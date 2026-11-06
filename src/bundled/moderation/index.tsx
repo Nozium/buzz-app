@@ -8,7 +8,7 @@ export const inject = [
   "settingsCards",
   "adminAccess",
   "navigation",
-  "conversation",
+  "communityReader",
 ];
 export const apply: PluginModule["apply"] = (ctx) => {
   const relay = ctx.relay;
@@ -79,12 +79,11 @@ export const apply: PluginModule["apply"] = (ctx) => {
       subscribe: membership.subscribe,
       ensure: membership.ensure,
     },
-    component: ({ active, community }) => (
+    component: ({ active }) => (
       <WelcomeSettings
         relay={relay}
-        communityName={community?.name}
+        communities={ctx.communityReader}
         active={active}
-        extensions={ctx.conversation}
       />
     ),
   });
