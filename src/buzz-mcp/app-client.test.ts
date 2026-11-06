@@ -499,3 +499,160 @@ it.each(["direct", "process"])(
     expect(publish).toHaveBeenLastCalledWith(event, expect.any(Function));
   },
 );
+
+it.each([undefined, true])(
+  "defaults to forwarding managedAttachments when localAttachments is %s",
+  async (localAttachments) => {
+    const publish = vi.fn().mockResolvedValue({ id: "confirmed" });
+    const client = appClient(
+      { pubkey: "agent", publish } as unknown as AgentHandle,
+      {
+        read: async () => new TextEncoder().encode("bytes"),
+        memories: async () => ({ entries: [], partial: false }),
+        ...(localAttachments !== undefined ? { localAttachments } : {}),
+      },
+    );
+    const event = { kind: 9, content: "attachment", tags: [] };
+    const options = {
+      managedAttachments: [
+        {
+          path: "/saved/file",
+          sha256: "a".repeat(64),
+          size: 5,
+          url: "https://example.test/media",
+        },
+      ],
+    };
+    await expect(client.publish(event, options)).resolves.toEqual({
+      id: "confirmed",
+    });
+    expect(publish).toHaveBeenCalledExactlyOnceWith(
+      event,
+      expect.any(Function),
+      options,
+    );
+  },
+);
+
+it("drops managedAttachments when localAttachments is false and preserves other publish options", async () => {
+  const publish = vi.fn().mockResolvedValue({ id: "confirmed" });
+  const client = appClient(
+    { pubkey: "agent", publish } as unknown as AgentHandle,
+    {
+      read: async () => new TextEncoder().encode("bytes"),
+      memories: async () => ({ entries: [], partial: false }),
+      localAttachments: false,
+    },
+  );
+  const event = { kind: 9, content: "attachment", tags: [] };
+  const options = {
+    managedAttachments: [
+      {
+        path: "/elsewhere/file",
+        sha256: "b".repeat(64),
+        size: 7,
+        url: "https://example.test/remote",
+      },
+    ],
+    extra: "preserved" as const,
+  } as unknown as Parameters<AgentHandle["publish"]>[2];
+  await expect(client.publish(event, options)).resolves.toEqual({
+    id: "confirmed",
+  });
+  // Only one publish call: the forwarded options have no managedAttachments
+  // but keep other fields; publish never gets the original options object.
+  expect(publish).toHaveBeenCalledExactlyOnceWith(event, expect.any(Function), {
+    extra: "preserved",
+  });
+});
+
+it("drops the options argument entirely when localAttachments is false and only managedAttachments was set", async () => {
+  const publish = vi.fn().mockResolvedValue({ id: "confirmed" });
+  const client = appClient(
+    { pubkey: "agent", publish } as unknown as AgentHandle,
+    {
+      read: async () => new TextEncoder().encode("bytes"),
+      memories: async () => ({ entries: [], partial: false }),
+      localAttachments: false,
+    },
+  );
+  const event = { kind: 9, content: "attachment", tags: [] };
+  await client.publish(event, {
+    managedAttachments: [
+      {
+        path: "/elsewhere/file",
+        sha256: "c".repeat(64),
+        size: 3,
+        url: "https://example.test/x",
+      },
+    ],
+  });
+  // The two-argument form keeps the existing publish arity with no options.
+  expect(publish).toHaveBeenCalledExactlyOnceWith(event, expect.any(Function));
+});
+
+it("refuses publish once the owning turn has ended, whether localAttachments is true or false", async () => {
+  for (const localAttachments of [true, false]) {
+    const publish = vi.fn().mockResolvedValue({ id: "confirmed" });
+    const controller = new AbortController();
+    const client = appClient(
+      { pubkey: "agent", publish } as unknown as AgentHandle,
+      {
+        read: async () => new TextEncoder().encode("bytes"),
+        memories: async () => ({ entries: [], partial: false }),
+        signal: controller.signal,
+        localAttachments,
+      },
+    );
+    controller.abort(new Error("Turn ended"));
+    await expect(async () =>
+      client.publish(
+        { kind: 9, content: "x", tags: [] },
+        {
+          managedAttachments: [
+            {
+              path: "/x",
+              sha256: "d".repeat(64),
+              size: 1,
+              url: "https://example.test/x",
+            },
+          ],
+        },
+      ),
+    ).rejects.toThrow();
+    expect(publish).not.toHaveBeenCalled();
+  }
+});
+
+it("refuses publish when the explicit check rejects, whether localAttachments is true or false", async () => {
+  for (const localAttachments of [true, false]) {
+    const publish = vi.fn().mockResolvedValue({ id: "confirmed" });
+    const client = appClient(
+      { pubkey: "agent", publish } as unknown as AgentHandle,
+      {
+        read: async () => new TextEncoder().encode("bytes"),
+        memories: async () => ({ entries: [], partial: false }),
+        check: () => {
+          throw new Error("Community ended");
+        },
+        localAttachments,
+      },
+    );
+    await expect(async () =>
+      client.publish(
+        { kind: 9, content: "x", tags: [] },
+        {
+          managedAttachments: [
+            {
+              path: "/x",
+              sha256: "e".repeat(64),
+              size: 1,
+              url: "https://example.test/x",
+            },
+          ],
+        },
+      ),
+    ).rejects.toThrow("Community ended");
+    expect(publish).not.toHaveBeenCalled();
+  }
+});

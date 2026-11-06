@@ -2127,6 +2127,14 @@ file once. After a confirmed post, the host may release the local copy; keep the
 posted link for reuse. Failed or uncertain sends are not safe to repeat
 automatically.” Also disclose that cleanup refusal may retain it indefinitely.
 
+Only a desktop-local reader forwards managed-attachment hints. An agent runtime
+whose active reader is backed by a remote execution target (such as Codex or
+Claude Code bound to a remote target) sends attachments normally through the
+same tools, but its app client drops managed-attachment hints before publication.
+Remote sources cannot trigger local managed cleanup, and no remote deletion is
+added by this contract. Managed release remains strictly local, bounded by the
+same consent/identity/path/content checks above.
+
 Optional `host.deleteManagedFile(path)` requires `host.managedFiles` and the current
 enabled plugin revision, not `host.files`. It accepts only a direct, host-generated
 file in this root whose owner digest matches the calling plugin ID, including
