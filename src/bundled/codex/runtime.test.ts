@@ -6613,6 +6613,17 @@ it("runs bound Codex tools in the guest workspace, resumes, and stops on provide
       return target;
     });
     f = fixture([], undefined, false, {}, undefined, undefined, execution);
+    const bytes = Buffer.from("GUEST FILE");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    f.upload.mockImplementation(async (data, mime) => {
+      expect(data).toBe(bytes.toString("base64"));
+      return {
+        url: "https://files.test/file",
+        sha256,
+        size: bytes.length,
+        type: mime,
+      };
+    });
     await f.runtime.run(f.delivery("first"));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
     expect(
@@ -6637,6 +6648,18 @@ it("runs bound Codex tools in the guest workspace, resumes, and stops on provide
       cwd: "/guest/project",
     });
     expect(f.fileReads).toEqual([]);
+    expect(f.upload).toHaveBeenCalledOnce();
+    expect(f.publish).toHaveBeenCalledOnce();
+    expect(f.publish.mock.calls[0]?.[0]).toMatchObject({
+      content: expect.stringContaining("https://files.test/file"),
+      tags: expect.arrayContaining([
+        expect.arrayContaining([
+          "imeta",
+          `x ${sha256}`,
+          `size ${bytes.length}`,
+        ]),
+      ]),
+    });
     // Target-bound runs publish normally but never forward managedAttachments
     // hints: localAttachments: !this.target drops them in app-client.
     for (const call of f.publish.mock.calls as unknown as unknown[][]) {

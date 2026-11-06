@@ -2127,13 +2127,14 @@ file once. After a confirmed post, the host may release the local copy; keep the
 posted link for reuse. Failed or uncertain sends are not safe to repeat
 automatically.” Also disclose that cleanup refusal may retain it indefinitely.
 
-Only a desktop-local reader forwards managed-attachment hints. An agent runtime
-whose active reader is backed by a remote execution target (such as Codex or
-Claude Code bound to a remote target) sends attachments normally through the
-same tools, but its app client drops managed-attachment hints before publication.
-Remote sources cannot trigger local managed cleanup, and no remote deletion is
-added by this contract. Managed release remains strictly local, bounded by the
-same consent/identity/path/content checks above.
+The bundled Codex and Claude Code runtimes suppress managed-attachment hints
+when their active reader is backed by an execution target. Those attachments
+still publish normally through the same tools, but cannot trigger desktop-local
+managed cleanup through these two guarded readers. No remote deletion is added.
+The shared app client otherwise forwards hints by default; custom-reader harness
+integrations retain their existing trusted-reader contract and must not treat
+this scoped guard as universal source provenance. Managed release remains local,
+bounded by the same consent/identity/path/content checks above.
 
 Optional `host.deleteManagedFile(path)` requires `host.managedFiles` and the current
 enabled plugin revision, not `host.files`. It accepts only a direct, host-generated
