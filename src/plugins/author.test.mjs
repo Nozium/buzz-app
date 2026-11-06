@@ -318,7 +318,11 @@ export function observePlugin(ctx: Context) {
             "@buzz/author": ["./author package/types/plugins/author.d.ts"],
           },
         },
-        files: ["consumer.ts", "query-consumer.ts", "plugin-status-consumer.ts"],
+        files: [
+          "consumer.ts",
+          "query-consumer.ts",
+          "plugin-status-consumer.ts",
+        ],
       }),
     );
     // Only generated declarations and the external consumer, never host source.
