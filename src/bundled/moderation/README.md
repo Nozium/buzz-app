@@ -16,8 +16,6 @@ community where you are an owner or admin.
 Direct addition by public identity is retained behind `DIRECT_MEMBER_ADD_ENABLED`
 for a possible return, but is hidden in the shipped UI.
 
-## Welcome channel
-
 On relays that support it, **Settings → Community admin → Welcome** lets an
 owner or admin choose the public channel new members join and open first, and
 the title and message of the welcome card pinned above that channel's

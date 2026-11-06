@@ -33,6 +33,7 @@ import type { RelayData } from "../../features/relay/service";
 import { matchesEvent } from "../../features/relay/projection";
 import type { ReadFilter, RelayEvent } from "../../features/relay/events";
 import {
+  bounds,
   keypair,
   metadata,
   roster,
@@ -306,7 +307,8 @@ it.each(["side", "main"] as const)(
 
 /** A page over `events` with no saved selection and no registered panels.
  * A read waits for the promise `hold` returns for its filters, if any; the
- * relay's welcome-channel support is read from `landing`, if given. */
+ * relay's welcome-channel support is read from `landing`, if given. A history
+ * window is served only for a channel whose 39006 bounds are in `events`. */
 function workspace(
   events: RelayEvent[],
   viewer = keypair(),
@@ -322,7 +324,14 @@ function workspace(
       query: async (filters) => {
         await hold?.(filters);
         return events.filter((event) =>
-          filters.some((filter) => matchesEvent(event, filter)),
+          filters.some(
+            (filter) =>
+              matchesEvent(event, filter) ||
+              // The relay answers a window read with its bounds.
+              (event.kind === 39006 &&
+                !!filter.top_level &&
+                matchesEvent(event, { "#h": filter["#h"] ?? [], limit: 1 })),
+          ),
         );
       },
       writer: {
@@ -442,6 +451,8 @@ it("opens the community's welcome channel before its auto-join channel and pins 
         ["welcome", "Say **hi**\nand introduce yourself."],
         ["welcome_title", "Hello, newcomer"],
       ]),
+      // Beta's history is empty.
+      bounds(authority, "beta", "head", { has_more: false, next_cursor: null }),
     ],
     viewer,
     authority,
