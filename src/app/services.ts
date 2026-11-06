@@ -72,7 +72,6 @@ import { createExternalApps } from "../features/agents/external-connection";
 export function createServices() {
   const appearance = createAppearance();
   const shortcutBindings = createShortcutBindings();
-  const updates = createUpdates();
   const ctx = new Context();
   const externalApps = createExternalApps();
   ctx.provide("externalApps", externalApps);
@@ -164,6 +163,7 @@ export function createServices() {
     undefined,
     deviceSettings(appearance),
   );
+  const updates = createUpdates(undefined, agents.work);
   ctx.effect(() =>
     localAgents.bind({
       snapshot: agents.local,
