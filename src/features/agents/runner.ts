@@ -673,7 +673,8 @@ export class AgentRunners {
     return () => void this.workingListeners.delete(listener);
   }
   private noteWorking() {
-    let count = 0;
+    // By pubkey: an agent in several communities has a runner in each.
+    const working = new Set<string>();
     for (const runner of this.runners.values())
       if (
         runner.busy.size > 0 ||
@@ -681,7 +682,8 @@ export class AgentRunners {
         runner.queues.mention.length > 0 ||
         runner.queues.watch.length > 0
       )
-        count++;
+        working.add(runner.member.pubkey);
+    const count = working.size;
     if (count === this.workingCountNow) return;
     this.workingCountNow = count;
     for (const listener of this.workingListeners) listener();
