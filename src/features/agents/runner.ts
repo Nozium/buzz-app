@@ -659,13 +659,13 @@ export class AgentRunners {
     this.turns = this.left = this.stopped = host.interrupted.read();
   }
 
-  /** Whether any agent has an event being classified, a job queued or in a
-   * lane, or a turn still working. */
+  /** Whether any agent has an event being classified, a job queued, waiting
+   * on its watch's catch-up or in a lane, or a turn still working. */
   isWorking() {
     return this.workingCountNow > 0;
   }
-  /** How many agents have an event being classified, a job queued or in a
-   * lane, or a turn still working. */
+  /** How many agents have an event being classified, a job queued, waiting
+   * on its watch's catch-up or in a lane, or a turn still working. */
   workingCount() {
     return this.workingCountNow;
   }
@@ -683,7 +683,9 @@ export class AgentRunners {
         runner.working > 0 ||
         runner.classifying > 0 ||
         runner.queues.mention.length > 0 ||
-        runner.queues.watch.length > 0
+        runner.queues.watch.length > 0 ||
+        runner.waiting.size > 0 ||
+        runner.later.length > 0
       )
         working.add(runner.member.pubkey);
     const count = working.size;
@@ -1220,6 +1222,7 @@ export class AgentRunners {
         return;
       runner.later.shift();
       this.submit(runner, agent, job);
+      this.noteWorking();
     }
     while (runner.backlog.length) {
       const { event, channelId, addressable, replay, ...entry } = runner
@@ -2023,6 +2026,7 @@ export class AgentRunners {
     runner.waiting.set(slug, waiting);
     waiting.jobs.push(job);
     waiting.bytes += sizeOf((job.trigger as WatchTrigger).event);
+    this.noteWorking();
     if (waiting.jobs.length <= WAITING_LIMIT && waiting.bytes <= WAITING_BYTES)
       return;
     console.warn(

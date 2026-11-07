@@ -8200,6 +8200,49 @@ it("holds a watch's live events while it catches up, then hears them oldest firs
   }
 });
 
+it("counts a live event waiting on its watch's catch-up as work", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const { service, run, session, emit, recover } = await setup({
+      identities: [echo],
+    });
+    const now = nowSeconds();
+    await service.save(bot, {
+      attentionEnabled: true,
+      attention: { ...chat, "watch/channel": null },
+    });
+    await settle();
+    vi.setSystemTime((now + 60) * 1000);
+    const read = vi.mocked(session.read);
+    const original = read.getMockImplementation() as NonNullable<
+      ReturnType<typeof read.getMockImplementation>
+    >;
+    const reading = runnerGate();
+    const page = runnerGate();
+    let first = true;
+    read.mockImplementation(async (filters, options) => {
+      if (filters[0]?.kinds?.includes(9) && first) {
+        first = false;
+        reading.resolve(undefined);
+        await page.promise;
+      }
+      return original(filters, options);
+    });
+    recover();
+    await reading.promise;
+    emit({ events: [event("live", { created_at: now + 50 })] });
+    await settle();
+    // Already saved as heard: a restart now would not give it again.
+    expect(run).not.toHaveBeenCalled();
+    expect(service.work.workingCount()).toBe(1);
+    page.resolve(undefined);
+    await vi.waitFor(() => expect(heard(run)).toEqual(["hello live"]));
+    await vi.waitFor(() => expect(service.work.workingCount()).toBe(0));
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("starts catch-up again when its watch is edited while a page is being read", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   try {
