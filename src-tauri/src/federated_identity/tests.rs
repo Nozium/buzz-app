@@ -65,6 +65,7 @@ pub(super) fn host(store: Arc<Memory>) -> FederatedIdentity {
 pub(super) fn record() -> Arc<Session> {
     let record = Record {
         version: 1,
+        device_key: None,
         fingerprint: "fingerprint".into(),
         revision: uuid::Uuid::new_v4().to_string(),
         session_token: "fixture-session-token".into(),
@@ -73,6 +74,7 @@ pub(super) fn record() -> Arc<Session> {
     };
     let raw = Zeroizing::new(serde_json::to_vec(&record).unwrap());
     Arc::new(Session {
+        key: None,
         record,
         raw,
         issued_at: 0,
@@ -820,6 +822,10 @@ pub(super) async fn adapter_with_status(
                 headers,
                 body,
             });
+            // Lost reply: the server has received the complete request, then closes the connection.
+            if status == 0 {
+                continue;
+            }
             let body = reply.to_string();
             let reason = match status {
                 200 => "OK",
@@ -1696,4 +1702,174 @@ async fn a_renewal_ended_after_saving_puts_back_the_session_it_replaced() {
     assert!(host.state().session.is_none());
     // The other copy's record is back, not this copy's old one.
     assert_eq!(store.raw.lock().unwrap().as_deref(), Some(&*other.raw));
+}
+
+#[cfg(target_os = "macos")]
+fn bound_host(store: Arc<Memory>, base: String) -> FederatedIdentity {
+    let mut owner = at_adapter(store, base.clone());
+    let config = Arc::get_mut(&mut owner.0).unwrap().config.as_mut().unwrap();
+    let url = url::Url::parse(&base).unwrap();
+    config.identity_origin = url.origin().ascii_serialization();
+    config.api_base_path = format!("{}/", url.path().trim_end_matches('/'));
+    config.dpop = Some(config::DpopMode::Software);
+    owner
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn bound_exchange_restore_and_sign_out_keep_then_retire_the_same_device_key() {
+    let expires = "2099-01-01T00:00:00Z";
+    let token = "v".repeat(43);
+    let (base, seen) = adapter(vec![
+        serde_json::json!({"token_type":"DPoP","session_token":token,"expires_at":expires}),
+        serde_json::json!({"expires_at":expires}),
+        serde_json::json!({"expires_at":expires}),
+        serde_json::json!({}),
+    ])
+    .await;
+    let memory = Arc::new(Memory::default());
+    let owner = bound_host(memory.clone(), base.clone());
+    let key = Arc::new(dpop::DeviceKey::create(config::DpopMode::Software).unwrap());
+    let handle = key.handle().to_owned();
+    let revision = owner.snapshot().revision;
+    owner
+        .finish_bound_login(
+            "code",
+            "secret",
+            &revision,
+            &CancellationToken::new(),
+            Some(key),
+        )
+        .await
+        .unwrap();
+    let record: Record =
+        serde_json::from_slice(memory.raw.lock().unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(record.version, 2);
+    assert_eq!(record.device_key.as_deref(), Some(handle.as_str()));
+    assert!(owner.with_session(|_, _, _| ()).is_none());
+    let restored = bound_host(memory.clone(), base);
+    assert!(matches!(restored.restore().await.status, Status::SignedIn));
+    assert_eq!(
+        restored.state().session.as_ref().unwrap().record.device_key,
+        record.device_key
+    );
+    restored.sign_out(None).await;
+    for request in std::mem::take(&mut *restored.0.revocations.lock().unwrap()) {
+        request.await.unwrap();
+    }
+    assert!(dpop::DeviceKey::load(&handle, config::DpopMode::Software).is_err());
+    let requests = seen.await.unwrap();
+    assert_eq!(requests.len(), 4);
+    let claims = |index: usize| -> serde_json::Value {
+        let proof = &requests[index]
+            .headers
+            .iter()
+            .find(|(name, _)| name == "dpop")
+            .unwrap()
+            .1;
+        serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(proof.split('.').nth(1).unwrap())
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    assert!(claims(0).get("ath").is_none());
+    assert_eq!(
+        claims(1)["ath"],
+        URL_SAFE_NO_PAD.encode(Sha256::digest(token.as_bytes()))
+    );
+    assert_ne!(claims(1)["jti"], claims(2)["jti"]);
+    assert!(requests[3].target.contains("/v1/auth/logout"));
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn credential_mode_change_and_missing_device_key_require_fresh_login_without_network_fallback(
+) {
+    for bound_record in [false, true] {
+        let memory = Arc::new(Memory::default());
+        let mut record: Record = serde_json::from_slice(&record().raw).unwrap();
+        if bound_record {
+            record.version = 2;
+            record.device_key = Some(format!("xyz.buzz.native-dpop.{}", uuid::Uuid::new_v4()));
+        }
+        *memory.raw.lock().unwrap() = Some(Zeroizing::new(serde_json::to_vec(&record).unwrap()));
+        let mut owner = host(memory.clone());
+        if !bound_record {
+            Arc::get_mut(&mut owner.0)
+                .unwrap()
+                .config
+                .as_mut()
+                .unwrap()
+                .dpop = Some(config::DpopMode::Software);
+        }
+        let result = owner.restore().await;
+        assert!(matches!(result.status, Status::ReauthenticationRequired));
+        assert_eq!(result.failure, Some("credential-mode-changed"));
+        assert!(owner.state().restored);
+        assert!(owner.authorization().is_none());
+        assert!(memory.raw.lock().unwrap().is_some());
+    }
+    let memory = Arc::new(Memory::default());
+    let mut record: Record = serde_json::from_slice(&record().raw).unwrap();
+    record.version = 2;
+    record.device_key = Some(format!("xyz.buzz.native-dpop.{}", uuid::Uuid::new_v4()));
+    *memory.raw.lock().unwrap() = Some(Zeroizing::new(serde_json::to_vec(&record).unwrap()));
+    let owner = bound_host(memory, "https://identity.example".into());
+    let result = owner.restore().await;
+    assert_eq!(result.failure, Some("device-key-unavailable"));
+    assert!(matches!(result.status, Status::ReauthenticationRequired));
+    assert!(owner.state().restored);
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn removing_an_old_record_keeps_a_referenced_key_and_removing_the_last_record_retires_it() {
+    let memory = Arc::new(Memory::default());
+    let owner = bound_host(memory.clone(), "https://identity.example".into());
+    let key = Arc::new(dpop::DeviceKey::create(config::DpopMode::Software).unwrap());
+    key.retain();
+    let mut record: Record = serde_json::from_slice(&record().raw).unwrap();
+    record.version = 2;
+    record.device_key = Some(key.handle().to_owned());
+    let raw = Zeroizing::new(serde_json::to_vec(&record).unwrap());
+    let old = Arc::new(Session {
+        record,
+        raw,
+        issued_at: 0,
+        key: Some(key.clone()),
+    });
+    let mut newer: Record = serde_json::from_slice(&old.raw).unwrap();
+    newer.revision = uuid::Uuid::new_v4().to_string();
+    let raw = Zeroizing::new(serde_json::to_vec(&newer).unwrap());
+    *memory.raw.lock().unwrap() = Some(raw.clone());
+    assert_eq!(owner.remove(old).await.unwrap_err().code, "session-changed");
+    assert!(dpop::DeviceKey::load(key.handle(), config::DpopMode::Software).is_ok());
+    let current = Arc::new(Session {
+        record: newer,
+        raw,
+        issued_at: 0,
+        key: Some(key.clone()),
+    });
+    owner.remove(current).await.unwrap();
+    assert!(dpop::DeviceKey::load(key.handle(), config::DpopMode::Software).is_err());
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn recovery_lease_revokes_its_temporary_session_after_the_last_request_owner_drops() {
+    let (base, seen) = adapter(vec![serde_json::json!({"token_type":"DPoP","session_token":"v".repeat(43),"expires_at":"2099-01-01T00:00:00Z"}), serde_json::json!({})]).await;
+    let owner = bound_host(Arc::new(Memory::default()), base.clone());
+    let login = owner.recovery_login(&base).unwrap().unwrap();
+    let handle = login.key.handle().to_owned();
+    let auth = login.exchange("code", "secret").await.unwrap();
+    let active_request = auth.clone();
+    drop(auth);
+    drop(login);
+    assert!(dpop::DeviceKey::load(&handle, config::DpopMode::Software).is_ok());
+    drop(active_request);
+    let requests = seen.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].target.contains("/v1/auth/logout"));
 }

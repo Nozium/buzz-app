@@ -18,6 +18,16 @@ pub(crate) struct Config {
     /// The organization's display name for sign-in copy, such as "Block".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) organization: Option<String>,
+    /// Explicit native key policy. Software is a weaker, opt-in mode; absence keeps the legacy protocol.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) dpop: Option<DpopMode>,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum DpopMode {
+    SecureEnclave,
+    Software,
 }
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]

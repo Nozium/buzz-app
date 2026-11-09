@@ -5,7 +5,8 @@ pub(crate) mod agent;
 pub(crate) mod assertion;
 pub(crate) mod config;
 mod customers;
-pub(crate) mod protocol;
+mod dpop;
+mod protocol;
 pub(crate) mod socket;
 pub(crate) mod store;
 
@@ -82,6 +83,8 @@ pub(crate) struct Record {
     session_token: String,
     expires_at: String,
     email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    device_key: Option<String>,
 }
 impl Drop for Record {
     fn drop(&mut self) {
@@ -89,11 +92,201 @@ impl Drop for Record {
     }
 }
 struct Session {
+    key: Option<Arc<dpop::DeviceKey>>,
     record: Record,
     raw: Zeroizing<Vec<u8>>,
     /// Unix seconds at exchange, kept in memory only so the stored record
     /// stays readable by shipped builds; 0 for a restored session.
     issued_at: i64,
+}
+/// Native-only authorization, fenced by the session owner and configured authority.
+/// It is never serialized or exposed through a command.
+#[derive(Clone)]
+pub(crate) struct SessionAuthorization {
+    token: Zeroizing<String>,
+    key: Option<Arc<dpop::DeviceKey>>,
+    config: Config,
+    temporary: Option<Arc<TemporarySession>>,
+}
+impl SessionAuthorization {
+    fn new(record: &Record, key: Option<Arc<dpop::DeviceKey>>, config: &Config) -> Self {
+        Self {
+            token: Zeroizing::new(record.session_token.clone()),
+            key,
+            config: config.clone(),
+            temporary: None,
+        }
+    }
+    pub(crate) fn authorize(
+        &self,
+        request: reqwest::RequestBuilder,
+        method: &str,
+        target: &url::Url,
+    ) -> Result<reqwest::RequestBuilder, &'static str> {
+        if self.key.is_some() {
+            self.check_target(target)?;
+        }
+        match &self.key {
+            Some(key) => Ok(request
+                .header(
+                    "Authorization",
+                    sensitive_header(&format!("DPoP {}", self.token.as_str()))?,
+                )
+                .header(
+                    "DPoP",
+                    sensitive_header(&key.proof(method, target, Some(&self.token))?)?,
+                )),
+            None => Ok(request.bearer_auth(self.token.as_str())),
+        }
+    }
+    fn check_target(&self, target: &url::Url) -> Result<(), &'static str> {
+        let origin =
+            url::Url::parse(&self.config.identity_origin).map_err(|_| "invalid-dpop-target")?;
+        if target.origin() != origin.origin()
+            || !target.username().is_empty()
+            || target.password().is_some()
+            || target.fragment().is_some()
+        {
+            return Err("invalid-dpop-target");
+        }
+        Ok(())
+    }
+    fn owner_proof(
+        &self,
+        request: reqwest::RequestBuilder,
+        target: &url::Url,
+    ) -> Result<reqwest::RequestBuilder, &'static str> {
+        if self.key.is_some() {
+            self.check_target(target)?;
+        }
+        match &self.key {
+            Some(key) => Ok(request.header(
+                "DPoP",
+                sensitive_header(&key.proof("POST", target, Some(&self.token))?)?,
+            )),
+            None => Ok(request),
+        }
+    }
+}
+fn sensitive_header(value: &str) -> Result<reqwest::header::HeaderValue, &'static str> {
+    let mut value =
+        reqwest::header::HeaderValue::from_str(value).map_err(|_| "invalid-credential")?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+/// All recovery requests share this lease; the last one revokes the temporary server session.
+struct TemporarySession(SessionAuthorization);
+impl Drop for TemporarySession {
+    fn drop(&mut self) {
+        let Ok(target) = url::Url::parse(&format!(
+            "{}{}v1/auth/logout",
+            self.0.config.identity_origin, self.0.config.api_base_path
+        )) else {
+            return;
+        };
+        let Ok(client) = protocol::client() else {
+            return;
+        };
+        let Ok(request) = self
+            .0
+            .authorize(client.post(target.clone()), "POST", &target)
+        else {
+            return;
+        };
+        let key = self.0.key.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = request.send().await;
+            drop(key);
+        });
+    }
+}
+/// Deletes only a native-owned key no current secure record references. Read failure keeps it.
+fn retire_unreferenced(store: &dyn Store, key: &dpop::DeviceKey) -> Result<(), &'static str> {
+    let referenced = match store.read()? {
+        None => false,
+        Some(raw) => {
+            serde_json::from_slice::<Record>(&raw)
+                .map_err(|_| "storage-corrupt")?
+                .device_key
+                .as_deref()
+                == Some(key.handle())
+        }
+    };
+    if !referenced {
+        key.retire()?;
+    }
+    Ok(())
+}
+/// A recovery login owns a new device key, independently of a missing old key.
+/// Its ephemeral session is used only by native recovery and is not installed as the account session.
+pub(crate) struct RecoveryLogin {
+    config: Config,
+    key: Arc<dpop::DeviceKey>,
+}
+impl RecoveryLogin {
+    pub(crate) fn start(&self, challenge: &str) -> url::Url {
+        let mut url = login_start(
+            &self.config,
+            challenge,
+            LoginStart {
+                force_login: true,
+                signup: false,
+            },
+        );
+        url.query_pairs_mut()
+            .append_pair("dpop_jkt", self.key.thumbprint());
+        url
+    }
+    pub(crate) async fn exchange(
+        &self,
+        code: &str,
+        secret: &str,
+    ) -> Result<SessionAuthorization, &'static str> {
+        #[derive(Deserialize)]
+        struct Exchange {
+            token_type: String,
+            session_token: String,
+            expires_at: String,
+        }
+        impl Drop for Exchange {
+            fn drop(&mut self) {
+                self.session_token.zeroize();
+            }
+        }
+        let client = protocol::client()?;
+        let target = self.config.endpoint("/v1/login/exchange");
+        let body = Zeroizing::new(
+            serde_json::to_string(&serde_json::json!({"code":code,"handoff_secret":secret}))
+                .map_err(|_| "invalid-request")?,
+        );
+        let exchanged: Exchange = protocol::json_signed(|| async {
+            Ok(client
+                .post(target.clone())
+                .header("Content-Type", "application/json")
+                .header(
+                    "DPoP",
+                    sensitive_header(&self.key.proof("POST", &target, None)?)?,
+                )
+                .body(body.as_str().to_owned()))
+        })
+        .await
+        .map_err(|error| error.code)?;
+        if exchanged.token_type != "DPoP"
+            || exchanged.session_token.is_empty()
+            || exchanged.session_token.len() > 4096
+            || expiry(&exchanged.expires_at)? <= now()?
+        {
+            return Err("invalid-response");
+        }
+        let mut auth = SessionAuthorization {
+            token: Zeroizing::new(exchanged.session_token.clone()),
+            key: Some(self.key.clone()),
+            config: self.config.clone(),
+            temporary: None,
+        };
+        auth.temporary = Some(Arc::new(TemporarySession(auth.clone())));
+        Ok(auth)
+    }
 }
 #[derive(Clone)]
 struct CallbackGuard(crate::oauth_callback::OAuthCallbackHost, String);
@@ -549,13 +742,40 @@ impl FederatedIdentity {
         let config = self.0.config.as_ref()?;
         let (token, revision) = {
             let state = self.state();
-            let session = state.session.as_ref().filter(|_| !state.closed)?;
+            let session = state
+                .session
+                .as_ref()
+                .filter(|session| !state.closed && session.key.is_none())?;
             (
                 Zeroizing::new(session.record.session_token.clone()),
                 state.snapshot.revision.clone(),
             )
         };
         Some(use_session(&token, &revision, config))
+    }
+    pub(crate) fn authorization(&self) -> Option<(SessionAuthorization, String)> {
+        let config = self.config()?;
+        let state = self.state();
+        let session = state.session.as_ref().filter(|_| !state.closed)?;
+        Some((
+            SessionAuthorization::new(&session.record, session.key.clone(), config),
+            state.snapshot.revision.clone(),
+        ))
+    }
+    pub(crate) fn recovery_login(&self, root: &str) -> Result<Option<RecoveryLogin>, &'static str> {
+        let Some(config) = self.config() else {
+            return Ok(None);
+        };
+        let Some(mode) = config.dpop else {
+            return Ok(None);
+        };
+        if config.adapter_base.trim_end_matches('/') != root.trim_end_matches('/') {
+            return Err("invalid-dpop-target");
+        }
+        Ok(Some(RecoveryLogin {
+            config: config.clone(),
+            key: Arc::new(dpop::DeviceKey::create(mode)?),
+        }))
     }
     /// Secure-store account for an agent grant in this profile and deployment.
     #[allow(dead_code)] // Consumed by the agent token client.
@@ -680,8 +900,15 @@ impl FederatedIdentity {
             .map_err(Failure::from)
     }
     async fn remove(&self, session: Arc<Session>) -> Result<(), Failure> {
-        self.storage(move |store| store.remove(&session.raw, &session.record.revision))
-            .await
+        self.storage(move |store| {
+            let result = store.remove(&session.raw, &session.record.revision);
+            // Even another copy's replacement may leave this old key unreferenced.
+            if let Some(key) = &session.key {
+                retire_unreferenced(store.as_ref(), key)?;
+            }
+            result
+        })
+        .await
     }
     /// Remove the stored record of the session `revision` retired. Another
     /// Buzz copy may already have ended or replaced it: its refusal marker
@@ -694,7 +921,11 @@ impl FederatedIdentity {
             _ => {}
         }
     }
-    async fn verify(&self, record: &Record) -> Result<Option<String>, Failure> {
+    async fn verify(
+        &self,
+        record: &Record,
+        key: Option<Arc<dpop::DeviceKey>>,
+    ) -> Result<Option<String>, Failure> {
         if expiry(&record.expires_at)? <= now()? {
             return Err(Failure {
                 code: "reauthentication-required",
@@ -708,10 +939,11 @@ impl FederatedIdentity {
         }
         let config = self.0.config.as_ref().ok_or("unconfigured")?;
         let client = protocol::client()?;
-        let result: Checked = protocol::json(|| {
-            client
-                .get(config.endpoint("/v1/session"))
-                .bearer_auth(&record.session_token)
+        let auth = SessionAuthorization::new(record, key, config);
+        let endpoint = config.endpoint("/v1/session");
+        let result: Checked = protocol::json_signed(|| async {
+            auth.authorize(client.get(endpoint.clone()), "GET", &endpoint)
+                .map_err(Failure::from)
         })
         .await?;
         let expected = chrono::DateTime::parse_from_rfc3339(&record.expires_at)
@@ -744,7 +976,7 @@ impl FederatedIdentity {
             };
             session
         };
-        let Err(failure) = self.verify(&session.record).await else {
+        let Err(failure) = self.verify(&session.record, session.key.clone()).await else {
             return;
         };
         if !failure.session_denied {
@@ -829,7 +1061,8 @@ impl FederatedIdentity {
             }
             let mut record: Record =
                 serde_json::from_slice(&raw).map_err(|_| Failure::from("storage-corrupt"))?;
-            if record.version != 1
+            if !matches!(record.version, 1 | 2)
+                || (record.version == 2) != record.device_key.is_some()
                 || record.fingerprint != self.0.fingerprint
                 || uuid::Uuid::parse_str(&record.revision).is_err()
                 || record.session_token.is_empty()
@@ -838,8 +1071,22 @@ impl FederatedIdentity {
             {
                 return Err("storage-corrupt".into());
             }
+            if (record.version == 2) != self.config().is_some_and(|config| config.dpop.is_some()) {
+                return Err("credential-mode-changed".into());
+            }
+            let key = match (
+                &record.device_key,
+                self.config().and_then(|config| config.dpop),
+            ) {
+                (Some(handle), Some(mode)) => Some(Arc::new(
+                    dpop::DeviceKey::load(handle, mode).map_err(Failure::from)?,
+                )),
+                (None, None) => None,
+                _ => return Err("device-key-unavailable".into()),
+            };
             let refused = refusal.as_deref() == Some(&record.revision);
             let session = Arc::new(Session {
+                key,
                 record,
                 raw,
                 issued_at: 0,
@@ -848,13 +1095,14 @@ impl FederatedIdentity {
                 self.remove(session).await?;
                 return Ok(None);
             }
-            let checked = self.verify(&session.record).await;
+            let checked = self.verify(&session.record, session.key.clone()).await;
             match checked {
                 Ok(email) => {
                     record = serde_json::from_slice(&session.raw)
                         .map_err(|_| Failure::from("storage-corrupt"))?;
                     record.email = email;
                     Ok(Some(Arc::new(Session {
+                        key: session.key.clone(),
                         record,
                         raw: session.raw.clone(),
                         issued_at: 0,
@@ -900,14 +1148,22 @@ impl FederatedIdentity {
                 if failure.session_denied {
                     self.signal(SessionChange::Expired);
                 }
-                state.snapshot.status = if failure.session_denied {
+                state.snapshot.status = if failure.session_denied
+                    || matches!(
+                        failure.code,
+                        "device-key-unavailable" | "credential-mode-changed"
+                    ) {
                     Status::ReauthenticationRequired
                 } else {
                     Status::Unavailable
                 };
                 state.snapshot.failure = Some(failure.code);
                 // A failed read or check is not permission to overwrite unknown state.
-                state.restored = failure.session_denied;
+                state.restored = failure.session_denied
+                    || matches!(
+                        failure.code,
+                        "device-key-unavailable" | "credential-mode-changed"
+                    );
             }
         }
         self.publish(&state);
@@ -1020,7 +1276,17 @@ impl FederatedIdentity {
         getrandom::fill(bytes.as_mut()).map_err(|_| "random-unavailable")?;
         let secret = Zeroizing::new(URL_SAFE_NO_PAD.encode(bytes.as_ref()));
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(secret.as_bytes()));
-        let login = login_start(config, &challenge, start);
+        let key = config
+            .dpop
+            .map(dpop::DeviceKey::create)
+            .transpose()?
+            .map(Arc::new);
+        let mut login = login_start(config, &challenge, start);
+        if let Some(key) = &key {
+            login
+                .query_pairs_mut()
+                .append_pair("dpop_jkt", key.thumbprint());
+        }
         let callback = app.state::<crate::oauth_callback::OAuthCallbackHost>();
         let attempt = callback
             .begin_federated(
@@ -1062,8 +1328,14 @@ impl FederatedIdentity {
             if codes.next().is_some() || code.is_empty() || code.len() > 4096 {
                 return Err("callback-refused".into());
             }
-            self.finish_login(code.as_str(), secret.as_str(), revision, cancel)
-                .await
+            self.finish_bound_login(
+                code.as_str(),
+                secret.as_str(),
+                revision,
+                cancel,
+                key.clone(),
+            )
+            .await
         }
         .await;
         if result.is_ok() {
@@ -1088,6 +1360,7 @@ impl FederatedIdentity {
     }
 
     // Verified exchange and conditional installation form one native transaction.
+    #[cfg(test)]
     async fn finish_login(
         &self,
         code: &str,
@@ -1095,12 +1368,25 @@ impl FederatedIdentity {
         revision: &str,
         cancel: &CancellationToken,
     ) -> Result<(), Failure> {
+        self.finish_bound_login(code, secret, revision, cancel, None)
+            .await
+    }
+    async fn finish_bound_login(
+        &self,
+        code: &str,
+        secret: &str,
+        revision: &str,
+        cancel: &CancellationToken,
+        key: Option<Arc<dpop::DeviceKey>>,
+    ) -> Result<(), Failure> {
         if cancel.is_cancelled() || !self.current(revision) {
             return Err("session-changed".into());
         }
         let config = self.0.config.as_ref().ok_or("unconfigured")?;
         #[derive(Deserialize)]
         struct Exchanged {
+            #[serde(default)]
+            token_type: Option<String>,
             session_token: String,
             expires_at: String,
         }
@@ -1116,8 +1402,21 @@ impl FederatedIdentity {
         let client = protocol::client()?;
         let exchange: Exchanged = tokio::select! {
             _ = cancel.cancelled() => return Err("sign-in-canceled".into()),
-            result = protocol::json(|| client.post(config.endpoint("/v1/login/exchange")).header("Content-Type", "application/json").body(body.as_str().to_owned())) => result?,
+            result = protocol::json_signed(|| async {
+                let endpoint = config.endpoint("/v1/login/exchange");
+                let request = client.post(endpoint.clone()).header("Content-Type", "application/json").body(body.as_str().to_owned());
+                Ok(match &key {
+                    Some(key) => request.header("DPoP", sensitive_header(&key.proof("POST", &endpoint, None)?)?),
+                    None => request,
+                })
+            }) => result?,
         };
+        if key.is_some() && exchange.token_type.as_deref() != Some("DPoP") {
+            return Err("invalid-response".into());
+        }
+        if config.dpop.is_some() != key.is_some() {
+            return Err("device-key-unavailable".into());
+        }
         if exchange.session_token.is_empty()
             || exchange.session_token.len() > 4096
             || !exchange.session_token.bytes().all(|b| b.is_ascii_graphic())
@@ -1125,7 +1424,8 @@ impl FederatedIdentity {
             return Err("invalid-response".into());
         }
         let mut record = Record {
-            version: 1,
+            version: if key.is_some() { 2 } else { 1 },
+            device_key: key.as_ref().map(|key| key.handle().to_owned()),
             fingerprint: self.0.fingerprint.clone(),
             revision: uuid::Uuid::new_v4().to_string(),
             session_token: exchange.session_token.clone(),
@@ -1134,7 +1434,7 @@ impl FederatedIdentity {
         };
         record.email = tokio::select! {
             _ = cancel.cancelled() => return Err("sign-in-canceled".into()),
-            result = self.verify(&record) => result?,
+            result = self.verify(&record, key.clone()) => result?,
         };
         // Persistence/install/late cleanup still serialize with sign-out.
         let _operation = self.0.operation.lock().await;
@@ -1168,6 +1468,7 @@ impl FederatedIdentity {
         };
         let raw = Zeroizing::new(serde_json::to_vec(&record).map_err(|_| "storage-corrupt")?);
         let session = Arc::new(Session {
+            key,
             record,
             raw,
             issued_at: now()?,
@@ -1199,6 +1500,10 @@ impl FederatedIdentity {
             abandon().await;
             return Err("session-changed".into());
         }
+        if let Some(key) = &session.key {
+            key.retain();
+        }
+        let retired_session = self.state().session.clone();
         let installed = {
             let mut state = self.state();
             if state.snapshot.revision == revision && !state.closed {
@@ -1219,6 +1524,11 @@ impl FederatedIdentity {
             self.unsave(session, replacing).await?;
             abandon().await;
             return Err("session-changed".into());
+        }
+        if let Some(retired) = retired_session
+            .filter(|old| old.key.is_some() && old.record.device_key != session.record.device_key)
+        {
+            self.revoke(&retired);
         }
         Ok(())
     }
@@ -1280,10 +1590,9 @@ impl FederatedIdentity {
     ) -> Snapshot {
         let _operation = self.0.operation.lock().await;
         let result = if let Some(session) = session {
-            self.remove_retired(session.clone(), &revision).await;
-            // Whatever the removal found: this copy's token only, never a
-            // record read back from the item, which may be another copy's.
+            // Construct the signed revocation before retiring the unreferenced key.
             self.revoke(&session);
+            self.remove_retired(session.clone(), &revision).await;
             Ok(())
         } else {
             // Also retries an incomplete deletion or sign-out during restore.
@@ -1308,21 +1617,36 @@ impl FederatedIdentity {
     /// session only in this header and answers with a redirect, not followed.
     fn revoke(&self, session: &Session) {
         let Some(config) = &self.0.config else { return };
-        let (Ok(client), Ok(mut credential)) = (
-            protocol::client(),
-            reqwest::header::HeaderValue::from_str(&session.record.session_token),
-        ) else {
+        let Ok(client) = protocol::client() else {
             return;
         };
-        credential.set_sensitive(true);
-        let request = client
-            .post(format!(
-                "{}{}v1/auth/logout",
-                config.identity_origin, config.api_base_path
+        let Ok(endpoint) = url::Url::parse(&format!(
+            "{}{}v1/auth/logout",
+            config.identity_origin, config.api_base_path
+        )) else {
+            return;
+        };
+        let auth = SessionAuthorization::new(&session.record, session.key.clone(), config);
+        let request = if session.key.is_some() {
+            auth.authorize(client.post(endpoint.clone()), "POST", &endpoint)
+        } else {
+            Ok(client.post(endpoint).header(
+                "X-BB-Session-Credential",
+                session.record.session_token.as_str(),
             ))
-            .header("X-BB-Session-Credential", credential);
+        };
+        let Ok(request) = request else { return };
+        let key = session.key.clone();
+        let store = self.0.store.clone();
         let _revocation = tauri::async_runtime::spawn(async move {
             let _ = request.send().await;
+            if let Some(key) = key {
+                // A failed removal or a newer stored record using the same key keeps it.
+                let _ = tokio::task::spawn_blocking(move || {
+                    let _ = retire_unreferenced(store.as_ref(), &key);
+                })
+                .await;
+            }
         });
         #[cfg(test)]
         self.0
