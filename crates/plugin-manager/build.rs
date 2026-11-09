@@ -159,39 +159,85 @@ fn federated_identity(
     .next()
 }
 
+fn write_packaged_plugins(input: Option<&Path>, output: &Path) -> Result<(), String> {
+    let mut entries = String::from("&[");
+    let mut ids = std::collections::BTreeSet::new();
+    if let Some(input) = input {
+        println!("cargo:rerun-if-changed={}", input.display());
+        let paths: Vec<PathBuf> =
+            serde_json::from_slice(&std::fs::read(input).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+        for (index, path) in paths.iter().enumerate() {
+            let path = input.parent().unwrap_or(Path::new(".")).join(path);
+            println!("cargo:rerun-if-changed={}", path.display());
+            let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+            if bytes.len() > 8 * 1024 * 1024 {
+                return Err("Packaged plugin exceeds 8 MiB".into());
+            }
+            let artifact: serde_json::Value =
+                serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            let id = artifact["manifest"]["id"]
+                .as_str()
+                .ok_or("Packaged plugin identity")?;
+            if !ids.insert(id.to_owned()) {
+                return Err(format!("Duplicate packaged plugin id: {id}"));
+            }
+            let staged = output.join(format!("packaged-plugin-{index}.json"));
+            std::fs::write(&staged, bytes).map_err(|e| e.to_string())?;
+            entries.push_str(&format!("({id:?}, include_bytes!({:?}) as &[u8]),", staged));
+        }
+    }
+    entries.push(']');
+    std::fs::write(output.join("packaged-plugins.rs"), entries).map_err(|e| e.to_string())
+}
+
+#[test]
+fn packaged_build_input_supports_lists_and_rejects_duplicates() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let input = root.join("plugins.json");
+    for (name, id) in [("one.json", "example.one"), ("two.json", "example.two")] {
+        std::fs::write(
+            root.join(name),
+            serde_json::json!({"manifest": {"id": id}, "code": "export function apply() {}"})
+                .to_string(),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        &input,
+        serde_json::to_vec(&vec![PathBuf::from("one.json"), root.join("two.json")]).unwrap(),
+    )
+    .unwrap();
+    write_packaged_plugins(Some(&input), root).unwrap();
+    let generated = std::fs::read_to_string(root.join("packaged-plugins.rs")).unwrap();
+    assert!(generated.contains("example.one"));
+    assert!(generated.contains("example.two"));
+    std::fs::write(&input, r#"["one.json", "one.json"]"#).unwrap();
+    assert!(write_packaged_plugins(Some(&input), root)
+        .unwrap_err()
+        .contains("Duplicate"));
+    for input in [None, Some(input.as_path())] {
+        std::fs::write(root.join("plugins.json"), "[]").unwrap();
+        write_packaged_plugins(input, root).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("packaged-plugins.rs")).unwrap(),
+            "&[]"
+        );
+    }
+}
+
 #[cfg_attr(test, allow(dead_code))]
 fn main() {
-    println!("cargo:rerun-if-env-changed=BUZZ_BUILD_PACKAGED_PLUGIN");
-    let (packaged, packaged_id) =
-        match std::env::var_os("BUZZ_BUILD_PACKAGED_PLUGIN").filter(|p| !p.is_empty()) {
-            Some(path) => {
-                let path = PathBuf::from(path);
-                println!("cargo:rerun-if-changed={}", path.display());
-                let bytes = std::fs::read(path).expect("Read packaged plugin artifact");
-                assert!(
-                    bytes.len() <= 8 * 1024 * 1024,
-                    "Packaged plugin exceeds 8 MiB"
-                );
-                let artifact: serde_json::Value =
-                    serde_json::from_slice(&bytes).expect("Packaged plugin JSON");
-                let id = artifact["manifest"]["id"]
-                    .as_str()
-                    .expect("Packaged plugin identity")
-                    .to_owned();
-                (bytes, id)
-            }
-            None => (Vec::new(), String::new()),
-        };
-    std::fs::write(
-        PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("packaged-plugin.json"),
-        packaged,
+    println!("cargo:rerun-if-env-changed=BUZZ_BUILD_PACKAGED_PLUGINS");
+    let input = std::env::var_os("BUZZ_BUILD_PACKAGED_PLUGINS")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
+    write_packaged_plugins(
+        input.as_deref(),
+        &PathBuf::from(std::env::var_os("OUT_DIR").unwrap()),
     )
-    .expect("Write packaged plugin build input");
-    std::fs::write(
-        PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("packaged-plugin-id.rs"),
-        format!("{packaged_id:?}"),
-    )
-    .expect("Write packaged plugin identity");
+    .expect("Write packaged plugin build inputs");
     let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
     let local = root.join(".env.local");
     println!("cargo:rerun-if-changed={}", local.display());

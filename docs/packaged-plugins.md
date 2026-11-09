@@ -1,30 +1,18 @@
-# Packaged plugin
+# Packaged plugins
 
-Desktop distributors can set `BUZZ_BUILD_PACKAGED_PLUGIN` to the path of one
-single-file plugin artifact produced by `buzzodz plugin pack`. Cargo embeds the
-artifact in the native plugin manager. The input is absent by default; ordinary
-builds include no additional plugin or distributor configuration.
+Set `BUZZ_BUILD_PACKAGED_PLUGINS` to a JSON file listing artifacts produced by
+`buzzodz plugin pack`. Paths are relative to the list file; absolute paths also work.
 
-The distributor approves the plugin and its host access as part of the application
-release. This input is compile-time only. Managed plugin policies remain advisory.
+```json
+["notes.json", "tasks.json"]
+```
 
-On the first normal catalog read for each profile, Buzz installs and enables the
-artifact using external plugin storage. It records a receipt beside the registry before
-returning the catalog. Existing installations retain their code, source and enabled
-state. Later app releases leave those installations untouched; plugin updates use
-the existing review flow.
+Cargo embeds each artifact; duplicate plugin ids fail the build. The default is an
+empty list. The distributor approves each plugin's host access. Managed policies
+remain recommendations.
 
-Disabling or removing the plugin persists across restart and app upgrades. Removal
-keeps the receipt, so automatic provisioning does not reinstall it. Manual reinstall
-remains available. Safe mode defers provisioning and pauses external plugins as
-usual. Receipts live in the profile's `packaged-plugins/` folder, so older versions
-can still read the registry. Receipts distinguish provisioning from explicit removal.
-Settings recovery restores packages the user kept and preserves explicit removals.
-Erasing the profile removes both.
-
-If provisioning fails, Buzz reports the error to stderr and retains its ordinary
-plugin catalog. No receipt is written for a failed installation; later reads retry.
-
-Older versions did not record plugin removals. A plugin removed before this
-capability was introduced cannot be distinguished from one never installed.
-The first distributor build provisions it once; subsequent removal is preserved.
+Each profile installs and enables each package once, preserving existing installs.
+Disable, remove and reviewed updates use the normal plugin lifecycle. Per-plugin
+receipts preserve removals across restart and upgrades; recovery restores kept
+packages. Safe mode defers installation. Failures log and retry independently.
+Older versions did not record removals, so pre-feature uninstalls cannot be detected.

@@ -926,12 +926,9 @@ impl Manager {
         Ok(file)
     }
     fn read(&self) -> Result<Registry> {
-        self.read_with_packaged(
-            include!(concat!(env!("OUT_DIR"), "/packaged-plugin-id.rs")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/packaged-plugin.json")),
-        )
+        self.read_with_packaged(include!(concat!(env!("OUT_DIR"), "/packaged-plugins.rs")))
     }
-    fn read_with_packaged(&self, packaged_id: &str, packaged_bytes: &[u8]) -> Result<Registry> {
+    fn read_with_packaged(&self, packaged: &[(&str, &[u8])]) -> Result<Registry> {
         let path = self.root.join("registry.json");
         let mut r: Registry = match File::open(&path) {
             Ok(file) => serde_json::from_str(&read_file_limited(file)?).map_err(err)?,
@@ -964,8 +961,10 @@ impl Manager {
         }
         let renamed = migrate_agent_flag::migrate(&mut r);
         let pinned = pin_bundled_defaults(&mut r, self.existing_profile);
-        if let Err(error) = self.provision_packaged(&mut r, packaged_id, packaged_bytes) {
-            eprintln!("Packaged plugin provisioning deferred: {error}");
+        for (id, bytes) in packaged {
+            if let Err(error) = self.provision_packaged(&mut r, id, bytes) {
+                eprintln!("Packaged plugin {id} provisioning deferred: {error}");
+            }
         }
         if renamed {
             self.save(&r)?;
@@ -1845,7 +1844,7 @@ mod tests {
         .unwrap();
         let read = || {
             let _lock = manager.lock().unwrap();
-            manager.read_with_packaged(id, &bytes).unwrap()
+            manager.read_with_packaged(&[(id, &bytes)]).unwrap()
         };
         assert!(read().installed[id].enabled);
         fs::write(manager.root.join("registry.json"), "corrupt").unwrap();
@@ -1881,7 +1880,7 @@ mod tests {
         manager.change("remove", id).unwrap();
         let _lock = manager.lock().unwrap();
         assert!(!manager
-            .read_with_packaged(id, &bytes)
+            .read_with_packaged(&[(id, &bytes)])
             .unwrap()
             .installed
             .contains_key(id));
@@ -1897,7 +1896,7 @@ mod tests {
             b"invalid".as_slice(),
             br#"{"manifest":{"id":"buzz.channels","name":"Reserved","apiVersion":1},"code":"export function apply() {}"}"#.as_slice(),
         ] {
-            let registry = manager.read_with_packaged(id, bytes).unwrap();
+            let registry = manager.read_with_packaged(&[(id, bytes)]).unwrap();
             assert!(registry.installed.is_empty());
             assert!(!manager.root.join("packaged-plugins").exists());
         }
@@ -1907,6 +1906,48 @@ mod tests {
         assert!(!manager
             .provision_packaged(&mut registry, id, b"invalid")
             .unwrap());
+    }
+
+    #[test]
+    fn packaged_plugins_have_independent_lifecycles_and_failures() {
+        let home = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(home.path().into()), "default", false).unwrap();
+        let artifact = |id| {
+            artifact_from_text(
+                &serde_json::json!({"id": id, "name": id, "apiVersion": 1}).to_string(),
+                "export function apply() {}".into(),
+            )
+            .unwrap()
+        };
+        let one = artifact("example.one");
+        let two = artifact("example.two");
+        let three = artifact("example.three");
+        let read = |packaged: &[(&str, &[u8])]| {
+            let _lock = manager.lock().unwrap();
+            manager.read_with_packaged(packaged).unwrap()
+        };
+        let initial = [
+            ("example.broken", b"invalid".as_slice()),
+            ("example.one", one.as_slice()),
+            ("example.two", two.as_slice()),
+        ];
+        assert_eq!(read(&initial).installed.len(), 2);
+        manager.change("disable", "example.one").unwrap();
+        manager.change("remove", "example.two").unwrap();
+        let upgraded = [
+            ("example.one", one.as_slice()),
+            ("example.two", two.as_slice()),
+            ("example.three", three.as_slice()),
+        ];
+        let registry = read(&upgraded);
+        assert!(!registry.installed["example.one"].enabled);
+        assert!(!registry.installed.contains_key("example.two"));
+        assert!(registry.installed["example.three"].enabled);
+        manager.recover().unwrap();
+        let registry = read(&upgraded);
+        assert!(registry.installed["example.one"].enabled);
+        assert!(!registry.installed.contains_key("example.two"));
+        assert!(registry.installed["example.three"].enabled);
     }
 
     #[test]
