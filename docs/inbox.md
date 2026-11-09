@@ -281,7 +281,8 @@ other people are ignored without a read. It recovers 50 recent events from the
 relay's `#p: [viewer]` index, which lists untagged reactions only where the relay has
 derived the target's author, and retains up to 100 candidates, including live
 arrivals. A candidate whose target is not the viewer's message is dropped after one
-check. Exact target ownership, current channel eligibility and edit/deletion closure
+check, and later reactions to that target cost no reads (up to 1,000 remembered
+targets). Targets that could not be read are checked again each time. Exact target ownership, current channel eligibility and edit/deletion closure
 are checked before displaying any preview.
 Incomplete settlement withholds rows and offers retry rather than showing stale text.
 

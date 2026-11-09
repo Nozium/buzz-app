@@ -281,16 +281,37 @@ it("checks a foreign untagged reaction once and keeps the viewer's rows past 100
     h.query.mock.calls.filter(([filters]) =>
       filters.some((filter) => filter.ids?.includes(other.id)),
     ).length;
-  for (let at = 30; at <= 130; at++) {
+  h.emit([h.untagged(h.alice, 30, other.id)]);
+  await h.feed.ensure();
+  expect(fetchesOther()).toBe(1);
+  // Once the target is verified as someone else's, more reactions to it cost
+  // no relay reads at all.
+  const reads = h.query.mock.calls.length;
+  for (let at = 31; at <= 130; at++) {
     h.emit([h.untagged(h.alice, at, other.id)]);
     await h.feed.ensure();
   }
-  expect(fetchesOther()).toBe(101);
+  expect(h.query.mock.calls.length).toBe(reads);
   await h.feed.refresh();
-  expect(fetchesOther()).toBe(101);
+  expect(fetchesOther()).toBe(1);
   expect(
     h.feed.snapshot().items.map((item) => item.events.map(({ id }) => id)),
   ).toEqual([[owned.id]]);
+});
+
+it("keeps checking a target it could not read, so access can return", async () => {
+  const h = setup();
+  const missing = "d".repeat(64);
+  await h.feed.ensure();
+  const fetchesMissing = () =>
+    h.query.mock.calls.filter(([filters]) =>
+      filters.some((filter) => filter.ids?.includes(missing)),
+    ).length;
+  h.emit([h.untagged(h.alice, 30, missing)]);
+  await h.feed.ensure();
+  h.emit([h.untagged(h.alice, 31, missing)]);
+  await h.feed.ensure();
+  expect(fetchesMissing()).toBe(2);
 });
 
 it.each(["live", "history"] as const)(

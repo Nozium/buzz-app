@@ -63,14 +63,20 @@ export function createInboxReactions({
   let closed = false;
   let requested = false;
   let dirty = false;
+  // A signed target's author never changes, so a target verified as someone
+  // else's is never fetched again. Unread targets are not remembered: access
+  // to them can return.
+  const foreign = new Set<string>();
   // Every channel reaction reaches receive(), so only untagged reactions and
   // those tagging the viewer may cost a target fetch.
   const eligible = (event: RelayEvent) => {
     const recipients = event.tags.filter(([name]) => name === "p");
+    const target = targetOf(event);
     return (
       event.kind === 7 &&
       event.pubkey !== viewer &&
-      !!targetOf(event) &&
+      !!target &&
+      !foreign.has(target) &&
       validReactionContent(event.content) &&
       (!recipients.length || recipients.some(([, value]) => value === viewer))
     );
@@ -148,6 +154,15 @@ export function createInboxReactions({
         )
       : [];
     signal.throwIfAborted();
+    for (const event of targets)
+      if (
+        ids.includes(event.id) &&
+        messageAuthor(event, signingAuthority) !== viewer
+      ) {
+        foreign.add(event.id);
+        const oldest = foreign.values().next().value;
+        if (foreign.size > 1000 && oldest) foreign.delete(oldest);
+      }
     // Missing, foreign and revoked targets never establish a reaction row.
     const owned = targets.filter(
       (event) =>
@@ -305,6 +320,7 @@ export function createInboxReactions({
     live.clear();
     overlays.clear();
     known.clear();
+    foreign.clear();
     retained = [];
     seen.clear();
     publish({ status: "idle", items: [] });
