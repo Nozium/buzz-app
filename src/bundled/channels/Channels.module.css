@@ -276,6 +276,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.unreadEdgeMore {
+  flex-shrink: 0;
+}
 .unreadDmPreviews {
   display: flex;
   align-items: center;

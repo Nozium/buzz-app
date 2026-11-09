@@ -24,9 +24,11 @@ export type UnreadDmPreview = {
 type EdgeTarget = {
   row: HTMLButtonElement;
   channelId: string;
+  name: string | undefined;
   attention: boolean;
 };
 type Edges = { above: EdgeTarget[]; below: EdgeTarget[] };
+const LISTED_NAMES = 5;
 
 /** Geometry over rendered unread destinations, not another unread store. */
 function unreadEdges(list: HTMLElement): Edges {
@@ -56,7 +58,8 @@ function unreadEdges(list: HTMLElement): Edges {
       row.getAttribute("data-channel-type") === "dm" ||
       row.querySelector('[data-priority="true"]') !== null ||
       row.querySelector("[data-channel-activity]") !== null;
-    const target = { row, channelId, attention };
+    const name = row.getAttribute("data-channel-name")?.trim() || undefined;
+    const target = { row, channelId, name, attention };
     if (rect.bottom <= viewport.top) edges.above.push(target);
     else if (rect.top >= viewport.top + list.clientHeight)
       edges.below.push(target);
@@ -106,6 +109,7 @@ export function SidebarUnread({
               (target, i) =>
                 target.row === next[edge][i]?.row &&
                 target.channelId === next[edge][i]?.channelId &&
+                target.name === next[edge][i]?.name &&
                 target.attention === next[edge][i]?.attention,
             ),
         )
@@ -131,6 +135,7 @@ export function SidebarUnread({
         "data-channel-activity",
         "data-channel-type",
         "data-channel-id",
+        "data-channel-name",
         "data-priority",
         "data-moving",
       ],
@@ -180,6 +185,14 @@ export function SidebarUnread({
         return preview ? [{ channelId, ...preview }] : [];
       })
       .slice(0, 3);
+    // Name the nearest destination; a bare count hides where unread waits.
+    // Group DM names contain commas, so the hint list uses semicolons and
+    // stops at a few names so a long backlog stays readable.
+    const names = nearestFirst.flatMap(({ name }) => (name ? [name] : []));
+    const named = count > 0 && names.length === count;
+    const listed = names.slice(0, LISTED_NAMES);
+    const list = `${listed.join("; ")}${count > listed.length ? `; and ${count - listed.length} more` : ""}`;
+    const noun = count === 1 ? "conversation" : "conversations";
     const Icon = edge === "above" ? ArrowUpIcon : ArrowDownIcon;
     // Spend the strong fill only when a DM, a mention of you or a thread
     // reply waits past this edge; ordinary unread uses the quiet gray fill.
@@ -196,7 +209,8 @@ export function SidebarUnread({
       >
         <Button
           variant={attention ? "prominent" : "subtle"}
-          aria-label={`${count} unread ${count === 1 ? "conversation" : "conversations"} ${edge}`}
+          aria-label={`${count} unread ${noun} ${edge}${named ? `: ${list}` : ""}`}
+          title={named ? list : undefined}
           data-edge={edge}
           data-attention={attention}
           size="xs"
@@ -228,7 +242,16 @@ export function SidebarUnread({
               <span>·</span>
             </span>
           )}
-          <span className={styles.unreadEdgeLabel}>{count} unread</span>
+          {named ? (
+            <>
+              <span className={styles.unreadEdgeLabel}>{names[0]}</span>
+              {count > 1 && (
+                <span className={styles.unreadEdgeMore}>+{count - 1}</span>
+              )}
+            </>
+          ) : (
+            <span className={styles.unreadEdgeLabel}>{count} unread</span>
+          )}
         </Button>
       </div>
     );

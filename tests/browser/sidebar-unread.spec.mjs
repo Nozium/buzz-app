@@ -245,10 +245,12 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
     path: info.outputPath("sidebar-unread-hierarchy.png"),
   });
   await expect(cue(page, "below")).toBeVisible();
-  await expect(cue(page, "below")).toHaveText(/\d+ unread$/);
+  // The cue names its nearest destinations instead of a bare count.
+  await expect(cue(page, "below")).toHaveText(/^[^+]+(\+\d+)?$/);
+  await expect(cue(page, "below")).not.toHaveText(/unread/);
   await expect(cue(page, "below").locator("..")).toHaveCSS("bottom", "12px");
   await expect(cue(page, "below")).toHaveAccessibleName(
-    /^\d+ unread conversations? below$/,
+    /^\d+ unread conversations? below: .+$/,
   );
   await expect(cue(page, "below")).toHaveAttribute("data-attention", "true");
   const transitionProperties = await cue(page, "below").evaluate((el) =>
@@ -262,10 +264,12 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
   await scrollRowAbove(page, "beta");
   await expect.poll(() => inView(page, "beta")).toBe(false);
   await expect(cue(page, "above")).toBeVisible();
-  await expect(cue(page, "above")).toHaveText(/\d+ unread$/);
+  // The cue names its nearest destinations instead of a bare count.
+  await expect(cue(page, "above")).toHaveText(/^[^+]+(\+\d+)?$/);
+  await expect(cue(page, "above")).not.toHaveText(/unread/);
   await expect(cue(page, "above").locator("..")).toHaveCSS("top", "12px");
   await expect(cue(page, "above")).toHaveAccessibleName(
-    /^\d+ unread conversations? above$/,
+    /^\d+ unread conversations? above: .+$/,
   );
   await expect(cue(page, "above")).toHaveAttribute("data-attention", "false");
   await expect(cue(page, "below")).toHaveAttribute("data-attention", "true");
@@ -655,7 +659,9 @@ test.describe("DM preview wiring", () => {
         return edge === "above" ? ids.reverse() : ids;
       }, edge);
       await expect(pill).toHaveAccessibleName(
-        `${expected.length} unread conversation${expected.length === 1 ? "" : "s"} ${edge}`,
+        new RegExp(
+          `^${expected.length} unread conversation${expected.length === 1 ? "" : "s"} ${edge}: `,
+        ),
       );
       const previews = pill.locator("[data-unread-dm]");
       await expect

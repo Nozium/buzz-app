@@ -388,3 +388,63 @@ it.each([
     }
   },
 );
+
+it("names the nearest off-screen conversation and counts the rest", async () => {
+  const named = (id: string, top: number) => (
+    <button
+      key={id}
+      type="button"
+      data-channel-id={id}
+      data-channel-name={id}
+      data-top={top}
+    >
+      {id}
+      <span data-channel-unread="" />
+    </button>
+  );
+  render(
+    <SidebarUnread>
+      {named("far-above", 0)}
+      {named("near-above", 40)}
+      {named("visible", 150)}
+      {named("design", 310)}
+      {named("Alice, Bob", 340)}
+      {named("ops", 370)}
+      {named("random", 400)}
+    </SidebarUnread>,
+  );
+  await measure();
+  const above = screen.getByRole("button", {
+    name: "2 unread conversations above: near-above; far-above",
+  });
+  expect(above).toHaveTextContent("near-above+1");
+  const below = screen.getByRole("button", {
+    name: "4 unread conversations below: design; Alice, Bob; ops; random",
+  });
+  expect(below).toHaveTextContent(/^design\+3$/);
+  expect(below).not.toHaveTextContent("unread");
+});
+
+it("lists at most five names in the hint and counts the rest", async () => {
+  render(
+    <SidebarUnread>
+      {[0, 1, 2, 3, 4, 5, 6].map((n) => (
+        <button
+          key={n}
+          type="button"
+          data-channel-id={`c-${n}`}
+          data-channel-name={`c-${n}`}
+          data-top={310 + 30 * n}
+        >
+          <span data-channel-unread="" />
+        </button>
+      ))}
+    </SidebarUnread>,
+  );
+  await measure();
+  expect(
+    screen.getByRole("button", {
+      name: "7 unread conversations below: c-0; c-1; c-2; c-3; c-4; and 2 more",
+    }),
+  ).toHaveTextContent(/^c-0\+6$/);
+});
