@@ -1,7 +1,0 @@
-{
-  "id": "buzz.mermaid",
-  "name": "Mermaid diagrams",
-  "apiVersion": 1,
-  "description": "Draw Mermaid code blocks in conversations as diagrams.",
-  "discovery": { "category": "communication" }
-}

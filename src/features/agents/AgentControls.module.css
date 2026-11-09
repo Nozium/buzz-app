@@ -1,5 +1,0 @@
-.modelOptions {
-  width: max-content;
-  min-width: min(14rem, var(--available-width));
-  max-width: min(var(--available-width), calc(100vw - var(--space-6)));
-}

@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "buzz-native": {
-      "command": "bin/node",
-      "args": ["scripts/native-mcp-client.mjs"]
-    }
-  }
-}

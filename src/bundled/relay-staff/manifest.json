@@ -1,7 +1,0 @@
-{
-  "id": "buzz.relay-staff",
-  "name": "Moderation",
-  "apiVersion": 1,
-  "description": "Review reports and feedback, investigate issues, and take action.",
-  "discovery": { "category": "people-and-communities" }
-}
