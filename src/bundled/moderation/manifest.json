@@ -1,7 +1,0 @@
-{
-  "id": "buzz.moderation",
-  "name": "Membership",
-  "apiVersion": 1,
-  "description": "Invite people and manage their access and roles.",
-  "discovery": { "category": "people-and-communities", "tags": ["people"] }
-}
