@@ -329,7 +329,10 @@ function FeatureSwitch({
   setSaving(saving: boolean): void;
 }) {
   const [error, setError] = useState<string>();
-  const problem = cannotEdit(agents, agent, feature);
+  const problem =
+    feature === inbox && agent.place !== "here"
+      ? "Not available with remote agents yet."
+      : cannotEdit(agents, agent, feature);
   if (problem)
     return <PreferenceRow title={feature.title} subtitle={problem} />;
   if (hosted && !hosted.loaded)

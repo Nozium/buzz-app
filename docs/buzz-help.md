@@ -809,7 +809,7 @@ available rather than silently discarding it.
   Bestie choice unchanged; it does not delete a newly created agent. A hosted
   Bestie whose provider holds its instructions (Builderlab does) shows a
   **Bestie** tab where **Remembers you** edits them through the provider;
-  check-ins stay unavailable for hosted agents.
+  check-ins and Inbox access stay unavailable for hosted agents.
 - In your agent's **Bestie** tab, **Behavior** groups **Remembers you** and
   **Checks in**. Check-ins need memory on and run once an hour while Buzz is open
   and the Watching plugin is on. Each wake uses tokens.

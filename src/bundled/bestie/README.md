@@ -58,10 +58,11 @@ when they can't be read or saved, such as when they would pass the provider's
 length limit or you aren't signed in to it. Reading them never starts the
 provider's sign-in. A save replaces only the copy the tab shows: if they were
 changed elsewhere since, it saves nothing, says so and shows the newer copy.
-**Check-ins** stay unavailable for it, as hosted agents have no
-Attention timers; a hosted agent whose provider holds no instructions shows
-both rows as unavailable. A remote Bestie doesn't start with Remembers you
-on. Once it is no longer Bestie, its provider is read once per connection if
+**Check-ins** and **Inbox** stay unavailable for it: hosted agents have no
+local Attention timers or owner-Inbox capability. A hosted agent whose provider
+holds no instructions also shows Remembers you as unavailable. A remote Bestie
+doesn't start with Remembers you on. Once it is no longer Bestie, its provider
+is read once per connection if
 this device saw it as Bestie, and it shows **Former Bestie** while its memory
 section is on or it is in one of your private channels. If its latest read
 fails, even after an earlier one found memory off, the tab stays until a read

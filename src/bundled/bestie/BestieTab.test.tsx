@@ -330,6 +330,14 @@ it("turns a hosted Bestie's memory on and off through its provider, and never to
   });
   expect(get).toHaveBeenCalledTimes(1);
   expect(remembers).not.toBeChecked();
+  const access = screen.getByRole("region", {
+    name: "What your Bestie can read",
+  });
+  expect(within(access).queryByRole("switch", { name: "Inbox" })).toBeNull();
+  expect(
+    within(access).getByText("Not available with remote agents yet."),
+  ).toBeVisible();
+  expect(set).not.toHaveBeenCalled();
   await user.click(remembers);
   await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(1));
   expect(set.mock.calls[0]?.[0]).toBe(withFeature("Be brief.", memory, true));
@@ -348,7 +356,7 @@ it("turns a hosted Bestie's memory on and off through its provider, and never to
   ).not.toBeInTheDocument();
   expect(
     screen.getAllByText("Not available with remote agents yet."),
-  ).toHaveLength(1);
+  ).toHaveLength(2);
 });
 
 it("never replaces a hosted Bestie's instructions edited elsewhere since the tab read them", async () => {
@@ -389,11 +397,9 @@ it("says why a hosted Bestie's instructions can't be read or saved, and lets eit
   await act(async () => {
     render(<Tab agent={remote} />);
   });
-  expect((await screen.findAllByText("Builderlab is down."))[0]).toBeVisible();
+  expect(await screen.findByText("Builderlab is down.")).toBeVisible();
   expect(screen.queryByRole("switch")).toBeNull();
-  const retry = screen.getAllByRole("button", { name: "Retry" })[0];
-  if (!retry) throw new Error("Expected a memory retry button");
-  await user.click(retry);
+  await user.click(screen.getByRole("button", { name: "Retry" }));
   const remembers = await screen.findByRole("switch", {
     name: "Remembers you",
   });
