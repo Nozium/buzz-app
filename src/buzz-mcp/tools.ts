@@ -29,6 +29,7 @@ import {
   referencedEmoji,
 } from "../features/relay/emoji";
 import { newer } from "../features/relay/events";
+import { snapshotArchives } from "../features/relay/identity-archive-protocol";
 import {
   VERIFIED_PROFILE_BATCH,
   type VerifiedProfile,
@@ -2119,8 +2120,26 @@ class Tools {
     return contentEmojiTags(content, communityEmoji(sets.values()));
   }
 
+  /** Keys the relay's latest NIP-IA snapshot (kind 13535) archives. Empty
+   * when it cannot be read or verified: as in the app, unknown archive state
+   * hides no one. */
+  async archived(): Promise<ReadonlySet<string>> {
+    const relay = this.client.relayAuthor;
+    if (!relay || !HEX_KEY.test(relay)) return new Set();
+    const events = await this.client
+      .query([{ kinds: [13535], authors: [relay], limit: 1 }])
+      .catch(() => []);
+    const latest = (events as unknown as RelayEvent[]).reduce<
+      RelayEvent | undefined
+    >(newer, undefined);
+    return new Set(latest ? (snapshotArchives(latest, relay) ?? []) : []);
+  }
+
   /** Who `content` notifies: `mentions`, `nostr:npub…` links, and `@Name`
-   * for a channel member, as the CLI resolves them. Each must be a member. */
+   * for a channel member, as the CLI resolves them. Each must be a member.
+   * `@Name` skips known-archived members (never this agent itself), so an
+   * archived namesake cannot make a live name ambiguous; an explicit key or
+   * `nostr:npub…` still reaches an archived member. */
   async mentions(
     channel: string,
     content: string,
@@ -2135,7 +2154,16 @@ class Tools {
     if (!prose.includes("@") && !keys.size) return [];
     const members = await this.members(channel);
     if (prose.includes("@")) {
-      const byName = await this.aliases(members.map((member) => member.pubkey));
+      const [archived, byName] = await Promise.all([
+        this.archived(),
+        this.aliases(members.map((member) => member.pubkey)),
+      ]);
+      for (const [name, holders] of byName) {
+        for (const key of holders.keys())
+          if (key !== this.client.pubkey && archived.has(key))
+            holders.delete(key);
+        if (!holders.size) byName.delete(name);
+      }
       const longest = [...byName.keys()].sort((a, b) => b.length - a.length);
       const unknown: string[] = [];
       for (const match of prose.matchAll(/(^|\s)@/g)) {

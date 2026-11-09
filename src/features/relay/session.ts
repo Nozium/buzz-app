@@ -1080,6 +1080,7 @@ export function createRelaySession(
   const nameSource = {
     viewer: transport?.viewer,
     profiles: profiles.queries,
+    archives: archives.queries,
     agentLibrary: agentLibrary.queries,
     relayUrl: transport?.scope,
   };
@@ -3471,7 +3472,7 @@ export function createRelaySession(
   };
   /** Per global route, the connection whose covered reads are settled. */
   const coveredGeneration = { profiles: -1, membership: -1 };
-  /** The reads a global route's replay covers (statuses and emoji for
+  /** The reads a global route's replay covers (statuses, emoji and archives for
    * `profiles`; read state and reminders for `membership`), once per
    * connection. A continuous replay already delivered every change since the
    * last connection heard the relay, so each owner resumes the state the
@@ -3494,6 +3495,7 @@ export function createRelaySession(
           emoji.reconnect();
           statuses.reconnect();
         }
+        archives.resume(!!continuous);
         return;
       }
       repairUnread(continuous);
@@ -3640,6 +3642,8 @@ export function createRelaySession(
           ),
       );
       confirmMembershipHints(hints);
+      // Relay-signed 13535 snapshots ride the profiles route.
+      archives.receive(events);
       // Before anything the batch it re-sends delivers (see `granted`).
       for (const hint of hints)
         if (hint.kind === 44100)

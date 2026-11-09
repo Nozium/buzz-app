@@ -1,10 +1,10 @@
 import { retryRead } from "./read-retry";
 import { getEventHash } from "nostr-tools";
 import { authTagOwner, withinTimeBounds } from "../agents/owner-attestation";
-import { byteSize } from "./budget";
 import { newer, type RelayEvent } from "./events";
 import {
   archiveRequestTemplate,
+  snapshotArchives,
   type IdentityArchiveAction,
 } from "./identity-archive-protocol";
 import { PublishRejected } from "./outbox";
@@ -45,11 +45,11 @@ export function archiveHides(
 const archivedSets = new WeakMap<readonly string[], ReadonlySet<string>>();
 const empty: readonly string[] = Object.freeze([]);
 const HEX = /^[0-9a-f]{64}$/;
-const MAX_BYTES = 2 * 1024 * 1024;
 
 /** Relay-scoped NIP-IA visibility, never access, membership or liveness evidence.
  * The caller supplies only explicit NIP-11 self, never the contact-key fallback.
- * Reads are lazy finite snapshots, not a live archive subscription.
+ * Reads are lazy finite snapshots; live snapshots from the session's profiles
+ * route (`receive`) replace them, and `resume` reconciles after a reconnect.
  * Requests are optional NIP-IA 9035/9036 writes; the relay re-verifies consent. */
 export function createIdentityArchives(
   reader: RelayReader,
@@ -68,6 +68,10 @@ export function createIdentityArchives(
   // Keep only the ordering fence across cache clears; never revive old contents.
   // This is session-local rollback resistance, not a cross-device durable fence.
   let head: Pick<RelayEvent, "id" | "created_at"> | undefined;
+  // Whether anything demanded a read, so a reconnect owes one; and whether the
+  // evidence held before the stream dropped was a complete current snapshot.
+  let requested = false;
+  let resumable = false;
   let snapshot: IdentityArchiveSnapshot = Object.freeze({
     status: available ? "idle" : "unavailable",
     archived: empty,
@@ -76,8 +80,25 @@ export function createIdentityArchives(
     snapshot = Object.freeze(next);
     for (const listener of listeners) notify(listener);
   }
+  /** NIP-01 ordering also applies when the relay replays an older snapshot.
+   * Re-reading the identical head is valid; a losing equal-time id is not. */
+  const older = (event: RelayEvent) =>
+    !!head &&
+    (event.created_at < head.created_at ||
+      (event.created_at === head.created_at && event.id > head.id));
+  function apply(event: RelayEvent, archived: readonly string[]) {
+    head = { id: event.id, created_at: event.created_at };
+    publish({
+      status: "ready",
+      archived,
+      eventId: event.id,
+      createdAt: event.created_at,
+      readAt: Date.now(),
+    });
+  }
   function refresh(): Promise<void> {
     if (closed || !available || !authority) return Promise.resolve();
+    requested = true;
     if (pending) return pending;
     const owned = new AbortController();
     controller = owned;
@@ -90,6 +111,8 @@ export function createIdentityArchives(
     // them, so a known-archived identity never briefly looks live.
     const { error: _, ...known } = snapshot;
     publish({ ...known, status: "loading" });
+    // A live snapshot applied while this read was out is at least as new.
+    const seen = head;
     void (async () => {
       try {
         if (closed || owned.signal.aborted) return;
@@ -110,43 +133,16 @@ export function createIdentityArchives(
           return;
         }
         const event = events[0];
-        const markers = event?.tags.filter(([name]) => name === "-");
-        if (
-          events.length !== 1 ||
-          !event ||
-          event.kind !== 13535 ||
-          event.pubkey !== authority ||
-          event.content !== "" ||
-          markers?.length !== 1 ||
-          markers[0]?.length !== 1 ||
-          byteSize(event) > MAX_BYTES
-        )
-          throw new Error("Invalid archive snapshot");
-        // NIP-01 ordering also applies when the relay replays an older snapshot.
-        // Re-reading the identical head is valid; a losing equal-time id is not.
-        if (
-          head &&
-          (event.created_at < head.created_at ||
-            (event.created_at === head.created_at && event.id > head.id))
-        )
-          throw new Error("Stale archive snapshot");
-        const archived = [
-          ...new Set(
-            event.tags.flatMap(([name, key]) =>
-              name === "p" && key && HEX.test(key) ? [key] : [],
-            ),
-          ),
-        ].sort();
-        head = { id: event.id, created_at: event.created_at };
-        publish({
-          status: "ready",
-          archived: Object.freeze(archived),
-          eventId: event.id,
-          createdAt: event.created_at,
-          readAt: Date.now(),
-        });
+        const archived =
+          events.length === 1 && event && authority
+            ? snapshotArchives(event, authority)
+            : undefined;
+        if (head !== seen && (!event || !archived || older(event))) return;
+        if (!event || !archived) throw new Error("Invalid archive snapshot");
+        if (older(event)) throw new Error("Stale archive snapshot");
+        apply(event, archived);
       } catch {
-        if (!closed && !owned.signal.aborted)
+        if (!closed && !owned.signal.aborted && head === seen)
           publish({
             ...snapshot,
             status: "error",
@@ -262,6 +258,33 @@ export function createIdentityArchives(
     if (snapshot.status !== "ready" || !HEX.test(pubkey)) return "unknown";
     return snapshot.archived.includes(pubkey) ? "archived" : "not-archived";
   }
+  /** A live snapshot from the relay replaces the list like a read does; the
+   * identical or an older one changes nothing. */
+  function receive(events: readonly RelayEvent[]) {
+    if (closed || !available || !authority) return;
+    for (const event of events) {
+      if (event.kind !== 13535 || event.pubkey !== authority) continue;
+      if (older(event) || event.id === head?.id) continue;
+      const archived = snapshotArchives(event, authority);
+      if (archived) apply(event, archived);
+      else
+        publish({
+          ...snapshot,
+          status: "error",
+          error:
+            "Archive visibility is unknown. The relay sent an invalid snapshot.",
+        });
+    }
+  }
+  /** After the profiles route re-establishes. A continuous replay delivered
+   * every snapshot since the drop, so complete evidence is current again;
+   * anything else rereads once if this session ever demanded archives. */
+  function resume(continuous: boolean) {
+    if (closed || !available || snapshot.status === "ready") return;
+    if (continuous && resumable && !pending)
+      publish({ ...snapshot, status: "ready" });
+    else if (requested) void refresh();
+  }
   function stop() {
     for (const owned of requests) owned.abort();
     controller?.abort();
@@ -271,11 +294,13 @@ export function createIdentityArchives(
   }
   /** Forgets everything known, for a new identity or access. */
   function clear() {
+    resumable = false;
     publish({ status: stop(), archived: empty });
   }
   /** After a reconnect: the next ensure() rereads, and until it replaces them
    * the last known archives stay known. */
   function stale() {
+    resumable = snapshot.status === "ready";
     const { error: _, ...known } = snapshot;
     publish({ ...known, status: stop() });
   }
@@ -301,6 +326,8 @@ export function createIdentityArchives(
     }),
     clear,
     stale,
+    receive,
+    resume,
     dispose() {
       closed = true;
       clear();

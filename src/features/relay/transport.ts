@@ -1467,6 +1467,9 @@ export async function connectSignedTransport(
           undefined,
           undefined,
           signer.verifySignatures,
+          // The only caller (native) passes the explicit NIP-11 self it also
+          // exposes as `archiveAuthority`.
+          relayAuthor,
         );
       } catch (error) {
         owner.streams--;
