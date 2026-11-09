@@ -108,8 +108,12 @@ The same forms work in message content.
 The navigation forms above do not carry a community, so each binds to the currently
 selected community and viewer, and fails `unavailable` when no community is
 selected or no identity is known. `buzz://join` is the separate invitation form.
-It holds through identity setup and opens the
-existing join dialog with the relay and code prefilled; it never claims or saves
+On the first-run welcome screen it starts the same discovery and sign-in flow
+as a pasted community invite, retaining the code for the final join. A cold
+link waits for identity restoration to settle before Welcome takes it. Links
+arriving during sign-in or setup wait for the existing flow to finish; they
+do not interrupt it. In the app, an invite opens the existing join dialog with
+the relay and code prefilled. Neither path claims or saves
 membership until the user completes discovery, policy acceptance, claim and profile
 confirmation. The first-run welcome screen hands an address (and invite code)
 typed there to the same intent when it enters the app on a restored community

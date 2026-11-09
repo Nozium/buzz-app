@@ -4,6 +4,7 @@
 // handler, so everything here is a no-op outside Tauri.
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { parseInviteLink, type InviteLink } from "../communities/invite-link";
+import type { createInviteIntent } from "../communities/invite-intent";
 import { communityDestination } from "../communities/destination";
 import type { ClientSnapshot } from "../communities/service";
 import { agentCardTarget, parseBuzzLink, settingsTarget } from "./buzz-links";
@@ -39,6 +40,11 @@ export type DeepLinkHost = Readonly<{
   }>;
   /** Invite presentation belongs to the community switcher, not navigation. */
   invite?: (invite: InviteLink, viewer: string) => void;
+  /** Welcome reuses its community-entry flow before the app can show a dialog. */
+  onboarding?: Pick<
+    ReturnType<typeof createInviteIntent>["onboarding"],
+    "offer" | "subscribe"
+  >;
   authorize?: (request: ExternalAuthorization, viewer: string) => void;
 }>;
 type Client = Pick<ClientSnapshot, "status" | "viewer" | "selected">;
@@ -208,9 +214,14 @@ export function bindDeepLinks(
       host.fail("denied");
       return Promise.resolve({ status: "failed", reason: "denied" });
     }
+    const invite = incoming.invite;
+    if (invite && host.onboarding?.offer(invite)) {
+      // Welcome now owns discovery, sign-in, cancellation, and the final join.
+      held = undefined;
+      return Promise.resolve({ status: "cancelled" });
+    }
     if (client.status === "loading")
       return Promise.resolve({ status: "failed", reason: "unavailable" });
-    const invite = incoming.invite;
     if (incoming.authorization) {
       if (!client.viewer || client.status !== "ready")
         return Promise.resolve({ status: "failed", reason: "unavailable" });
@@ -255,7 +266,11 @@ export function bindDeepLinks(
     ) {
       held = undefined;
       host.fail("denied");
-    } else if (client.status !== "loading" && !held.reported && !draining) {
+    } else if (
+      (held.invite || client.status !== "loading") &&
+      !held.reported &&
+      !draining
+    ) {
       void openHeld();
     }
   };
@@ -344,6 +359,7 @@ export function bindDeepLinks(
     flush();
   });
   const stopInbox = host.inbox.subscribe(flush);
+  const stopOnboarding = host.onboarding?.subscribe(flush);
   const stopNavigation = host.navigation.subscribe(() => {
     const next = host.navigation.snapshot();
     // fail() emits synchronously; its ingress marker distinguishes our failure
@@ -364,6 +380,7 @@ export function bindDeepLinks(
     closed = true;
     stopClient();
     stopInbox();
+    stopOnboarding?.();
     stopNavigation();
     stopShell();
     held = undefined;

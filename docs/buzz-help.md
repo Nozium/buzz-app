@@ -48,6 +48,10 @@ mention anyone. Explicit agent watches on that room can still receive them.
   once this computer was set up through Builderlab, **Sign in** comes first.
   **Other options** reveals a **Community URL** field
   for an address or invite link; desktop does not offer QR scanning.
+  Opening a community invite in the desktop app before setup starts that same
+  community lookup and sign-in flow automatically. The invite is kept for the
+  join step; opening it alone does not make you a member. An invite opened
+  during sign-in or setup waits until that flow finishes.
   With no communities yet, **Join** advances through full-page access and profile
   steps. Before joining, **Back** returns to the entered link; after admission,
   profile setup continues forward. An invite-code field appears for

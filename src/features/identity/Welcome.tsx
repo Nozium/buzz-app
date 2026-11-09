@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { OnboardingBack } from "./OnboardingBack";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -164,7 +165,10 @@ export function Welcome({
    * The app's invite intent: a typed address the restore did not admit is
    * handed to the rail's Add-a-community dialog as the gate lifts.
    */
-  invites: Pick<ReturnType<typeof createInviteIntent>, "open">;
+  invites: Pick<ReturnType<typeof createInviteIntent>, "open"> &
+    Partial<
+      Pick<ReturnType<typeof createInviteIntent>, "onboarding" | "snapshot">
+    >;
   children: ReactNode;
   /**
    * The NIP-FI session as the bundled Builderlab plugin calls it
@@ -248,6 +252,7 @@ export function Welcome({
   // discovery lookup; after setup, the Join Community page. Cleared on every
   // return to the landing or choices page.
   const [finding, setFinding] = useState<string>();
+  const [findingRequest, setFindingRequest] = useState(0);
   // Counts hosted-server lookups for a found community; a lookup's answer
   // applies only while it is the latest (see FindCommunity's onFound).
   const lookups = useRef(0);
@@ -256,7 +261,7 @@ export function Welcome({
     () => () => {
       lookups.current++;
     },
-    [finding],
+    [finding, findingRequest],
   );
   // The code of the invite link `finding` came from, claimed on Join; "" for
   // a bare address. Every submit sets it with `finding`.
@@ -317,6 +322,36 @@ export function Welcome({
   // The typed address the restore entered the app without; opened in the
   // join dialog, with its invite code, once the gate lifts.
   const handoff = useRef<string | undefined>(undefined);
+  /** A submitted address or invite link: what to look up, and the code to claim. */
+  const find = useCallback(
+    (origin: string, code = "", justCreated = false) => {
+      lookups.current++;
+      setFinding(origin);
+      setFindingRequest((request) => request + 1);
+      setInviteCode(code);
+      setJoinAtOnce(justCreated || accountConsents(federatedIdentity, origin));
+    },
+    [federatedIdentity],
+  );
+  const acceptsInvite =
+    state.status === "missing" &&
+    !state.busy &&
+    progress.status === "idle" &&
+    auth.status !== "pending";
+  useEffect(() => {
+    if (!acceptsInvite) return;
+    return invites.onboarding?.handle((invite) => {
+      cancels.current++;
+      login.cancel();
+      setOtherOptions(false);
+      setEntered(
+        invite.code
+          ? `${invite.community}/invite/${encodeURIComponent(invite.code)}`
+          : invite.community,
+      );
+      find(invite.community, invite.code);
+    });
+  }, [acceptsInvite, invites.onboarding, login, find]);
   useEffect(
     () => () => {
       if (login.snapshot().status === "pending") login.cancel();
@@ -613,7 +648,12 @@ export function Welcome({
   const enterApp = () => {
     const current = identity.snapshot();
     setConfirmed(true);
-    if (handoff.current && current.status === "ready")
+    // A link that arrived during setup is newer than the address it started on.
+    if (
+      handoff.current &&
+      current.status === "ready" &&
+      invites.snapshot?.()?.viewer !== current.viewer
+    )
       invites.open(
         { community: handoff.current, code: inviteCode },
         current.viewer,
@@ -714,12 +754,6 @@ export function Welcome({
         }
       },
     });
-  };
-  /** A submitted address or invite link: what to look up, and the code to claim. */
-  const find = (origin: string, code = "", justCreated = false) => {
-    setFinding(origin);
-    setInviteCode(code);
-    setJoinAtOnce(justCreated || accountConsents(federatedIdentity, origin));
   };
   /** Every way back to the landing, so a kept `finding` cannot re-enter discovery. */
   const backToLanding = () => {
@@ -1381,6 +1415,7 @@ export function Welcome({
         />
       ) : finding ? (
         <FindCommunity
+          key={`${finding}:${findingRequest}`}
           onboarding
           url={finding}
           onCancel={backToLanding}

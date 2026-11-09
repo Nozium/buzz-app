@@ -32,6 +32,10 @@ import { IdentitySetup } from "./IdentitySetup";
 import { PrivateKey } from "./PrivateKey";
 import { SignOutDialog, WIPE_PHRASE } from "./SignOut";
 import { Welcome } from "./Welcome";
+import { createInviteIntent } from "../communities/invite-intent";
+import { bindDeepLinks } from "../navigation/deep-links";
+import { createNavigationController } from "../navigation/controller";
+import { createMemoryHistory } from "../navigation/history";
 import {
   federatedFixture,
   forwardingSession,
@@ -2045,6 +2049,18 @@ const publicServers = async (): Promise<SessionSnapshot[]> => [
     cleanup: false,
   },
 ];
+
+const inviteServers = async (): Promise<SessionSnapshot[]> =>
+  (await publicServers()).map((server) => {
+    if (!server.authority) throw new Error("Missing test sign-in authority");
+    return {
+      ...server,
+      authority: {
+        ...server.authority,
+        communityHosts: ["relay.example.com:8443"],
+      },
+    };
+  });
 
 it.each([["bb-public compiled", publicServers]])(
   "a landing URL hosted by this build's Builderlab (%s) signs in at once, with no connect choice",
@@ -4470,6 +4486,250 @@ const invitePolicy: JoinPolicy = {
   terms_markdown: "# Terms",
 };
 const inviteLink = `https://relay.example.com:8443/invite/${inviteCode}`;
+
+/** Exercise the OS queue through the real ingress, onboarding and join owners. */
+function incomingInvites(
+  communities: ReturnType<typeof communitiesFor>,
+  pending: string[] = [],
+) {
+  const requests = createInviteIntent();
+  const navigation = createNavigationController(createMemoryHistory());
+  const queue = [...pending];
+  let ping = () => {};
+  const stop = bindDeepLinks(
+    {
+      ...navigation,
+      invite: requests.open,
+      onboarding: requests.onboarding,
+      accepted: vi.fn(),
+      rejected: vi.fn(),
+      inbox: { status: () => "off", subscribe: () => () => {} },
+    },
+    communities,
+    {
+      take: async () => queue.splice(0),
+      watch(listener) {
+        ping = listener;
+        return () => {
+          ping = () => {};
+        };
+      },
+    },
+  );
+  return {
+    requests,
+    arrive(url: string) {
+      queue.push(url);
+      ping();
+    },
+    dispose() {
+      stop();
+      navigation.dispose();
+    },
+  };
+}
+
+it.each(["cold", "warm"])(
+  "an OS invite on %s first run discovers, signs in, and keeps its code through joining",
+  async (launch) => {
+    const member = keypair();
+    const relay = nativeRelay(member);
+    relay.admitted = false;
+    relay.policy = invitePolicy;
+    const identity = createIdentity();
+    const communities = communitiesFor(identity);
+    const url = `buzz://join/?relay=${encodeURIComponent(relay.origin)}&code=${inviteCode}`;
+    const links = incomingInvites(communities, launch === "cold" ? [url] : []);
+    const signedIn = deferred<Credential>();
+    const connect = vi.fn(() => signedIn.promise);
+    const user = userEvent.setup();
+    try {
+      render(
+        <Welcome
+          identity={identity}
+          communities={communities}
+          invites={links.requests}
+          account={unlinked}
+          connect={connect}
+          servers={inviteServers}
+        >
+          <p>Signed in</p>
+        </Welcome>,
+      );
+      if (launch === "warm") {
+        await screen.findByRole("button", { name: SIGN_IN });
+        act(() => links.arrive(url));
+      }
+      await waitFor(() => expect(connect).toHaveBeenCalledTimes(1));
+      expect(identity.snapshot().status).toBe("missing");
+      expect(claims(relay)).toEqual([]);
+      await act(async () => signedIn.resolve(credential));
+      await screen.findByRole("heading", { name: "Join Community" });
+      // Opening an invite does not accept policy or claim membership.
+      expect(screen.getByRole("button", { name: "Join" })).toBeDisabled();
+      expect(claims(relay)).toEqual([]);
+      await consent(user);
+      await user.click(screen.getByRole("button", { name: "Join" }));
+      await completeRequiredProfile(user);
+      expect(await screen.findByText("Signed in")).toBeVisible();
+      expect(claims(relay)).toEqual([
+        {
+          community: relay.origin,
+          path: "/api/invites/claim",
+          method: "POST",
+          body: { code: inviteCode, policy_receipt: "policy-receipt" },
+        },
+      ]);
+      expect(communities.snapshot().selected).toBe(relay.origin);
+      expect(links.requests.snapshot()).toBeUndefined();
+    } finally {
+      signedIn.resolve(credential);
+      cleanup();
+      links.dispose();
+      identity.dispose();
+    }
+  },
+);
+
+it("canceling an OS invite lookup retires it without a late sign-in or join", async () => {
+  const relay = landingRelay();
+  const identity = createIdentity();
+  const communities = communitiesFor(identity);
+  const links = incomingInvites(communities, [
+    `buzz://join?relay=https%3A%2F%2Frelay.example.com%3A8443&code=${inviteCode}`,
+  ]);
+  const connect = vi.fn();
+  const user = userEvent.setup();
+  try {
+    render(
+      <Welcome
+        identity={identity}
+        communities={communities}
+        invites={links.requests}
+        connect={connect}
+        account={unlinked}
+        servers={publicServers}
+      >
+        <p>Signed in</p>
+      </Welcome>,
+    );
+    await screen.findByRole("heading", { name: "Finding community" });
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(async () => relay.info.resolve());
+    expect(welcomeHeading()).toBeVisible();
+    expect(connect).not.toHaveBeenCalled();
+    expect(links.requests.snapshot()).toBeUndefined();
+    expect(identity.snapshot().status).toBe("missing");
+  } finally {
+    relay.info.resolve();
+    cleanup();
+    links.dispose();
+    identity.dispose();
+  }
+});
+it.each(["relay.example.com:8443", "another.example.com"])(
+  "an OS invite restarts failed discovery, including the same destination: %s",
+  async (host) => {
+    const failed = landingRelay();
+    const identity = createIdentity();
+    const communities = communitiesFor(identity);
+    const links = incomingInvites(communities, [
+      "buzz://join?relay=https%3A%2F%2Frelay.example.com%3A8443&code=first",
+    ]);
+    let retry: ReturnType<typeof landingRelay> | undefined;
+    try {
+      render(
+        <Welcome
+          identity={identity}
+          communities={communities}
+          invites={links.requests}
+          connect={vi.fn()}
+          account={unlinked}
+          servers={publicServers}
+        >
+          <p>Signed in</p>
+        </Welcome>,
+      );
+      await screen.findByRole("heading", { name: "Finding community" });
+      await act(async () => failed.info.reject(new Error("Offline")));
+      await screen.findByRole("heading", { name: "Couldn’t find community" });
+      retry = landingRelay(`https://${host}`);
+      act(() =>
+        links.arrive(
+          `buzz://join?relay=${encodeURIComponent(`https://${host}`)}&code=second`,
+        ),
+      );
+      await screen.findByRole("heading", { name: "Finding community" });
+      await act(async () => retry?.info.resolve());
+      await screen.findByRole("heading", { name: "Connect to your community" });
+      expect(screen.getByText(host)).toBeVisible();
+      expect(retry.relayCalls).toEqual(retry.lookup);
+    } finally {
+      failed.info.resolve();
+      retry?.info.resolve();
+      cleanup();
+      links.dispose();
+      identity.dispose();
+    }
+  },
+);
+
+it("an invite arriving during restoration wins over the older onboarding handoff", async () => {
+  const member = keypair();
+  const restored = deferred<void>();
+  const relay = nativeRelay(member, {
+    [relayA]: {
+      admitted: true,
+      profile: profile(member, { name: "Ada" }),
+      query: restored.promise,
+    },
+  });
+  const identity = createIdentity();
+  const communities = communitiesFor(identity);
+  const links = incomingInvites(communities, [
+    `buzz://join?relay=${encodeURIComponent(relay.origin)}&code=first`,
+  ]);
+  try {
+    render(
+      <Welcome
+        identity={identity}
+        communities={communities}
+        invites={links.requests}
+        connect={vi.fn().mockResolvedValue(credential)}
+        account={restoringAccount([relayA])}
+        servers={inviteServers}
+      >
+        <p>Signed in</p>
+      </Welcome>,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Restoring your communities…",
+      ),
+    );
+    await waitFor(() => expect(communities.snapshot().status).toBe("ready"));
+    act(() =>
+      links.arrive(
+        "buzz://join?relay=https%3A%2F%2Fnewer.example.com&code=second",
+      ),
+    );
+    await waitFor(() => expect(links.requests.snapshot()?.code).toBe("second"));
+    await act(async () => restored.resolve());
+    expect(await screen.findByText("Signed in")).toBeVisible();
+    expect(links.requests.snapshot()).toMatchObject({
+      community: "https://newer.example.com",
+      code: "second",
+      viewer: member.pubkey,
+    });
+    expect(claims(relay)).toEqual([]);
+  } finally {
+    restored.resolve();
+    cleanup();
+    links.dispose();
+    identity.dispose();
+  }
+});
+
 /** The requests a Join with a code sends: the claim (after the policy's acceptance), then the read. */
 function claimCalls(
   relay: ReturnType<typeof nativeRelay>,

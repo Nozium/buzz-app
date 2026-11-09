@@ -1,4 +1,5 @@
 import { takeSignInRequest } from "../identity/sign-in-requests";
+import { createInviteIntent } from "../communities/invite-intent";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ClientSnapshot } from "../communities/service";
 import {
@@ -130,7 +131,11 @@ it("rejects non-string shell payloads the same way", () => {
 });
 
 type Client = Pick<ClientSnapshot, "status" | "viewer" | "selected">;
-function harness(initial: Client, pending: string[] = []) {
+function harness(
+  initial: Client,
+  pending: string[] = [],
+  onboarding?: ReturnType<typeof createInviteIntent>["onboarding"],
+) {
   const queue = [...pending];
   const watchers = new Set<() => void>();
   const take = vi.fn(async (): Promise<readonly string[]> => queue.splice(0));
@@ -181,6 +186,8 @@ function harness(initial: Client, pending: string[] = []) {
     },
     accepted: vi.fn(),
     authorize: vi.fn(),
+    invite: vi.fn(),
+    ...(onboarding ? { onboarding } : {}),
   };
   const stop = bindDeepLinks(
     host,
@@ -222,6 +229,61 @@ function harness(initial: Client, pending: string[] = []) {
 const inboxOn = { status: () => "on" as const, subscribe: () => () => {} };
 const ready: Client = { status: "ready", viewer, selected: origin };
 const loading: Client = { status: "loading", selected: null };
+
+it.each(["", "/"])(
+  "hands a cold invite to Welcome while identity is still loading (path %j)",
+  async (path) => {
+    const intents = createInviteIntent();
+    const t = harness(
+      loading,
+      [`buzz://join${path}?relay=wss%3A%2F%2Frelay.example&code=v2.invite`],
+      intents.onboarding,
+    );
+    let release = () => {};
+    try {
+      await vi.waitFor(() => expect(t.host.accepted).toHaveBeenCalledTimes(1));
+      expect(t.host.invite).not.toHaveBeenCalled();
+      const accept = vi.fn();
+      release = intents.onboarding.handle(accept);
+      expect(accept).toHaveBeenCalledWith({
+        community: "https://relay.example",
+        code: "v2.invite",
+      });
+      release();
+      t.become(ready);
+      expect(t.host.invite).not.toHaveBeenCalled();
+      expect(t.host.fail).not.toHaveBeenCalled();
+      expect(accept).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      t.stop();
+    }
+  },
+);
+
+it("a newer malformed link retires an invite still waiting for Welcome", async () => {
+  const intents = createInviteIntent();
+  const t = harness(
+    loading,
+    ["buzz://join?relay=wss%3A%2F%2Frelay.example&code=v2.invite"],
+    intents.onboarding,
+  );
+  let release = () => {};
+  try {
+    await vi.waitFor(() => expect(t.host.accepted).toHaveBeenCalledTimes(1));
+    t.arrive("buzz://unknown");
+    await settle();
+    const accept = vi.fn();
+    release = intents.onboarding.handle(accept);
+    t.become(ready);
+    expect(accept).not.toHaveBeenCalled();
+    expect(t.host.invite).not.toHaveBeenCalled();
+    expect(t.host.rejected).toHaveBeenCalledTimes(1);
+  } finally {
+    release();
+    t.stop();
+  }
+});
 
 it("holds external authorization through startup without adding handshake data to navigation", async () => {
   const link = `buzz://mcp-authorize?${new URLSearchParams({ version: "1", client: "Test app", callback: "http://127.0.0.1:1234/buzz/authorize", state: "A".repeat(43), scope: "read post", code_challenge: "A".repeat(43), code_challenge_method: "S256" })}`;

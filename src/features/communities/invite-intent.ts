@@ -22,6 +22,28 @@ declare module "@deepseek-ai/cordis" {
 
 /** An OS invitation is an intent, never a membership or an authorization. */
 export function createInviteIntent() {
+  // The deep-link owner keeps a cold invite until Welcome can take it. Only
+  // register while its existing community-entry flow can accept a destination.
+  let onboardingHandler: ((invite: InviteLink) => void) | undefined;
+  const onboardingListeners = new Set<() => void>();
+  const onboarding = {
+    offer(invite: InviteLink) {
+      if (!onboardingHandler) return false;
+      onboardingHandler(invite);
+      return true;
+    },
+    subscribe(listener: () => void) {
+      onboardingListeners.add(listener);
+      return () => onboardingListeners.delete(listener);
+    },
+    handle(handler: (invite: InviteLink) => void) {
+      onboardingHandler = handler;
+      for (const listener of onboardingListeners) listener();
+      return () => {
+        if (onboardingHandler === handler) onboardingHandler = undefined;
+      };
+    },
+  };
   let current:
     | (JoinRequest & { viewer: string; requestId: number })
     | undefined;
@@ -36,6 +58,7 @@ export function createInviteIntent() {
     for (const listener of listeners) listener();
   };
   return {
+    onboarding,
     snapshot,
     subscribe,
     open(invite: JoinRequest, viewer: string) {

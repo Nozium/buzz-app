@@ -226,6 +226,7 @@ export function createServices() {
   const deepLinks = {
     ...navigationHost,
     invite: invites.open,
+    onboarding: invites.onboarding,
     authorize: externalApps.open,
     rejected: rejectedLinks.reject,
     accepted: () => rejectedLinks.clear(),
