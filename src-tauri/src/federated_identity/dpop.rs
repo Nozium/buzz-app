@@ -6,6 +6,11 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+// The legacy macOS Keychain can return errSecItemNotFound from overlapping
+// SecKeyCreateRandomKey calls. Serialize creation in the host, including real sign-ins.
+#[cfg(target_os = "macos")]
+static KEY_CREATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub(super) struct DeviceKey {
     handle: String,
     jwk: serde_json::Value,
@@ -34,6 +39,7 @@ impl DeviceKey {
             item::Location,
             key::{GenerateKeyOptions, KeyType, SecKey, Token},
         };
+        let _creation = super::lock(&KEY_CREATION);
         let handle = format!("xyz.buzz.native-dpop.{}", uuid::Uuid::new_v4());
         let mut options = GenerateKeyOptions::default();
         options
@@ -58,7 +64,14 @@ impl DeviceKey {
                 options.set_token(Token::Software);
             }
         }
-        let key = SecKey::new(&options).map_err(|_| "device-key-unavailable")?;
+        let key = SecKey::new(&options).map_err(|error| {
+            eprintln!(
+                "DPoP SecKeyCreateRandomKey failed: domain={} code={}",
+                error.domain(),
+                error.code()
+            );
+            "device-key-unavailable"
+        })?;
         Self::from_key(handle, key, mode, false)
     }
     #[cfg(not(target_os = "macos"))]
@@ -278,6 +291,41 @@ fn raw_signature(der: &[u8]) -> Result<[u8; 64], &'static str> {
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
+    #[test]
+    fn concurrent_software_key_creation_keeps_distinct_restorable_signers() {
+        let start = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let workers: Vec<_> = (0..8)
+            .map(|_| {
+                let start = start.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    DeviceKey::create(DpopMode::Software)
+                })
+            })
+            .collect();
+        // Join all callers before dropping keys, isolating concurrent creation from deletion.
+        let results: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        let keys: Vec<_> = results
+            .into_iter()
+            .map(|result| result.expect("concurrent software key"))
+            .collect();
+        let handles: std::collections::BTreeSet<_> = keys.iter().map(DeviceKey::handle).collect();
+        let thumbprints: std::collections::BTreeSet<_> =
+            keys.iter().map(DeviceKey::thumbprint).collect();
+        assert_eq!(handles.len(), 8);
+        assert_eq!(thumbprints.len(), 8);
+        let target = url::Url::parse("https://issuer.example/prefix/v1/session").unwrap();
+        for key in &keys {
+            let restored = DeviceKey::load(key.handle(), DpopMode::Software).unwrap();
+            assert_eq!(restored.thumbprint(), key.thumbprint());
+            assert!(restored.proof("GET", &target, Some("test-token")).is_ok());
+            key.retire().unwrap();
+            assert!(DeviceKey::load(key.handle(), DpopMode::Software).is_err());
+        }
+    }
     #[test]
     fn software_key_persists_and_signs_distinct_bound_proofs_then_retires() {
         let cold = std::time::Instant::now();
