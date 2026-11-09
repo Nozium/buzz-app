@@ -304,14 +304,18 @@ export function createPluginInstallRequests({
       if (current.confirmed) current.ended = true;
       else settle(id, "cancelled");
     },
+    /** Whether a plugin review dialog holds the native import preview. */
+    reviewing: () => reviews > 0,
     /** Marks a plugin review dialog as open until the returned function runs. */
     holdReview() {
       reviews++;
+      emit();
       let held = true;
       return () => {
         if (!held) return;
         held = false;
         reviews--;
+        emit();
       };
     },
     settle,

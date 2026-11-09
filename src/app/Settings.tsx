@@ -29,6 +29,11 @@ import { SurfaceButton } from "../shared/design-system/ui/SurfaceButton";
 import { IconButton } from "../shared/design-system/ui/IconButton";
 import { ChoiceRow } from "../shared/design-system/ui/ChoiceRow";
 import { SettingsGroup } from "../shared/design-system/ui/SettingsGroup";
+import { SwitchPreferenceRow } from "../shared/design-system/ui/SwitchPreferenceRow";
+import {
+  setPluginAutoUpdatePreference,
+  usePluginAutoUpdatePreference,
+} from "./plugin-auto-update-preference";
 import { Tabs } from "../shared/design-system/ui/Tabs";
 import { SearchField } from "../shared/design-system/ui/SearchField";
 import { EmptyState } from "../shared/design-system/ui/EmptyState";
@@ -840,6 +845,7 @@ export function Settings({
   const ready = configuration.status === "ready" ? configuration : undefined;
   const catalog = ready?.catalog;
   const externalPluginsPaused = ready?.externalPluginsPaused;
+  const autoUpdate = usePluginAutoUpdatePreference();
   const managed = ready?.managed;
   const pendingCount = pendingManaged(managed).length;
   const [activationAttempt, setActivationAttempt] = useState<{
@@ -1518,6 +1524,18 @@ export function Settings({
                 }
               />
             </motion.div>
+            {plugins.imports && catalog && (
+              <motion.div {...layoutMotion}>
+                <SettingsGroup>
+                  <SwitchPreferenceRow
+                    label="Install plugin updates automatically"
+                    description="Installs an update when Buzz finds it, if it asks for no new access and has the same publisher. Other updates still ask for review. Updating an enabled plugin reloads it."
+                    checked={autoUpdate}
+                    onCheckedChange={setPluginAutoUpdatePreference}
+                  />
+                </SettingsGroup>
+              </motion.div>
+            )}
             <AnimatePresence initial={false} mode="popLayout">
               {coreGroup && renderPluginGroup(coreGroup)}
             </AnimatePresence>

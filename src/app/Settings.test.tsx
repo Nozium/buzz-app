@@ -3104,12 +3104,36 @@ it("offers Review update for a managed plugin whose pinned commit changed", () =
   ).toHaveAccessibleDescription(/Managed by Example Org/);
 });
 
+it("saves the automatic plugin update choice where plugins can be imported", () => {
+  const fixture = reviewPluginFixture();
+  Object.assign(fixture.manager, {
+    imports: { git: vi.fn(), discard: vi.fn() },
+  });
+  act(fixture.publish);
+  const toggle = screen.getByRole("switch", {
+    name: "Install plugin updates automatically",
+  });
+  expect(toggle).not.toBeChecked();
+  try {
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+    expect(localStorage.getItem("buzz-plugin-auto-update.v1")).toBe("on");
+  } finally {
+    localStorage.clear();
+  }
+});
+
 it("hides managed recommendations where plugins cannot be imported", () => {
   const fixture = reviewPluginFixture();
   Object.assign(fixture.snapshot.configuration, {
     managed: managedPolicy("missing"),
   });
   act(fixture.publish);
+  expect(
+    screen.queryByRole("switch", {
+      name: "Install plugin updates automatically",
+    }),
+  ).toBeNull();
   expect(screen.queryByRole("region", { name: /Recommended by/ })).toBeNull();
 });
 

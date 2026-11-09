@@ -245,6 +245,14 @@ review and remains subject to native signing rules. **Later** hides the notice
 for the current app run and candidate. The update stays in the profile menu's
 **Plugins** submenu. A newer candidate can show a notice again.
 
+With **Install plugin updates automatically** on (a device-local Settings →
+Plugins choice, off by default), the shell starts the same **Update and reload**
+apply for a found candidate without a click when access does not increase, the
+publisher is unchanged and no rollback warning applies. It reuses the
+`PluginImport` update path, so the fresh immutable preview is checked again
+before install and a fresh access increase falls back to the review. Each
+plugin revision is attempted once per app run.
+
 An update action fetches a fresh immutable preview. The importer checks access
 and publisher data from that preview before it applies the update. It checks
 the live source again before installation. A managed source retains its commit

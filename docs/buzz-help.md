@@ -1035,6 +1035,13 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   a notice again. Failed checks offer **Retry**. If the updated plugin cannot
   start, use **Retry activation** or its recovery menu to **Roll back**, when
   available. Checks, review, Later, and cancellation keep plugin work running.
+- On desktop, **Install plugin updates automatically** in Settings → Plugins
+  (off by default, saved on this device) installs an update as soon as a check
+  finds it, when it asks for no new access, keeps its publisher and doesn't
+  block rollback. A short **Updating** dialog shows progress, and the plugin
+  reloads right away. Other updates still
+  show their notice and review. Buzz tries each automatic update once per found
+  revision; if it fails, the usual notice returns.
 - A `buzz://plugin-install` Git link pinned to both a commit and a folder can
   update a plugin installed from that same repository and folder: it opens an
   **Update** review showing access changes and any change to the branch or tag

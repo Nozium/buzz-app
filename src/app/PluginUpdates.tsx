@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
   useSyncExternalStore,
@@ -32,9 +33,10 @@ import {
 } from "../shared/design-system/ui/Menu";
 import { SquaresFourIcon } from "../shared/design-system/icons";
 import { RecommendationCount } from "./RecommendationCount";
-import { PluginImport } from "./PluginImport";
+import { importRollbackWarning, PluginImport } from "./PluginImport";
 import { pluginAccessIncreases } from "./PluginAccessReview";
 import { PluginMenu } from "./PluginMenu";
+import { usePluginAutoUpdatePreference } from "./plugin-auto-update-preference";
 
 const Context = createContext<{
   updates: readonly PluginUpdate[];
@@ -128,6 +130,35 @@ export function PluginUpdates({
     );
   };
   const [recovering, setRecovering] = useState<readonly string[]>([]);
+  // With the choice on, an update that needs no review starts the same
+  // apply as Update and reload, once per found revision.
+  const autoUpdate = usePluginAutoUpdatePreference();
+  const attempted = useRef(new Set<string>());
+  // Another review or install request holds the single native import preview.
+  const reviewing = useSyncExternalStore(
+    installRequests.subscribe,
+    () => installRequests.reviewing() || !!installRequests.snapshot(),
+  );
+  const canStart = !state.busy && !action && !reviewing;
+  const automatic = (update: PluginUpdate) =>
+    autoUpdate &&
+    !!update.candidate &&
+    !store?.hidden(update) &&
+    !needsReview(update) &&
+    !importRollbackWarning(
+      update.candidate,
+      catalog?.plugins.find((p) => p.manifest.id === update.id),
+    ) &&
+    !attempted.current.has(`${update.id}:${update.candidate.revision}`);
+  const nextAutomatic = canStart ? updates.find(automatic) : undefined;
+  const startAutomatic = useEffectEvent((update: PluginUpdate) => {
+    if (!update.candidate || !canStart) return;
+    attempted.current.add(`${update.id}:${update.candidate.revision}`);
+    open(update);
+  });
+  useEffect(() => {
+    if (nextAutomatic) startAutomatic(nextAutomatic);
+  }, [nextAutomatic]);
   return (
     <Context
       value={{
@@ -141,7 +172,12 @@ export function PluginUpdates({
     >
       {children}
       {updates
-        .filter((update) => !store?.hidden(update) && update.id !== action?.id)
+        .filter(
+          (update) =>
+            !store?.hidden(update) &&
+            update.id !== action?.id &&
+            !(canStart && automatic(update)),
+        )
         .map((update) => {
           const plugin = catalog?.plugins.find(
             (p) => p.manifest.id === update.id,

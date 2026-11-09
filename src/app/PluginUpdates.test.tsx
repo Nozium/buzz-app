@@ -22,9 +22,11 @@ import type { PluginManager } from "../plugins/manager";
 import type { ImportPreview, PluginInfo } from "../plugins/types";
 import type { AppServices } from "./services";
 import { createPluginInstallRequests } from "../plugins/installer";
+import { setPluginAutoUpdatePreference } from "./plugin-auto-update-preference";
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.useRealTimers();
 });
 
@@ -103,6 +105,7 @@ function fixture() {
     open: vi.fn(async () => ({ status: "opened" as const })),
   };
   const relay = { snapshot: () => ({ session: {} }) } as AppServices["relay"];
+  const installRequests = createPluginInstallRequests();
   const mount = () =>
     render(
       <ToastProvider>
@@ -110,7 +113,7 @@ function fixture() {
           plugins={manager}
           navigation={navigation}
           relay={relay}
-          installRequests={createPluginInstallRequests()}
+          installRequests={installRequests}
         >
           <MenuRoot>
             <MenuTrigger>Profile</MenuTrigger>
@@ -132,6 +135,7 @@ function fixture() {
     installImport,
     navigation,
     manager,
+    installRequests,
     state: () => snapshot,
     emit(next: Partial<ReturnType<PluginManager["snapshot"]>>) {
       snapshot = { ...snapshot, ...next };
@@ -595,4 +599,105 @@ it("requires review when a fresh update removes a process artifact constraint", 
   );
   fireEvent.click(confirm);
   await waitFor(() => expect(f.installImport).toHaveBeenCalledOnce());
+});
+
+it("installs an update without more access when automatic updates are on", async () => {
+  setPluginAutoUpdatePreference(true);
+  const f = fixture();
+  f.installImport.mockImplementationOnce(async () => {
+    const ready = f.state().configuration;
+    if (ready.status === "ready")
+      f.emit({
+        configuration: {
+          ...ready,
+          catalog: {
+            ...ready.catalog,
+            plugins: [{ ...f.plugin, revision: "new" }],
+          },
+        },
+      });
+    return true;
+  });
+  f.mount();
+  await waitFor(() =>
+    expect(f.installImport).toHaveBeenCalledExactlyOnceWith(
+      "immutable-preview",
+      ".",
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Updating Notes" })).toBeNull(),
+  );
+  expect(
+    screen.queryByRole("button", { name: "Update and reload" }),
+  ).toBeNull();
+  expect(f.imports.git).toHaveBeenCalledOnce();
+});
+
+it.each(["discovered", "publisher"] as const)(
+  "still asks for review when %s data needs it with automatic updates on",
+  async (kind) => {
+    setPluginAutoUpdatePreference(true);
+    const f = fixture();
+    if (kind === "discovered")
+      f.candidate.manifest = { ...f.plugin.manifest, host: { files: true } };
+    else f.candidate.publisher = "b".repeat(64);
+    f.mount();
+    expect(
+      await screen.findByRole("button", { name: "Review permissions" }),
+    ).toBeVisible();
+    expect(f.imports.git).not.toHaveBeenCalled();
+    expect(f.installImport).not.toHaveBeenCalled();
+  },
+);
+
+it("tries an automatic update once per revision", async () => {
+  setPluginAutoUpdatePreference(true);
+  const f = fixture();
+  f.installImport.mockResolvedValue(false);
+  f.mount();
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Plugin installation wasn’t confirmed",
+  );
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  expect(
+    await screen.findByRole("button", { name: "Update and reload" }),
+  ).toBeVisible();
+  // The notice shows only once nothing is starting; give a retry its chance.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(f.imports.git).toHaveBeenCalledOnce();
+  expect(f.installImport).toHaveBeenCalledOnce();
+});
+
+it("waits for an open plugin review before an automatic update", async () => {
+  setPluginAutoUpdatePreference(true);
+  const f = fixture();
+  const release = f.installRequests.holdReview();
+  f.mount();
+  // The notice stays available while the review holds the import preview.
+  expect(
+    await screen.findByRole("button", { name: "Update and reload" }),
+  ).toBeVisible();
+  expect(f.imports.git).not.toHaveBeenCalled();
+  act(release);
+  await waitFor(() =>
+    expect(f.installImport).toHaveBeenCalledExactlyOnceWith(
+      "immutable-preview",
+      ".",
+    ),
+  );
+});
+
+it("leaves an update the user put off for Later until it is chosen", async () => {
+  const f = fixture();
+  f.mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Later" }));
+  act(() => setPluginAutoUpdatePreference(true));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(f.imports.git).not.toHaveBeenCalled();
+  expect(f.installImport).not.toHaveBeenCalled();
 });
