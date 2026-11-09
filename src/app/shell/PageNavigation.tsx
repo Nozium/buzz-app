@@ -1,3 +1,4 @@
+import { DockArtwork } from "./DockMagnification";
 import { ACTIVITY_PAGE } from "./activity-context";
 import { ActivityNavigationIcon } from "./ActivityNavigation";
 import {
@@ -73,25 +74,34 @@ export function PageNavigation({
           return {
             value: page.key,
             label,
-            icon: avatar ? (
-              <Avatar
-                src={avatar.src}
-                alt=""
-                fallback={label}
-                shape={avatar.shape}
-                size="small"
-              />
-            ) : page.key === ACTIVITY_PAGE ? (
-              <ActivityNavigationIcon>
-                <PageIcon
-                  icon={icon}
-                  image={image}
-                  size={20}
-                  strokeWidth={2.5}
-                />
-              </ActivityNavigationIcon>
-            ) : (
-              <PageIcon icon={icon} image={image} size={20} strokeWidth={2.5} />
+            icon: (
+              <DockArtwork>
+                {avatar ? (
+                  <Avatar
+                    src={avatar.src}
+                    alt=""
+                    fallback={label}
+                    shape={avatar.shape}
+                    size="small"
+                  />
+                ) : page.key === ACTIVITY_PAGE ? (
+                  <ActivityNavigationIcon>
+                    <PageIcon
+                      icon={icon}
+                      image={image}
+                      size={20}
+                      strokeWidth={2.5}
+                    />
+                  </ActivityNavigationIcon>
+                ) : (
+                  <PageIcon
+                    icon={icon}
+                    image={image}
+                    size={20}
+                    strokeWidth={2.5}
+                  />
+                )}
+              </DockArtwork>
             ),
             panelId: `shell-page-${page.key}`,
             renderTab: Preview

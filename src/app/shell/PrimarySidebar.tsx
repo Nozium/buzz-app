@@ -35,7 +35,6 @@ import type {
 import styles from "./PrimarySidebar.module.css";
 import {
   ActivityFilters,
-  ActivityScopeTabs,
   ActivitySidebar,
   activityViewFor,
   useActivityView,
@@ -223,7 +222,7 @@ function ScopedSidebar({
         .some((entry) => entry.sidebar === "activity"),
   );
   const [activityView, setActivityView] = useActivityView(scope);
-  // Opening a conversation from elsewhere shows the scope it belongs to.
+  // Opening a conversation from elsewhere reveals it in the combined list.
   const [activityLocation, setActivityLocation] = useState(location);
   if (location !== activityLocation) {
     setActivityLocation(location);
@@ -242,7 +241,13 @@ function ScopedSidebar({
   const setFilter = (filter: Filter) => setView({ filter, location });
   // Without the tabs there is no tab to label the panel.
   const panelId = restriction ? undefined : `sidebar-${filter}`;
-  const header = (
+  const header = showActivity ? (
+    <ActivityFilters
+      view={activityView}
+      onChange={setActivityView}
+      creationAction={props.creationAction}
+    />
+  ) : (
     <>
       <div className={styles.sidebarControls}>
         <div className={styles.sidebarScope}>
@@ -251,8 +256,6 @@ function ScopedSidebar({
               entry={restriction}
               registry={props.sidebarScope}
             />
-          ) : showActivity ? (
-            <ActivityScopeTabs view={activityView} onChange={setActivityView} />
           ) : (
             <Tabs
               label="Navigation scope"
@@ -274,9 +277,6 @@ function ScopedSidebar({
         </div>
         {props.creationAction}
       </div>
-      {showActivity && (
-        <ActivityFilters view={activityView} onChange={setActivityView} />
-      )}
       {/* PROTOTYPE: the Activity sidebar leaves out Drafts & sent. */}
       {props.children && !restriction && !showActivity && (
         <div className={styles.destinations}>{props.children}</div>

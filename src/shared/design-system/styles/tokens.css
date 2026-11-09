@@ -1169,6 +1169,9 @@
   --chart-series-4: var(--purple-9);
   --text-categorical-purple: var(--purple-12);
   --surface-categorical-purple: var(--purple-3);
+  --surface-categorical-blue: var(--blue-3);
+  --surface-categorical-green: var(--green-3);
+  --surface-categorical-orange: var(--orange-3);
   --icon-categorical-purple: var(--purple-11);
   --icon-categorical-purple-own: var(--icon-categorical-purple);
   --text-link: var(--text-standard);
@@ -1318,6 +1321,9 @@
   --chart-series-4: var(--purple-10);
   --text-categorical-purple: var(--purple-12);
   --surface-categorical-purple: var(--purple-3);
+  --surface-categorical-blue: var(--blue-3);
+  --surface-categorical-green: var(--green-3);
+  --surface-categorical-orange: var(--orange-3);
   --icon-categorical-purple: var(--purple-11);
   --icon-categorical-purple-own: var(--icon-categorical-purple);
   --text-link: var(--text-standard);
@@ -2094,6 +2100,9 @@
   --text-color-success: var(--text-success);
   --text-color-categorical-purple: var(--text-categorical-purple);
   --color-surface-categorical-purple: var(--surface-categorical-purple);
+  --color-surface-categorical-blue: var(--surface-categorical-blue);
+  --color-surface-categorical-green: var(--surface-categorical-green);
+  --color-surface-categorical-orange: var(--surface-categorical-orange);
   --text-color-accent: var(--text-accent);
   --border-color-standard: var(--border-standard);
   --border-color-message-thread: var(--border-message-thread);

@@ -333,6 +333,17 @@ function AvatarStackSpecimen() {
           max={5}
         />
       </Button>
+      {[1, 2, 3].map((count) => (
+        <span
+          key={count}
+          className="size-9"
+          role="img"
+          aria-label={`${count} conversation members`}
+        >
+          <AvatarStack items={items.slice(0, count)} size="cluster" />
+        </span>
+      ))}
+      <AvatarStack items={items} size="large" />
       <AvatarStack items={items} size="hero-large" max={5} animateEntrance />
     </div>
   );
@@ -341,6 +352,25 @@ function AvatarStackSpecimen() {
 function AvatarSpecimen() {
   return (
     <div className="component-specimen-stack">
+      <div className="component-specimen-row">
+        {(
+          [
+            "categorical-purple",
+            "categorical-blue",
+            "categorical-green",
+            "categorical-orange",
+          ] as const
+        ).map((surface) => (
+          <Specimen key={surface} prop={`fallbackSurface="${surface}"`}>
+            <Avatar
+              alt="Channel"
+              fallback="Channel"
+              shape="squircle"
+              fallbackSurface={surface}
+            />
+          </Specimen>
+        ))}
+      </div>
       <SpecimenGroup
         label="Identity shape: circles for humans, squircles for agents"
         code={`<div className="flex flex-wrap items-center gap-4">
@@ -827,6 +857,13 @@ function TabsSpecimen() {
   return (
     <div className="component-specimen-stack">
       <Tabs
+        label="Button filters"
+        variant="buttons"
+        value={panelDestination}
+        onValueChange={setPanelDestination}
+        items={iconItems}
+      />
+      <Tabs
         label="Segmented filters"
         variant="segmented"
         value={panelDestination}
@@ -1099,6 +1136,12 @@ function PanelHeaderSpecimen() {
           icon={<ChatCircleIcon size={16} aria-hidden="true" />}
           actions={actions}
         />
+      </SpecimenGroup>
+      <SpecimenGroup
+        label="Divider hidden, toolbar height preserved"
+        code={"<PanelHeader title={null} actions={actions} divider={false} />"}
+      >
+        <PanelHeader title={null} actions={actions} divider={false} />
       </SpecimenGroup>
       <SpecimenGroup
         label="Detail — back navigation before the title"

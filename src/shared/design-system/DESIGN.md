@@ -601,6 +601,12 @@ states, rather than painting over the adjacent surface. Hover uses the same
 contextual row highlight as NavigationItem, not the brighter floating-button
 step. Shared pressed and keyboard behavior remains unchanged.
 
+Proposed for the Activity sidebar: `AvatarStack size="cluster"` fills a square
+conversation slot with one, two, or three member avatars; callers exclude the
+viewer and cap the roster before passing it. Avatar categorical fallback surfaces
+use purple, blue, green, or orange identity fills with `text-standard`. A channel's
+first letter selects a stable hue; it does not communicate state or priority.
+
 ## Public identity text
 
 Public-key recognition labels use the shared pure formatter in
@@ -1229,15 +1235,17 @@ components, not a screenshot's measured offsets.
   Additional channel/workspace tabs retain `Tabs variant="navigation"`; the lone
   conversation uses its membership identity. Do not invent tab semantics for a
   static page just to reproduce its appearance.
-- **Conversation membership identity (proposed):** channels and DMs combine the
-  compact member avatar stack before the name in one left-aligned
-  `SurfaceButton`. It uses 24px avatars and sidebar-row body-sm labels, while
-  trailing actions retain the standard panel-header alignment. Solo chats
-  preview their participating agents.
-  It shares the header bottom hairline; message history fades at its top and bottom edges. It opens the existing
-  membership manager. `PanelWorkspace` uses this identity
-  instead of a lone permanent tab; when extra tabs exist, it retains their strip
-  beside the identity. Other header actions stay at the trailing edge.
+- **Conversation membership identity (proposed):** channels, DMs and Solo chats
+  show the other members above the name in a centered `SurfaceButton` above
+  the message scrollport. Human previews exclude the viewer; Solo previews retain
+  participating agents. Member avatars use the shared 48px large stack, twice
+  the small preview. The control opens the existing membership manager.
+  The toolbar keeps its height and trailing actions: `PanelHeader divider={false}`
+  makes its existing separator transparent. `PanelWorkspace identityPlacement="content"`
+  presents the identity only above its permanent conversation; additional tabs
+  retain their shared header strip. With a lone conversation and enough pane width,
+  the centered lockup starts at the toolbar's original top inset instead of
+  reserving a second toolbar row. Narrow panes keep it below the controls.
 - **Trailing actions:** use `IconButton size="sm" variant="ghost"` with 1rem
   artwork, an action-specific `aria-label`, and a matching `title` hint. Ordinary
   trailing actions use metadata ink; disabled, pressed, and expanded controls
@@ -1509,6 +1517,15 @@ not add feature-specific top offsets. Surfaces docked at the bottom of the
 window (the composer, the preview's Join notice) call `useToastClearance` with
 their element, and the stack rises above them so a notice never covers Send.
 F6 enters notifications, Tab reaches actions. Modals remain above the stack. Content updates do not restart expiry; timeout changes do.
+
+Proposed for Activity view filters: `Tabs variant="buttons"` composes the shared
+small Button with inline icons and labels. Selection uses the prominent variant;
+other filters use subtle. The strip scrolls horizontally with focus-ring insets,
+overflow-edge fades and a hidden scrollbar. Its host can set
+`--tabs-button-gutter` to extend the scrollport to pane edges while retaining
+content insets. Optional leading and trailing actions remain ordinary buttons
+outside the tablist but inside the same scroller. Activity places New first
+and its all/unread filter last.
 
 Tabs with content use renderPanel, which lets Base UI connect each tab and panel.
 Route navigation uses NavigationItem with aria-current instead, except for the
@@ -2118,8 +2135,12 @@ The dock uses independent 40px icon tiles with 12px corners, a transparent resti
 state, and an inactive hover fill. The active tile uses the theme-accent
 `surface-sidebar-selected` / `text-sidebar-selected` pair and retains its
 accessible selected state.
-Dock artwork stays still on hover and press. Bestie uses its configured avatar
-from the shared page presentation, at the standard avatar size.
+Proposed in the shell dock: pointer proximity magnifies artwork up to 1.45×
+within a 96px vertical radius, with a non-bouncing 0.4s spring. The dock and app
+tile hit targets keep their layout size. Keyboard, coarse-pointer and reduced-motion
+use stay still. Community, profile and Settings controls share the same Panel
+container at its bottom; the app list scrolls independently. Bestie uses its
+configured avatar from the shared page presentation, at the standard avatar size.
 Dock labels remain accessible and use the dock label hover bucket to the right of each vertical dock
 button (beneath horizontal docks); badges overlay the tile. A tile with a page
 preview shows its label on keyboard focus and while its preview is closed.

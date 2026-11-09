@@ -2344,6 +2344,8 @@ function ChannelWorkspace({
                 <div className={styles.mainWorkspace}>
                   <PanelWorkspace
                     main
+                    identityPlacement="content"
+                    headerDivider={false}
                     tabMenu={tabMenu}
                     drag={secondary.drag.main}
                     label="Channel tabs"

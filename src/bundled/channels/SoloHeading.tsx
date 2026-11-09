@@ -73,18 +73,20 @@ export function SoloHeading(props: SoloToolbarProps) {
   ) : (
     <div className={identityStyles.soloHeader}>
       <PanelHeader
-        title={
-          <ChannelMembersButton
-            session={props.session}
-            channelId={props.channel.id}
-            conversationName={props.channel.name}
-            owner={owner}
-            navigator={props.navigator}
-            signal={props.signal}
-          />
-        }
+        divider={false}
+        title={null}
         actions={<SoloToolbar {...props} membershipInHeader />}
       />
+      <div className={identityStyles.centeredIdentity}>
+        <ChannelMembersButton
+          session={props.session}
+          channelId={props.channel.id}
+          conversationName={props.channel.name}
+          owner={owner}
+          navigator={props.navigator}
+          signal={props.signal}
+        />
+      </div>
     </div>
   );
 }

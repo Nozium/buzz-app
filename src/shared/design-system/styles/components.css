@@ -837,6 +837,22 @@
     color: var(--text-standard);
   }
 
+  .buzz-avatar[data-fallback-surface^="categorical-"] {
+    color: var(--text-standard);
+  }
+  .buzz-avatar[data-fallback-surface="categorical-purple"] {
+    background: var(--surface-categorical-purple);
+  }
+  .buzz-avatar[data-fallback-surface="categorical-blue"] {
+    background: var(--surface-categorical-blue);
+  }
+  .buzz-avatar[data-fallback-surface="categorical-green"] {
+    background: var(--surface-categorical-green);
+  }
+  .buzz-avatar[data-fallback-surface="categorical-orange"] {
+    background: var(--surface-categorical-orange);
+  }
+
   /* Matches reply-stack artwork inside its 24px slot and 1.5px ring. */
   .buzz-avatar[data-size="compact"] {
     @apply text-caption;
@@ -1084,21 +1100,37 @@
   }
 
   /* A scrolling strip fades out on each edge that has tabs past them, so a cut
-     tab reads as "more this way" rather than as clipped. Only the panel and
-     navigation lists scroll; the others never hide a tab to fade. */
-  .buzz-tabs-list {
+     tab reads as "more this way" rather than as clipped. Panel, navigation and button
+     lists share this overflow cue. */
+  .buzz-tabs-list,
+  .buzz-tabs-scroll-strip {
     --tabs-fade: var(--space-8);
   }
-  .buzz-tabs:is([data-variant="panel"], [data-variant="navigation"])
-    .buzz-tabs-list[data-overflow-start] {
+  .buzz-tabs:is(
+      [data-variant="panel"],
+      [data-variant="navigation"],
+      [data-variant="buttons"]
+    )
+    :is(.buzz-tabs-list, .buzz-tabs-scroll-strip)[data-overflow-start] {
     mask-image: linear-gradient(to right, transparent, #000 var(--tabs-fade));
   }
-  .buzz-tabs:is([data-variant="panel"], [data-variant="navigation"])
-    .buzz-tabs-list[data-overflow-end] {
+  .buzz-tabs:is(
+      [data-variant="panel"],
+      [data-variant="navigation"],
+      [data-variant="buttons"]
+    )
+    :is(.buzz-tabs-list, .buzz-tabs-scroll-strip)[data-overflow-end] {
     mask-image: linear-gradient(to left, transparent, #000 var(--tabs-fade));
   }
-  .buzz-tabs:is([data-variant="panel"], [data-variant="navigation"])
-    .buzz-tabs-list[data-overflow-start][data-overflow-end] {
+  .buzz-tabs:is(
+      [data-variant="panel"],
+      [data-variant="navigation"],
+      [data-variant="buttons"]
+    )
+    :is(
+      .buzz-tabs-list,
+      .buzz-tabs-scroll-strip
+    )[data-overflow-start][data-overflow-end] {
     mask-image: linear-gradient(
       to right,
       transparent,
@@ -1108,13 +1140,25 @@
     );
   }
   [dir="rtl"]
-    .buzz-tabs:is([data-variant="panel"], [data-variant="navigation"])
-    .buzz-tabs-list[data-overflow-start]:not([data-overflow-end]) {
+    .buzz-tabs:is(
+      [data-variant="panel"],
+      [data-variant="navigation"],
+      [data-variant="buttons"]
+    )
+    :is(.buzz-tabs-list, .buzz-tabs-scroll-strip)[data-overflow-start]:not(
+      [data-overflow-end]
+    ) {
     mask-image: linear-gradient(to left, transparent, #000 var(--tabs-fade));
   }
   [dir="rtl"]
-    .buzz-tabs:is([data-variant="panel"], [data-variant="navigation"])
-    .buzz-tabs-list[data-overflow-end]:not([data-overflow-start]) {
+    .buzz-tabs:is(
+      [data-variant="panel"],
+      [data-variant="navigation"],
+      [data-variant="buttons"]
+    )
+    :is(.buzz-tabs-list, .buzz-tabs-scroll-strip)[data-overflow-end]:not(
+      [data-overflow-start]
+    ) {
     mask-image: linear-gradient(to right, transparent, #000 var(--tabs-fade));
   }
 
@@ -1316,6 +1360,29 @@
     transition: none;
   }
 
+  /* --- buttons: small shared controls in a scrolling strip ----- */
+  .buzz-tabs[data-variant="buttons"] .buzz-tabs-scroll-strip {
+    display: flex;
+    gap: var(--space-2);
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: var(--space-1) var(--tabs-button-gutter, var(--space-1));
+    margin-block: calc(-1 * var(--space-1));
+    scroll-padding-inline: var(--tabs-button-gutter, var(--space-1));
+  }
+  .buzz-tabs[data-variant="buttons"]
+    .buzz-tabs-scroll-strip::-webkit-scrollbar {
+    display: none;
+  }
+  .buzz-tabs-scroll-strip > *,
+  .buzz-tabs[data-variant="buttons"] .buzz-tabs-item {
+    flex: none;
+  }
+  .buzz-tabs[data-variant="buttons"] .buzz-tabs-list {
+    gap: var(--space-2);
+  }
+
   /* --- panel: an underline on a plain surface ---------------- */
 
   /* No container fill and no border: on a panel the tabs are text, and the only
@@ -1400,6 +1467,11 @@
     gap: var(--space-2);
     padding-block: 0;
     padding-inline: var(--space-1);
+  }
+
+  /* Keep toolbar geometry while the conversation identity lives in content. */
+  .panel-header[data-divider="hidden"] {
+    border-block-end-color: transparent;
   }
 
   /* Borderless floating cards retain their established optical alignment. */

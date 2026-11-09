@@ -1,9 +1,11 @@
 .identity {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
-  max-width: 100%;
+  text-align: center;
+  max-width: min(100%, 18rem);
   min-width: 0;
-  gap: var(--space-2);
+  gap: var(--space-1);
   padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-row);
@@ -21,10 +23,11 @@
 .label {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-1);
   max-width: 100%;
   min-width: 0;
-  min-height: var(--size-control-sm);
+  min-height: 0;
   color: var(--text-standard);
 }
 .name {
@@ -41,4 +44,23 @@
 
 .soloHeader {
   flex: none;
+  container: conversation-identity / inline-size;
+}
+
+.centeredIdentity {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  padding-block: var(--space-1);
+  pointer-events: none;
+}
+.centeredIdentity > * {
+  pointer-events: auto;
+}
+@container conversation-identity (min-width: 40rem) {
+  .centeredIdentity {
+    margin-block-start: calc(var(--space-1) - var(--size-panel-header));
+    padding-block-start: 0;
+  }
 }

@@ -1,16 +1,14 @@
 /**
  * PROTOTYPE: Activity as the primary navigation. The sidebar lists
- * conversations, newest first, with their latest event as the preview, under
- * two scopes grouped by who is in the conversation: Solo (you and agents) and
- * Team (you and people). Each scope has its own views, so the header keeps one
- * shape: Solo is All / Working / Waiting; Team is Channels / Threads / Direct,
- * Direct being DMs and mentions of you, everything addressed to you.
+ * conversations, newest first, with chats, DMs and channels in one list.
+ * All combines conversations; Threads lists channel threads; Direct combines
+ * chats, DMs and mentions. The unread filter applies across every view.
  * Rows open in the Messages page, so a thread opens beside its channel with
  * its root revealed there: list | channel | thread.
  */
 import {
+  type ReactNode,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,14 +29,18 @@ import { messagePreview } from "../../features/notifications/content";
 import { avatarMedia } from "../../shared/avatar-source";
 import { formatPublicKey } from "../../shared/identity/public-key";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
 import { ConversationRow } from "../../features/messages/ConversationRow";
 import {
   Filter2Icon,
   LockIcon,
   MessageReplyIcon,
+  UsersIcon,
+  ChatCircleIcon,
+  CircleNotchIcon,
+  ClockIcon,
 } from "../../shared/design-system/icons/index";
 import { Tabs } from "../../shared/design-system/ui/Tabs";
-import { Switch } from "../../shared/design-system/ui/Switch";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   MenuPopup,
@@ -53,50 +55,56 @@ import { useLatestMessages, type LatestMessage } from "./activity-previews";
 import { useIdentityNames } from "../../features/identity-names/react";
 import { dmLabel } from "../../bundled/inbox/dm-label";
 
-export type ActivityScope = "solo" | "team";
-type SoloView = "all" | "working" | "waiting";
-type TeamView = "channels" | "threads" | "direct";
 export type ActivityView = {
-  scope: ActivityScope;
-  solo: SoloView;
-  team: TeamView;
+  filter: "all" | "threads" | "direct" | "working" | "waiting";
   unread: boolean;
 };
 type View = ActivityView;
 
-const scopes = [
-  { value: "solo", label: "Solo" },
-  { value: "team", label: "Team" },
+const views = [
+  {
+    value: "all",
+    label: "All",
+    icon: <ChatCircleIcon size={20} aria-hidden="true" />,
+  },
+  {
+    value: "threads",
+    label: "Threads",
+    icon: <MessageReplyIcon size={20} aria-hidden="true" />,
+  },
+  {
+    value: "direct",
+    label: "Direct",
+    icon: <UsersIcon size={20} aria-hidden="true" />,
+  },
+  {
+    value: "working",
+    label: "Working",
+    icon: <CircleNotchIcon size={20} aria-hidden="true" />,
+  },
+  {
+    value: "waiting",
+    label: "Waiting",
+    icon: <ClockIcon size={20} aria-hidden="true" />,
+  },
 ] as const;
-const soloViews = [
-  { value: "all", label: "All" },
-  { value: "working", label: "Working" },
-  { value: "waiting", label: "Waiting" },
-] as const;
-const teamViews = [
-  { value: "channels", label: "Channels" },
-  { value: "threads", label: "Threads" },
-  { value: "direct", label: "Direct" },
-] as const;
-const viewKey = "activity-sidebar:view:v4";
+const viewKey = "activity-sidebar:view:v5";
 
 function readSavedView(scope: string): View {
   const saved = readView<Partial<View> | null>(scope, viewKey, null);
   return {
-    scope: saved?.scope === "team" ? "team" : "solo",
-    solo:
-      saved?.solo === "working" || saved?.solo === "waiting"
-        ? saved.solo
+    filter:
+      saved?.filter === "threads" ||
+      saved?.filter === "direct" ||
+      saved?.filter === "working" ||
+      saved?.filter === "waiting"
+        ? saved.filter
         : "all",
-    team:
-      saved?.team === "threads" || saved?.team === "direct"
-        ? saved.team
-        : "channels",
     unread: saved?.unread === true,
   };
 }
 
-/** What kind of conversation a channel is: a DM lists under Team's Direct. */
+/** Conversation kind determines artwork and the recency evidence to use. */
 type Kind = "solo" | "team" | "dm";
 const kindOf = (channel: ChannelSummary): Kind | undefined =>
   channel.channelType === "solo"
@@ -112,9 +120,38 @@ const kindOf = (channel: ChannelSummary): Kind | undefined =>
 const listed = (channel: ChannelSummary) =>
   !channel.archived && !channel.huddle && !channel.metadataPending;
 
-/** The view that lists a destination, so opening one from elsewhere shows it;
- * undefined when the current view already can. A Team channel keeps the Team
- * view, since Direct lists its mentions. */
+/** Conversation identity follows the roster, never the most recent sender. */
+const conversationPeople = (
+  channel: ChannelSummary,
+  viewer: string | undefined,
+) =>
+  [
+    ...new Set(
+      channel.channelType === "dm"
+        ? (channel.participants ?? channel.members ?? [])
+        : (channel.members ?? []),
+    ),
+  ]
+    .filter((id) => id !== viewer)
+    .slice(0, 3);
+
+const channelSurfaces = [
+  "categorical-purple",
+  "categorical-blue",
+  "categorical-green",
+  "categorical-orange",
+] as const;
+function channelSurface(name: string) {
+  const initial =
+    Array.from(name.trim().replace(/^#+/, "").trim())[0]?.toUpperCase() ?? "";
+  return (
+    channelSurfaces[(initial.codePointAt(0) ?? 0) % channelSurfaces.length] ??
+    "categorical-purple"
+  );
+}
+
+/** Reveal a destination excluded by the current filter without changing views
+ * for destinations already listed (including a channel's thread). */
 export function activityViewFor(
   channels: readonly ChannelSummary[] | undefined,
   id: string,
@@ -122,15 +159,16 @@ export function activityViewFor(
 ): View | undefined {
   const channel = channels?.find((entry) => entry.id === id);
   const kind = channel ? kindOf(channel) : undefined;
-  if (kind === "solo")
-    return view.scope === "solo" ? undefined : { ...view, scope: "solo" };
-  if (kind === "dm")
-    return view.scope === "team" && view.team === "direct"
-      ? undefined
-      : { ...view, scope: "team", team: "direct" };
-  if (kind === "team")
-    return view.scope === "team" ? undefined : { ...view, scope: "team" };
-  return undefined;
+  if (
+    !kind ||
+    view.filter === "all" ||
+    (view.filter === "direct" && kind !== "team") ||
+    (view.filter === "threads" && kind === "team") ||
+    ((view.filter === "working" || view.filter === "waiting") &&
+      kind === "solo")
+  )
+    return undefined;
+  return { ...view, filter: "all" };
 }
 
 export function useActivityView(scope: string) {
@@ -141,115 +179,71 @@ export function useActivityView(scope: string) {
   return [view, setView] as const;
 }
 
-/** The scope, in the sidebar's segmented control. */
-export function ActivityScopeTabs({
+/** The unread filter above the recency list. */
+function ActivityUnreadFilter({
   view,
   onChange,
 }: {
   view: View;
   onChange(view: View): void;
 }) {
+  const showLabel = view.unread ? "Showing unread" : "Showing all";
   return (
-    <Tabs
-      label="Activity scope"
-      variant="segmented"
-      size="sm"
-      value={view.scope}
-      items={scopes}
-      onValueChange={(scope) => onChange({ ...view, scope })}
-    />
+    <MenuRoot>
+      <MenuTrigger
+        render={
+          <IconButton
+            size="sm"
+            variant="inset"
+            shape="round"
+            aria-label={showLabel}
+            title={showLabel}
+            icon={<Filter2Icon aria-hidden="true" size={16} />}
+          />
+        }
+      />
+      <MenuPopup aria-label="Show">
+        <MenuRadioGroup
+          value={view.unread ? "unread" : "all"}
+          onValueChange={(value) =>
+            onChange({ ...view, unread: value === "unread" })
+          }
+        >
+          <MenuRadioItem value="all" closeOnClick>
+            All conversations
+          </MenuRadioItem>
+          <MenuRadioItem value="unread" closeOnClick>
+            Unread only
+          </MenuRadioItem>
+        </MenuRadioGroup>
+      </MenuPopup>
+    </MenuRoot>
   );
 }
 
-/** Below this width the views and a labelled Unread switch no longer fit on
- * one row, so Unread folds into a filter menu. */
-const unreadSwitchMinWidth = 300;
-
-/** True while the element is at least `min` pixels wide. Without a
- * ResizeObserver (tests) it stays wide. */
-function useWiderThan(min: number) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [wide, setWide] = useState(true);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element || typeof ResizeObserver === "undefined") return;
-    const measure = () => setWide(element.clientWidth >= min);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [min]);
-  return [ref, wide] as const;
-}
-
-/** Under the scope, one row in every scope, as Inbox's filter bar: the views
- * as underline tabs, then Unread at the right end. The scope above is the one
- * filled control, so the two levels never read as two equal trays. */
+/** Small-button views of one combined conversation inventory. */
 export function ActivityFilters({
   view,
   onChange,
+  creationAction,
 }: {
   view: View;
   onChange(view: View): void;
+  creationAction?: ReactNode;
 }) {
-  const [ref, wide] = useWiderThan(unreadSwitchMinWidth);
-  const setUnread = (unread: boolean) => onChange({ ...view, unread });
-  const showLabel = view.unread ? "Showing unread" : "Showing all";
   return (
-    <div className={styles.filters} ref={ref}>
-      <div className={`text-body-sm ${styles.views}`}>
-        {view.scope === "team" ? (
-          <Tabs
-            label="Team view"
-            variant="panel"
-            value={view.team}
-            items={teamViews}
-            onValueChange={(team) => onChange({ ...view, team })}
-          />
-        ) : (
-          <Tabs
-            label="Solo view"
-            variant="panel"
-            value={view.solo}
-            items={soloViews}
-            onValueChange={(solo) => onChange({ ...view, solo })}
-          />
-        )}
-      </div>
-      {wide ? (
-        <Switch
-          label="Unread"
-          checked={view.unread}
-          onCheckedChange={setUnread}
-        />
-      ) : (
-        <MenuRoot>
-          <MenuTrigger
-            render={
-              <IconButton
-                size="sm"
-                variant={view.unread ? "subtle" : "ghost"}
-                aria-label={showLabel}
-                title={showLabel}
-                icon={<Filter2Icon aria-hidden="true" size={16} />}
-              />
-            }
-          />
-          <MenuPopup aria-label="Show">
-            <MenuRadioGroup
-              value={view.unread ? "unread" : "all"}
-              onValueChange={(value) => setUnread(value === "unread")}
-            >
-              <MenuRadioItem value="all" closeOnClick>
-                All conversations
-              </MenuRadioItem>
-              <MenuRadioItem value="unread" closeOnClick>
-                Unread only
-              </MenuRadioItem>
-            </MenuRadioGroup>
-          </MenuPopup>
-        </MenuRoot>
-      )}
+    <div className={styles.filters}>
+      <Tabs
+        label="Conversation view"
+        variant="buttons"
+        leadingAction={creationAction}
+        trailingAction={
+          <ActivityUnreadFilter view={view} onChange={onChange} />
+        }
+        value={view.filter}
+        items={views}
+        onValueChange={(filter) => onChange({ ...view, filter })}
+      />
     </div>
   );
 }
@@ -306,13 +300,17 @@ export function ActivitySidebar({
     });
 
   const unreadOnly = view.unread;
-  const filter = view.scope === "team" ? view.team : view.solo;
+  const filter = view.filter;
   const flat = filter === "threads";
   const direct = filter === "direct";
-  const kind: Kind = view.scope === "solo" ? "solo" : direct ? "dm" : "team";
   const working = useWorkingChannels(session);
+  const agentView = filter === "working" || filter === "waiting";
   const scoped = list.channels.filter(
-    (channel) => listed(channel) && kindOf(channel) === kind,
+    (channel) =>
+      listed(channel) &&
+      kindOf(channel) !== undefined &&
+      (!direct || kindOf(channel) !== "team") &&
+      (!agentView || channel.channelType === "solo"),
   );
   const fetched = useLatestMessages(
     session,
@@ -339,8 +337,8 @@ export function ActivitySidebar({
         ? live
         : read;
   };
-  // Solo's Working: an agent is on it. Waiting: no agent is, and the agent
-  // spoke last, so it is your move: it finished, or it is asking you.
+  // Working: an agent is on it. Waiting: no agent is, and the other side
+  // spoke last, so it is your move. These retain the former Solo view rules.
   const channels =
     filter === "working"
       ? scoped.filter((channel) => working.has(channel.id))
@@ -352,12 +350,12 @@ export function ActivitySidebar({
             );
           })
         : scoped;
-  // Team ranks by what is relevant to you: top-level messages, threads you
+  // Channels rank by what is relevant to you: top-level messages, threads you
   // are in, and your Activity (mentions, replies). Other people's thread
   // chatter does not move a channel. Solo chats and DMs rank by any message.
   const recency = (channel: ChannelSummary) => {
     const latest = latestOf(channel)?.createdAt ?? 0;
-    if (kind !== "team")
+    if (kindOf(channel) !== "team")
       return Math.max(
         latest,
         channel.lastActivityAt ?? 0,
@@ -390,7 +388,7 @@ export function ActivitySidebar({
         ? mentionEvents(inbox.items, teamIds)
         : []
   ).filter((event) => !unreadOnly || event.unread);
-  // Direct interleaves DMs and mentions by time; other lists hold one kind.
+  // Direct interleaves chats, DMs and mentions; All lists conversations.
   const eventsByKey = new Map(shownEvents.map((event) => [event.key, event]));
   const entries = flat
     ? []
@@ -412,13 +410,15 @@ export function ActivitySidebar({
     ...channels.flatMap((channel) => [
       // A DM's title names its people.
       ...(channel.channelType === "dm"
-        ? (channel.participants?.slice(0, 8) ?? [])
+        ? (channel.participants
+            ?.filter((key) => key !== session.viewer)
+            .slice(0, 8) ?? [])
         : []),
-      ...(channel.channelType === "solo"
-        ? (channel.members ?? []).filter((key) => key !== session.viewer)
+      ...(channel.channelType === "solo" || channel.channelType === "dm"
+        ? conversationPeople(channel, session.viewer)
         : []),
       latestOf(channel)?.authorId ?? "",
-      ...(kind === "team"
+      ...(kindOf(channel) === "team"
         ? [newestThread(session, channel)?.authorId ?? ""]
         : []),
     ]),
@@ -498,7 +498,7 @@ export function ActivitySidebar({
                   channel={entry.channel}
                   at={entry.at}
                   latest={latestOf(entry.channel)}
-                  team={kind === "team"}
+                  team={kindOf(entry.channel) === "team"}
                   working={working.has(id)}
                   profiles={profiles}
                   nameOf={nameOf}
@@ -517,7 +517,7 @@ export function ActivitySidebar({
             {filter === "threads"
               ? "No thread activity yet."
               : filter === "direct"
-                ? "No DMs or mentions yet."
+                ? "No chats, DMs or mentions yet."
                 : filter === "working"
                   ? "No agent is working right now."
                   : filter === "waiting"
@@ -728,16 +728,11 @@ function ChannelRow({
   const unread = state.unread || threadUnread;
   if (unreadOnly && !unread && !selected) return null;
   const Icon = channelIcon(channel);
-  const peer = dm ? channel.participants?.[0] : undefined;
-  const others = (channel.members ?? []).filter(
-    (key) => key !== session.viewer,
-  );
   const solo = channel.channelType === "solo";
+  const people = dm || solo ? conversationPeople(channel, session.viewer) : [];
   // The latest event: a thread reply you're in, when it is newer.
   const thread = team ? newestThread(session, channel) : undefined;
   const replyIsNewest = !!thread && thread.createdAt > (latest?.createdAt ?? 0);
-  const latestAuthor = replyIsNewest ? thread.authorId : latest?.authorId;
-  // No sender: the avatar says who, yours included.
   const preview = replyIsNewest
     ? messagePreview(thread.preview)
     : latest
@@ -745,17 +740,6 @@ function ChannelRow({
       : channel.preview
         ? messagePreview(channel.preview)
         : "";
-  // Who the row shows, on every surface: whoever posted last, you included.
-  // Before any message is known: a DM's person, a Solo chat's agent, or in
-  // Team the channel's icon.
-  const face =
-    latestAuthor ??
-    (peer
-      ? peer
-      : solo
-        ? (others.find((key) => profiles.get(key)?.isAgent) ?? others[0])
-        : undefined);
-  const name = nameOf;
   return (
     <li data-activity-row={channel.id}>
       <ConversationRow
@@ -763,11 +747,15 @@ function ChannelRow({
         selected={selected}
         onClick={onOpen}
         avatar={
-          face ? (
-            <PersonAvatar
-              session={session}
-              profile={profiles.get(face)}
-              name={name(face)}
+          people.length ? (
+            <AvatarStack
+              size="cluster"
+              items={people.map((id) => ({
+                id,
+                name: nameOf(id),
+                src: avatarMedia(profiles.get(id)?.picture, session.media),
+                shape: profiles.get(id)?.isAgent ? "squircle" : "circle",
+              }))}
             />
           ) : (
             <Avatar
@@ -775,7 +763,16 @@ function ChannelRow({
               alt=""
               shape="squircle"
               fallback={channel.name}
-              fallbackContent={<Icon size={16} aria-hidden="true" />}
+              fallbackSurface={
+                dm || solo ? "subtle" : channelSurface(channel.name)
+              }
+              fallbackContent={
+                dm || solo ? (
+                  <UsersIcon size={16} aria-hidden="true" />
+                ) : (
+                  <Icon size={16} aria-hidden="true" />
+                )
+              }
             />
           )
         }

@@ -320,3 +320,23 @@ html[data-keyboard-input] :is(.subviewBase, .subview) {
   min-width: 0;
   max-width: 100%;
 }
+
+.contentIdentity {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  flex: none;
+  min-width: 0;
+  padding-block: var(--space-1);
+  pointer-events: none;
+}
+.contentIdentity > * {
+  max-width: min(100%, 18rem);
+  pointer-events: auto;
+}
+@container conversation-identity (min-width: 40rem) {
+  .contentIdentity[data-header-space] {
+    margin-block-start: calc(var(--space-1) - var(--size-panel-header));
+    padding-block-start: 0;
+  }
+}

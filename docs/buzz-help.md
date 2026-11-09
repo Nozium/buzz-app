@@ -581,21 +581,33 @@ revokes all of them, and a pairing unused for 30 days expires.
   to close, it closes the window while Buzz and running agents stay open.
   Reopen Buzz from the Dock. ⌘⇧W clears the current channel's tabs without
   closing the window. These tab shortcuts do nothing while a modal is open.
-- **Conversation members**: click the combined member avatars and conversation
-  name in the header to open membership management. Other header actions remain
-  on the right. Compact avatars sit before the name on the left; Solo chats show
-  the included agents.
+- **Conversation list filters**: All combines chats, DMs and channels by recent
+  activity. Threads shows channel threads; Direct combines chats, DMs and mentions.
+  Working shows Solo chats with an active agent; Waiting shows Solo chats where
+  the other side spoke last and no agent is working. Scroll the filter buttons
+  horizontally to reach more views. The small New button leads the strip;
+  the all/unread filter sits after the view buttons.
+- **Conversation list artwork**: Solo chats and direct messages show up to three
+  other members' avatars. Channels keep their channel icon on a colored background
+  chosen consistently from the first letter of the channel name.
+- **Conversation members**: click the centered avatars and conversation name
+  above the message history to open membership management. Avatars exclude you;
+  Solo chats show participating agents. The toolbar actions stay at the top right.
+- **Conversation timestamps**: sidebar times appear when you hover or focus a row.
+  Touch devices keep them visible.
 - **App navigation**: use the left dock to switch apps. Bestie is first,
-  Activity second, followed by the other apps. Community and profile controls
-  sit at the bottom of the dock. Search stays wide in the top bar.
+  Activity second, followed by the other apps. Community, profile and Settings
+  controls sit at the bottom of the same dock. Search is centered in the top bar.
+  Dock artwork magnifies near the pointer; reduced-motion and keyboard use
+  keep it still.
   Messages has All / Solo / Team sidebar filters; other apps use their main
   view unless they provide their own sidebar. Pages listed in the Messages
   sidebar, such as the Drafts & sent plugin, keep Messages selected in the dock. The
   Messages sidebar stays open unless the page provides its own sidebar, which
   replaces it.
   The sidebar and message pane share one surface with a persistent divider;
-  panel headers also have bottom hairlines. Dock icons stay still, highlight
-  on hover, and show instant labels to their right. Bestie uses your
+  panel headers retain their own divider treatment. Dock icons highlight
+  on hover and show instant labels to their right. Bestie uses your
   configured avatar.
   The **+** opens New from the sidebar. **Cmd/Ctrl+N** opens that menu where
   the current app has a creation sidebar.

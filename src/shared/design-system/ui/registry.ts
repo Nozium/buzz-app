@@ -566,6 +566,7 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
       "default",
       "large",
       "fill",
+      "categorical channel fills",
       "circle",
       "squircle",
     ],
@@ -580,10 +581,12 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     slug: "avatar-stack",
     name: "AvatarStack",
     purpose:
-      "Show overlapping identities, three unless the caller sets a maximum, and an overflow count on one line. The enclosing control supplies the accessible name.",
+      "Show overlapping identities and an overflow count on one line, or a cluster in a square conversation slot. Cluster callers supply at most three identities. The enclosing control supplies the accessible name.",
     behavior:
       "Decorative artwork composed from Avatar; mini, small, and hero sizes use a surface-colored inset to separate overlapping images. Identity data stays with the caller. Optional entrance motion respects reduced motion.",
     variants: [
+      "cluster",
+      "large (48px conversation identity)",
       "mini",
       "compact",
       "small",
@@ -701,13 +704,14 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     slug: "tabs",
     name: "Tabs",
     purpose:
-      "Switch between sibling views. Choose dock for static icon-only shell destinations with a theme-accent selected fill and inactive hover feedback, chrome for grouped tabs on the app backdrop, panel for a plain surface, segmented for grouped filters on an opaque surface, workspace for combined panes, or navigation for content-sized tabs capped at 12rem with icons or avatars. Closable tabs provide a sibling close button and support Delete or middle-click. The caller owns selection, retained content, and the next selection after closing.",
+      "Switch between sibling views. Choose dock for icon-only shell destinations with a theme-accent selected fill and inactive hover feedback, chrome for grouped tabs on the app backdrop, panel for a plain surface, segmented for grouped filters on an opaque surface, workspace for combined panes, or navigation for content-sized tabs capped at 12rem with icons or avatars. Closable tabs provide a sibling close button and support Delete or middle-click. The caller owns selection, retained content, and the next selection after closing.",
     behavior:
       "Base UI Tabs. Icon-only variants keep item labels accessible. Dock labels use instant tooltips to the right of vertical docks or beneath horizontal docks; segmented-icons labels remain available as titles. Items can be disabled. Navigation items accept attentionRequest to identify a repeated opening without changing focus or remounting content. Hosts may opt movable tabs into Panel Swap title-only dragging using TabDragFeedback; hosts own hit testing, cancellation and the committed order. tabMenu composes the host’s scoped Close all tabs action with Rename tab in one shared menu, without changing tab selection.",
     variants: [
       "chrome",
       "dock",
       "panel",
+      "buttons (small shared controls for Activity view filters)",
       "workspace",
       "navigation",
       "segmented",
@@ -740,7 +744,12 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     purpose:
       "Give a panel a consistent header with optional navigation, icon, title, and actions. The row has a 2.5rem minimum height; the panel and its content stay with the caller.",
     behavior: "Semantic native header.",
-    variants: ["default", "compact", "card"],
+    variants: [
+      "default",
+      "compact",
+      "card",
+      "divider: false (retains header geometry)",
+    ],
     status: "proposed",
     collection: "components",
     owner: "desktop-new Messages",

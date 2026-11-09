@@ -1,35 +1,16 @@
 /* PROTOTYPE: Activity-style conversation list in the primary sidebar.
  * Every view is one flat list of ConversationRows. */
 .activity {
+  --conversation-row-pad-inline: var(--space-2);
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
-/* Below the scope, one row in every scope: its views as underline tabs, then
- * Unread at the right end. The same shape everywhere, so switching scope
- * moves nothing. The tabs keep their labels' width and scroll if they must. */
+/* The filter strip stays above the existing conversation scrollport. */
 .filters {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-block-end: var(--space-2);
-  margin-inline: var(--space-1);
-}
-.views {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-/* One step closer than panel tabs' default, so three views and the filter
- * menu fit at the minimum sidebar width. */
-.views [class~="buzz-tabs-list"][class~="buzz-tabs-list"] {
-  gap: var(--space-4);
-}
-.filters > :last-child {
-  flex: none;
-}
-/* Unread is a filter, not a heading: it reads at the unselected views' level. */
-.filters > :last-child label {
-  color: var(--text-metadata);
+  margin-block-end: var(--space-3);
+  --tabs-button-gutter: calc(var(--sidebar-padding) + var(--space-1));
+  margin-inline: calc(-1 * var(--sidebar-padding));
 }
 .rows {
   display: flex;

@@ -1,10 +1,11 @@
 import { ActivityNavigationProvider } from "./ActivityNavigation";
 import { PageNavigation } from "./PageNavigation";
-import { TopPages } from "./TopPages";
+import { AppDock } from "./AppDock";
 import { navigationOwner, orderPages, pagePlacement } from "./presentation";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -14,7 +15,7 @@ import {
 } from "react";
 import { isApplePlatform } from "../../features/shortcuts/format";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
-import { SidebarIcon } from "../../shared/design-system/icons";
+import { GearIcon, SidebarIcon } from "../../shared/design-system/icons";
 import { Panel } from "../../shared/design-system/ui/Panel";
 import { isTauri } from "@tauri-apps/api/core";
 import type { SettingsCards } from "../../features/settings/service";
@@ -127,9 +128,29 @@ function AppShellContent({
   children: ReactNode;
 }) {
   const header = useRef<HTMLElement>(null);
-  // PROTOTYPE: the app icons live in the top bar; Search folds to its icon
-  // while the icons' overflow is open.
-  const [pagesExpanded, setPagesExpanded] = useState(false);
+  useLayoutEffect(() => {
+    const element = header.current;
+    const history = element?.querySelector<HTMLElement>(".shell-history");
+    const actions = element?.querySelector<HTMLElement>(".shell-actions");
+    if (!element || !history || !actions) return;
+    const measure = () => {
+      const css = getComputedStyle(element);
+      const wing = Math.max(history.offsetWidth, actions.offsetWidth);
+      const available =
+        element.clientWidth -
+        2 * wing -
+        2 * (Number.parseFloat(css.columnGap) || 0) -
+        (Number.parseFloat(css.paddingInlineStart) || 0) -
+        (Number.parseFloat(css.paddingInlineEnd) || 0);
+      element.style.setProperty("--shell-header-wing", `${wing}px`);
+      element.dataset.searchWrapped = String(available < 48);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    for (const region of [element, history, actions]) observer.observe(region);
+    return () => observer.disconnect();
+  }, []);
   const fillsWorkspace = workspace || selected === "settings";
   const [creationContainer, setCreationContainer] =
     useState<HTMLDivElement | null>(null);
@@ -261,8 +282,6 @@ function AppShellContent({
         data-tauri-drag-region={macDesktop ? undefined : true}
         {...titleBarDragProps}
         className={`shell-header ${macDesktop ? "shell-header-mac" : ""}`}
-        data-top-pages=""
-        data-pages-expanded={pagesExpanded || undefined}
       >
         <div
           className="shell-history"
@@ -293,14 +312,6 @@ function AppShellContent({
           )}
           {navigationControls}
         </div>
-        <TopPages
-          pages={dockPages}
-          selected={owner}
-          currentPage={selected}
-          onSelect={onSelect}
-          previews
-          onExpandedChange={setPagesExpanded}
-        />
         <div className="shell-menu-search">
           <PageSearch
             pages={pages}
@@ -315,29 +326,6 @@ function AppShellContent({
         >
           <div className="shell-actions-fixed">
             {launchers}
-            <CommunityPicker
-              communities={communities}
-              invite={invite}
-              onInviteClose={onInviteClose}
-              settingsCards={settingsCards}
-              federatedIdentity={federatedIdentity}
-              onSelect={onCommunitySelect}
-              onOpenTarget={onOpenTarget}
-              open={switcherOpen}
-              onOpenChange={setSwitcherOpen}
-              side="bottom"
-            />
-            <ProfileButton
-              communities={communities}
-              accountActions={accountActions}
-              settingsSelected={selected === "settings"}
-              appearance={appearance}
-              pluginRecommendations={pluginRecommendations}
-              onSettings={(section) =>
-                onSelect("settings", section ? { section } : undefined)
-              }
-              side="bottom"
-            />
             <WindowControls />
           </div>
         </div>
@@ -349,6 +337,53 @@ function AppShellContent({
           className="shell-dialog-frame"
           data-shell-dialog-frame=""
         />
+        <div className="shell-side-dock">
+          <AppDock
+            pages={dockPages}
+            selected={owner}
+            currentPage={selected}
+            onSelect={onSelect}
+            previews
+            community={
+              <CommunityPicker
+                communities={communities}
+                invite={invite}
+                onInviteClose={onInviteClose}
+                settingsCards={settingsCards}
+                federatedIdentity={federatedIdentity}
+                onSelect={onCommunitySelect}
+                onOpenTarget={onOpenTarget}
+                open={switcherOpen}
+                onOpenChange={setSwitcherOpen}
+                side="right"
+              />
+            }
+            profile={
+              <ProfileButton
+                communities={communities}
+                accountActions={accountActions}
+                settingsSelected={selected === "settings"}
+                appearance={appearance}
+                pluginRecommendations={pluginRecommendations}
+                onSettings={(section) =>
+                  onSelect("settings", section ? { section } : undefined)
+                }
+                side="right"
+              />
+            }
+            settings={
+              <IconButton
+                size="md"
+                variant={selected === "settings" ? "inset" : "ghost"}
+                aria-label="Settings"
+                title="Settings"
+                aria-current={selected === "settings" ? "page" : undefined}
+                onClick={() => onSelect("settings")}
+                icon={<GearIcon size={20} aria-hidden="true" />}
+              />
+            }
+          />
+        </div>
         <div
           className={`shell-body ${selected === "settings" ? "shell-body-settings" : ""}`}
         >

@@ -11,7 +11,6 @@ import type { Navigation } from "../../features/navigation/controller";
 import {
   ActivityFilters,
   ActivitySidebar,
-  ActivityScopeTabs,
   type ActivityView,
 } from "./ActivitySidebar";
 
@@ -31,6 +30,7 @@ function setup(
     { createdAt: number; content: string; authorId?: string }
   > = {},
   workingIn: readonly string[] = [],
+  dmParticipants: readonly string[] = [alice],
 ) {
   const base = createRelaySession(null).session;
   const channels = [
@@ -60,7 +60,7 @@ function setup(
       id: "dm",
       name: "DM",
       channelType: "dm" as const,
-      participants: [alice],
+      participants: dmParticipants,
       lastActivityAt: 450,
     },
   ];
@@ -119,6 +119,8 @@ function setup(
     [alice, { name: "Alice" }],
     [bob, { name: "Bob", isAgent: true }],
     [viewer, { name: "Zed" }],
+    [root, { name: "Dana" }],
+    [reply, { name: "Eli" }],
   ]);
   const markChannelRead = vi.fn(async () => ({}) as never);
   const session: RelaySession = {
@@ -183,14 +185,11 @@ function setup(
   const navigator = { open } as unknown as Navigation;
   function Harness() {
     const [view, setView] = useState<ActivityView>({
-      scope: "team",
-      solo: "all",
-      team: "channels",
+      filter: "all",
       unread: false,
     });
     return (
       <>
-        <ActivityScopeTabs view={view} onChange={setView} />
         <ActivityFilters view={view} onChange={setView} />
         <ActivitySidebar
           session={session}
@@ -214,11 +213,13 @@ const rowNames = () =>
     .filter((li) => li.hasAttribute("data-activity-row"))
     .map((li) => li.getAttribute("data-activity-row"));
 
-test("Team lists channels by their newest activity, threads included", () => {
+test("All interleaves chats, DMs, and channels by their newest activity", () => {
   setup();
   // old-news has an older top-level message but a newer thread reply, which
   // becomes its preview.
-  expect(rowNames()).toEqual(["old", "new"]);
+  expect(rowNames()).toEqual(["dm", "old", "solo", "new"]);
+  expect(screen.queryByRole("tab", { name: "Solo" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: "Team" })).not.toBeInTheDocument();
   expect(screen.getByText("a reply in the old channel")).toBeInTheDocument();
 });
 
@@ -237,17 +238,22 @@ test("a thread row opens the thread beside its channel", async () => {
   );
 });
 
-test("Unread hides read conversations and scopes switch lists", async () => {
+test("Unread filters the combined list and can restore every kind of conversation", async () => {
   setup();
-  await userEvent.click(screen.getByRole("switch", { name: "Unread" }));
+  await userEvent.click(screen.getByRole("button", { name: "Showing all" }));
+  await userEvent.click(
+    await screen.findByRole("menuitemradio", { name: "Unread only" }),
+  );
   expect(rowNames()).toEqual(["old"]);
-  await userEvent.click(screen.getByRole("tab", { name: "Solo" }));
-  await userEvent.click(screen.getByRole("switch", { name: "Unread" }));
-  expect(rowNames()).toEqual(["solo"]);
-  // Each scope has its own views.
-  expect(
-    screen.queryByRole("tab", { name: "Threads" }),
-  ).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Showing unread" }));
+  await userEvent.click(
+    await screen.findByRole("menuitemradio", { name: "All conversations" }),
+  );
+  expect(rowNames()).toEqual(["dm", "old", "solo", "new"]);
+  expect(screen.getByRole("tab", { name: "All" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
 });
 
 const mentionItem = () => {
@@ -299,9 +305,11 @@ test("a Team row previews its latest top-level message, without its author", () 
     old: { createdAt: 600, content: "a new post" },
     new: { createdAt: 150, content: "older post" },
   });
-  expect(rowNames()).toEqual(["old", "new"]);
+  expect(rowNames()).toEqual(["old", "dm", "solo", "new"]);
   expect(screen.getByText("a new post")).toBeInTheDocument();
-  expect(screen.queryByText(/Alice/)).not.toBeInTheDocument();
+  const row = document.querySelector<HTMLElement>('[data-activity-row="old"]');
+  if (!row) throw new Error("Conversation row missing");
+  expect(within(row).queryByText("Alice")).not.toBeInTheDocument();
 });
 
 test("an unread row's checkmark marks its channel read without opening it", async () => {
@@ -324,46 +332,63 @@ test("an unread row's checkmark marks its channel read without opening it", asyn
   ).not.toBeInTheDocument();
 });
 
-test("Direct interleaves DMs and mentions of you, newest first", async () => {
+test("Direct interleaves chats, DMs and mentions of you, newest first", async () => {
   setup([mentionItem()]);
   await userEvent.click(screen.getByRole("tab", { name: "Direct" }));
   const items = within(screen.getByRole("list", { name: "Conversations" }))
     .getAllByRole("listitem")
     .map((li) => li.getAttribute("data-activity-row") ?? li.textContent);
-  // The mention (500) is newer than the DM (450); Team channels stay out.
-  expect(items).toHaveLength(2);
+  // Mention (500), DM (450), chat (300); channels stay out.
+  expect(items).toHaveLength(3);
   expect(items[0]).toContain("hey @you");
   expect(items[1]).toBe("dm");
+  expect(items[2]).toBe("solo");
 });
 
-test("Solo's Working and Waiting split chats by whose move it is", async () => {
-  setup([], { solo: { createdAt: 300, content: "done, have a look" } }, []);
-  await userEvent.click(screen.getByRole("tab", { name: "Solo" }));
-  expect(rowNames()).toEqual(["solo"]);
-  await userEvent.click(screen.getByRole("tab", { name: "Working" }));
-  expect(rowNames()).toEqual([]);
-  expect(
-    screen.getByText("No agent is working right now."),
-  ).toBeInTheDocument();
-  // The agent spoke last and isn't working: it is waiting on you.
-  await userEvent.click(screen.getByRole("tab", { name: "Waiting" }));
-  expect(rowNames()).toEqual(["solo"]);
-});
+test.each([
+  {
+    workingIn: ["solo"],
+    authorId: alice,
+    workingRows: ["solo"],
+    waitingRows: [],
+  },
+  { workingIn: [], authorId: alice, workingRows: [], waitingRows: ["solo"] },
+  { workingIn: [], authorId: viewer, workingRows: [], waitingRows: [] },
+])(
+  "Working and Waiting preserve whose move it is: $authorId / $workingIn",
+  async ({ workingIn, authorId, workingRows, waitingRows }) => {
+    setup(
+      [],
+      { solo: { createdAt: 300, content: "on it", authorId } },
+      workingIn,
+    );
+    await userEvent.click(screen.getByRole("tab", { name: "Working" }));
+    expect(rowNames()).toEqual(workingRows);
+    if (workingRows.length) {
+      expect(
+        document.querySelector(
+          '[data-activity-row="solo"] [data-conversation-row]',
+        ),
+      ).toHaveAttribute("data-state", "working");
+    } else {
+      expect(
+        screen.getByText("No agent is working right now."),
+      ).toBeInTheDocument();
+    }
+    await userEvent.click(screen.getByRole("tab", { name: "Waiting" }));
+    expect(rowNames()).toEqual(waitingRows);
+    if (!waitingRows.length)
+      expect(
+        screen.getByText("Nothing is waiting on you."),
+      ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "All" }));
+    expect(rowNames()).toEqual(["dm", "old", "solo", "new"]);
+  },
+);
 
-test("a chat with a working agent is Working, not Waiting", async () => {
-  setup([], { solo: { createdAt: 300, content: "on it" } }, ["solo"]);
-  await userEvent.click(screen.getByRole("tab", { name: "Solo" }));
-  await userEvent.click(screen.getByRole("tab", { name: "Working" }));
-  expect(rowNames()).toEqual(["solo"]);
-  await userEvent.click(screen.getByRole("tab", { name: "Waiting" }));
-  expect(rowNames()).toEqual([]);
-});
-
-test("your own last message is not Waiting", async () => {
-  setup([], { solo: { createdAt: 300, content: "go", authorId: viewer } });
-  await userEvent.click(screen.getByRole("tab", { name: "Solo" }));
-  await userEvent.click(screen.getByRole("tab", { name: "Waiting" }));
-  expect(rowNames()).toEqual([]);
+test("your newest chat message moves it ahead of channels and DMs", () => {
+  setup([], { solo: { createdAt: 600, content: "go", authorId: viewer } });
+  expect(rowNames()).toEqual(["solo", "dm", "old", "new"]);
 });
 
 /** The initial a row's avatar shows, standing in for the picture. */
@@ -380,20 +405,46 @@ test("a DM row is titled with its people, not DM", async () => {
   expect(row).not.toHaveTextContent(/^DM/);
 });
 
-test("your own latest message shows your avatar, with no You prefix", () => {
+test("a channel keeps its channel icon after your latest message", () => {
   setup([], { new: { createdAt: 600, content: "my post", authorId: viewer } });
-  expect(faceOf("new")).toBe("Z");
+  expect(faceOf("new")).toBe("");
+  expect(screen.getByText("my post")).toBeInTheDocument();
   expect(screen.queryByText(/You/)).not.toBeInTheDocument();
 });
 
-test("a Solo row shows whoever posted last, not the agent that started it", async () => {
-  setup([], { solo: { createdAt: 300, content: "joined in" } });
-  await userEvent.click(screen.getByRole("tab", { name: "Solo" }));
-  expect(faceOf("solo")).toBe("A");
+test.each([alice, viewer])(
+  "a Solo row shows its other members regardless of the last sender %s",
+  async (authorId) => {
+    setup([], { solo: { createdAt: 300, content: "joined in", authorId } });
+    const row = document.querySelector<HTMLElement>(
+      '[data-activity-row="solo"]',
+    );
+    if (!row) throw new Error("Conversation row missing");
+    expect(row.querySelectorAll("[data-avatar-fallback]")).toHaveLength(2);
+    expect(within(row).getByTitle("Bob")).toBeInTheDocument();
+    expect(within(row).getByTitle("Alice")).toBeInTheDocument();
+    expect(within(row).queryByTitle("Zed")).not.toBeInTheDocument();
+  },
+);
+
+test("a group DM shows at most three other participants", async () => {
+  setup(
+    [],
+    { dm: { createdAt: 600, content: "my reply", authorId: viewer } },
+    [],
+    [viewer, alice, bob, root, reply],
+  );
+  await userEvent.click(screen.getByRole("tab", { name: "Direct" }));
+  const row = document.querySelector<HTMLElement>('[data-activity-row="dm"]');
+  if (!row) throw new Error("Conversation row missing");
+  expect(row.querySelectorAll("[data-avatar-fallback]")).toHaveLength(3);
+  for (const name of ["Alice", "Bob", "Dana"])
+    expect(within(row).getByTitle(name)).toBeInTheDocument();
+  expect(within(row).queryByTitle("Zed")).not.toBeInTheDocument();
+  expect(within(row).queryByTitle("Eli")).not.toBeInTheDocument();
 });
 
 test("a Solo row with no known message shows its agent", async () => {
   setup();
-  await userEvent.click(screen.getByRole("tab", { name: "Solo" }));
   expect(faceOf("solo")).toBe("B");
 });

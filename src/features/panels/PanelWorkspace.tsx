@@ -111,6 +111,8 @@ export function PanelWorkspace({
   select,
   actions,
   identity,
+  identityPlacement = "header",
+  headerDivider = true,
   main = false,
   label = "Panel tabs",
   focusOnMount = true,
@@ -134,6 +136,9 @@ export function PanelWorkspace({
   actions?: ReactNode;
   /** Interactive conversation identity; a lone permanent tab needs no tab strip. */
   identity?: ReactNode;
+  /** The permanent conversation may present its identity above its scrollport. */
+  identityPlacement?: "header" | "content";
+  headerDivider?: boolean;
   /**
    * The page's main pane: a lone permanent tab reads as a title, and native
    * Close acts here only while focus is inside (the side pane is the default).
@@ -436,7 +441,10 @@ export function PanelWorkspace({
       }}
     >
       <PanelHeader
-        navigation={!identityOnly ? heading : undefined}
+        divider={headerDivider}
+        navigation={
+          !identityOnly && identityPlacement === "header" ? heading : undefined
+        }
         actions={
           active && "toolbar" in active && active.toolbar ? (
             <>
@@ -449,7 +457,9 @@ export function PanelWorkspace({
         }
         title={
           identityOnly ? (
-            heading
+            identityPlacement === "header" ? (
+              heading
+            ) : null
           ) : (
             <Tabs
               label={label}
@@ -510,6 +520,14 @@ export function PanelWorkspace({
           )
         }
       />
+      {identityPlacement === "content" && selected === items[0]?.id && (
+        <div
+          className={styles.contentIdentity}
+          data-header-space={identityOnly ? "" : undefined}
+        >
+          {heading}
+        </div>
+      )}
       <div className={styles.workspaceBody}>
         {items.map((item) => (
           <TabScope

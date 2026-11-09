@@ -13,7 +13,7 @@
     --conversation-row-pad-block,
     calc(var(--space-2) + var(--space-half) / 2)
   );
-  --row-pad-inline: var(--conversation-row-pad-inline, var(--space-2));
+  --row-pad-inline: var(--conversation-row-pad-inline, var(--space-4));
   position: relative;
   min-width: 0;
 }
@@ -45,7 +45,7 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: var(--conversation-row-line-gap, var(--space-1));
+  gap: var(--conversation-row-line-gap, var(--space-half));
   min-width: 0;
 }
 /* Each line ends in its own right-hand slot, so the preview runs on under
@@ -142,7 +142,7 @@
   background: currentColor;
 }
 
-/* Mark as read: over the time, on hover or keyboard focus, on unread rows;
+/* Mark as read: beside the time, on hover or keyboard focus, on unread rows;
  * always shown without a hover pointer. */
 .action {
   position: absolute;
@@ -156,15 +156,22 @@
 .frame:focus-within .action {
   opacity: 1;
 }
-.frame[data-action]:hover .time,
-.frame[data-action]:focus-within .time {
-  visibility: hidden;
-}
 @media (hover: none), (pointer: coarse) {
   .action {
     opacity: 1;
   }
-  .frame[data-action] .time {
-    visibility: hidden;
+}
+
+/* Metadata stays quiet until the row is inspected; reserve its slot. */
+.frame[data-action] .time {
+  margin-inline-end: var(--space-6);
+}
+@media (hover: hover) and (pointer: fine) {
+  .time {
+    opacity: 0;
+  }
+  .frame:hover .time,
+  .frame:focus-within .time {
+    opacity: 1;
   }
 }
