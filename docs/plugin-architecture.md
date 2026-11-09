@@ -247,7 +247,8 @@ for the current app run and candidate. The update stays in the profile menu's
 
 With **Install plugin updates automatically** on (a device-local Settings →
 Plugins choice, off by default), the shell starts the same **Update and reload**
-apply for a found candidate without a click when access does not increase, the
+apply without a click for a candidate found by the launch check, or by the first
+check at least a day after the previous such check, when access does not increase, the
 publisher is unchanged and no rollback warning applies. It reuses the
 `PluginImport` update path, so the fresh immutable preview is checked again
 before install and a fresh access increase falls back to the review. Each

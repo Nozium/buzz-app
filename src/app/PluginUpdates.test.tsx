@@ -701,3 +701,38 @@ it("leaves an update the user put off for Later until it is chosen", async () =>
   expect(f.imports.git).not.toHaveBeenCalled();
   expect(f.installImport).not.toHaveBeenCalled();
 });
+
+it("installs an update found after launch at the next daily check", async () => {
+  vi.useFakeTimers();
+  const visibility = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockReturnValue("visible");
+  setPluginAutoUpdatePreference(true);
+  const f = fixture();
+  f.candidate.revision = f.plugin.revision;
+  const view = f.mount();
+  try {
+    await act(async () => {});
+    expect(f.imports.checkGit).toHaveBeenCalledTimes(1);
+    f.candidate.revision = "new";
+    await act(() => vi.advanceTimersByTimeAsync(3_600_000));
+    expect(f.imports.checkGit).toHaveBeenCalledTimes(2);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(
+      screen.getByRole("button", { name: "Update and reload" }),
+    ).toBeVisible();
+    await act(() => vi.advanceTimersByTimeAsync(22 * 3_600_000));
+    expect(f.imports.checkGit).toHaveBeenCalledTimes(24);
+    expect(f.imports.git).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(3_600_000));
+    expect(f.imports.checkGit).toHaveBeenCalledTimes(25);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(f.installImport).toHaveBeenCalledExactlyOnceWith(
+      "immutable-preview",
+      ".",
+    );
+  } finally {
+    view.unmount();
+    visibility.mockRestore();
+  }
+});

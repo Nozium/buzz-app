@@ -63,6 +63,9 @@ export function PluginUpdates({
 }) {
   const [store, setStore] = useState<Updates>();
   const [action, setAction] = useState<PluginUpdate>();
+  // Updates the launch check, or the first check a day after it, found;
+  // keyed by plugin id and candidate revision.
+  const [daily, setDaily] = useState<ReadonlySet<string>>(new Set());
   const returnFocus = useRef<HTMLElement | null>(null);
   const state = useSyncExternalStore(plugins.subscribe, plugins.snapshot);
   const updates = useSyncExternalStore(
@@ -80,11 +83,24 @@ export function PluginUpdates({
     setStore(updates);
     let timer: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
+    let dailyAt: number | undefined;
     const visible = () => document.visibilityState !== "hidden";
     const check = async () => {
       clearTimeout(timer);
       if (!visible()) return;
+      const due = dailyAt === undefined || Date.now() - dailyAt >= 86_400_000;
       const delay = await updates.check();
+      if (delay !== undefined && due && !disposed) {
+        dailyAt = Date.now();
+        const found = updates
+          .snapshot()
+          .flatMap((update) =>
+            update.candidate
+              ? [`${update.id}:${update.candidate.revision}`]
+              : [],
+          );
+        setDaily((keys) => new Set([...keys, ...found]));
+      }
       if (delay === undefined || disposed || !visible()) return;
       clearTimeout(timer);
       timer = setTimeout(check, delay);
@@ -130,8 +146,9 @@ export function PluginUpdates({
     );
   };
   const [recovering, setRecovering] = useState<readonly string[]>([]);
-  // With the choice on, an update that needs no review starts the same
-  // apply as Update and reload, once per found revision.
+  // With the choice on, an update that needs no review and was found at
+  // launch or by the daily check starts the same apply as Update and reload,
+  // once per found revision. Others keep their notice until then.
   const autoUpdate = usePluginAutoUpdatePreference();
   const attempted = useRef(new Set<string>());
   // Another review or install request holds the single native import preview.
@@ -149,6 +166,7 @@ export function PluginUpdates({
       update.candidate,
       catalog?.plugins.find((p) => p.manifest.id === update.id),
     ) &&
+    daily.has(`${update.id}:${update.candidate.revision}`) &&
     !attempted.current.has(`${update.id}:${update.candidate.revision}`);
   const nextAutomatic = canStart ? updates.find(automatic) : undefined;
   const startAutomatic = useEffectEvent((update: PluginUpdate) => {

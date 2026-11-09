@@ -1036,9 +1036,11 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   start, use **Retry activation** or its recovery menu to **Roll back**, when
   available. Checks, review, Later, and cancellation keep plugin work running.
 - On desktop, **Install plugin updates automatically** in Settings → Plugins
-  (off by default, saved on this device) installs an update as soon as a check
-  finds it, when it asks for no new access, keeps its publisher and doesn't
-  block rollback. A short **Updating** dialog shows progress, and the plugin
+  (off by default, saved on this device) installs updates found by the check at
+  launch, and by the first check a day after that, when they ask for no new
+  access, keep their publisher and don't block rollback. Updates found by the
+  hourly checks in between show the usual notice and wait for the next daily
+  check. A short **Updating** dialog shows progress, and the plugin
   reloads right away. Other updates still
   show their notice and review. Buzz tries each automatic update once per found
   revision; if it fails, the usual notice returns.
