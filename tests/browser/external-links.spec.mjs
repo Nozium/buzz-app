@@ -307,7 +307,7 @@ test("message link context menus bypass the pane and return keyboard focus", asy
     .getByRole("button", { name: "Close GitHub tab", exact: true })
     .click();
   await expect(panel).toHaveCount(0);
-  await anchor.focus();
+  await expect(anchor).toBeFocused();
 
   await page.keyboard.press("Shift+F10");
   await expect(menu).toBeVisible();

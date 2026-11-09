@@ -28,7 +28,7 @@ arbitrary file paths or application commands. Web keeps ordinary browser link
 behavior. Adding the native opener requires rebuilding/restarting desktop;
 frontend hot reload alone is not enough.
 
-HTTP(S) links rendered in messages expose **Open in browser** and **Copy link**
+HTTP(S) links rendered in messages always expose **Open in browser** and **Copy link**
 on right-click or long-press, or with Shift+F10 / the Context Menu key while focused.
 **Open in browser** uses the same `_blank` fallback above without consulting pane
 handlers; both actions retain the original URL, including query and fragment.
