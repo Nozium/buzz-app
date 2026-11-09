@@ -1,4 +1,5 @@
 use buzzodz_plugins::{
+    artifact_manifest,
     managed::{Managed, ManagedSource, ManagedState},
     pack_release, release_manifest, sign_release_saved, valid_id, Catalog, Manager, Manifest,
     Result,
@@ -16,6 +17,7 @@ Commands:
   build DIRECTORY          Run the project's pnpm build script
   sign DIST_DIRECTORY       Sign with your saved Buzz human identity
   pack DIST_DIRECTORY FILE  Write the single-file artifact a URL source serves; prints its SHA-256
+  inspect FILE             Validate a packed artifact without installing it
   install DIRECTORY        Install a built artifact (new plugins start disabled)
   reload ID                Reload a folder plugin, preserving its enabled state
   list                     List installed pages and their enabled state
@@ -67,6 +69,14 @@ fn run() -> Result<()> {
     let rest = &args[2..];
     // Source creation/building does not require a local installation profile.
     match (action.as_str(), rest) {
+        ("inspect", [file]) => {
+            let manifest = artifact_manifest(Path::new(file))?;
+            println!(
+                "{}",
+                serde_json::to_string(&manifest).map_err(|e| e.to_string())?
+            );
+            return Ok(());
+        }
         ("init", [directory, id, name]) => {
             init(Path::new(directory), id, name)?;
             println!("Created {id} in {directory}\nNext: add the host-matched @buzz/author preview archive with pnpm add -D /absolute/path/buzz-author-VERSION.tgz, then buzzodz plugin build DIRECTORY.");

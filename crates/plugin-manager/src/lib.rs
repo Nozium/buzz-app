@@ -958,6 +958,12 @@ impl Manager {
         }
         let renamed = migrate_agent_flag::migrate(&mut r);
         let pinned = pin_bundled_defaults(&mut r, self.existing_profile);
+        if let Err(error) = self.provision_packaged(
+            &mut r,
+            include_bytes!(concat!(env!("OUT_DIR"), "/packaged-plugin.json")),
+        ) {
+            eprintln!("Packaged plugin provisioning deferred: {error}");
+        }
         if renamed {
             self.save(&r)?;
         } else if pinned {
@@ -966,6 +972,38 @@ impl Manager {
             let _ = self.save(&r);
         }
         Ok(r)
+    }
+
+    // Package trust is established by the app distributor. Keep the artifact in
+    // ordinary external-plugin storage so disable, removal, updates and safe mode
+    // retain their existing behavior. The receipt survives explicit removal.
+    fn provision_packaged(&self, registry: &mut Registry, bytes: &[u8]) -> Result<bool> {
+        if bytes.is_empty() {
+            return Ok(false);
+        }
+        let release = Release {
+            bytes: bytes.to_vec(),
+            signature: None,
+        };
+        let artifact = release.artifact()?;
+        let id = artifact.manifest.id.clone();
+        let receipt = self.root.join("packaged-plugins").join(&id);
+        if receipt.try_exists().map_err(err)? {
+            return Ok(false);
+        }
+        if self.safe_mode && !registry.installed.contains_key(&id) {
+            return Ok(false);
+        }
+        if !registry.installed.contains_key(&id) {
+            let mut next = registry.clone();
+            self.store_release(&mut next, &release, None, true)?;
+            self.save(&next)?;
+            atomic_write(&receipt, b"1")?;
+            *registry = next;
+        } else {
+            atomic_write(&receipt, b"1")?;
+        }
+        Ok(true)
     }
     fn save(&self, r: &Registry) -> Result<()> {
         let bytes = serde_json::to_vec_pretty(r).map_err(err)?;
@@ -1093,6 +1131,21 @@ impl Manager {
         release: &Release,
         source: Option<InstallSource>,
     ) -> Result<Catalog> {
+        {
+            let _lock = self.lock()?;
+            let mut registry = self.read()?;
+            self.store_release(&mut registry, release, source, false)?;
+            self.save(&registry)?;
+        }
+        self.catalog()
+    }
+    fn store_release(
+        &self,
+        registry: &mut Registry,
+        release: &Release,
+        source: Option<InstallSource>,
+        default_enabled: bool,
+    ) -> Result<()> {
         let bytes = &release.bytes;
         let artifact = release.artifact()?;
         let manifest = artifact.manifest.clone();
@@ -1100,55 +1153,50 @@ impl Manager {
         let icon_png_revision = icon_revision(artifact.icon_png.as_deref());
         let icon_jpg_revision = icon_revision(artifact.icon_jpg.as_deref());
         let revision = hash(bytes);
-        {
-            let _lock = self.lock()?;
-            let mut registry = self.read()?;
-            let old = registry.installed.get(&manifest.id);
-            if let Some(old) = old {
-                if let Some(previous) = &old.current_signature {
-                    let previous_publisher = publisher_for_hash(&old.current, previous)?;
-                    if release.publisher().as_deref() != Some(previous_publisher.as_str()) {
-                        return Err("Publisher changed or signed plugin became unsigned; remove and reinstall to change publisher".into());
-                    }
+        let old = registry.installed.get(&manifest.id);
+        if let Some(old) = old {
+            if let Some(previous) = &old.current_signature {
+                let previous_publisher = publisher_for_hash(&old.current, previous)?;
+                if release.publisher().as_deref() != Some(previous_publisher.as_str()) {
+                    return Err("Publisher changed or signed plugin became unsigned; remove and reinstall to change publisher".into());
                 }
             }
-            let (previous, previous_source) = old.map_or((None, None), |p| {
-                if p.current == revision {
-                    (p.previous.clone(), p.previous_source.clone())
-                } else {
-                    (Some(p.current.clone()), p.current_source.clone())
-                }
-            });
-            let enabled = old.is_some_and(|p| p.enabled);
-            let update_checks = old.and_then(|p| p.update_checks);
-            let previous_signature = old.and_then(|p| {
-                if p.current == revision {
-                    p.previous_signature.clone()
-                } else {
-                    p.current_signature.clone()
-                }
-            });
-            atomic_write(&self.artifact_path(&manifest.id, &revision), bytes)?;
-            registry.installed.insert(
-                manifest.id.clone(),
-                Installed {
-                    manifest,
-                    current: revision,
-                    current_signature: release.signature.clone(),
-                    current_source: source,
-                    previous,
-                    previous_signature,
-                    previous_source,
-                    enabled,
-                    update_checks,
-                    readme_revision,
-                    icon_png_revision,
-                    icon_jpg_revision,
-                },
-            );
-            self.save(&registry)?;
         }
-        self.catalog()
+        let (previous, previous_source) = old.map_or((None, None), |p| {
+            if p.current == revision {
+                (p.previous.clone(), p.previous_source.clone())
+            } else {
+                (Some(p.current.clone()), p.current_source.clone())
+            }
+        });
+        let enabled = old.map_or(default_enabled, |p| p.enabled);
+        let update_checks = old.and_then(|p| p.update_checks);
+        let previous_signature = old.and_then(|p| {
+            if p.current == revision {
+                p.previous_signature.clone()
+            } else {
+                p.current_signature.clone()
+            }
+        });
+        atomic_write(&self.artifact_path(&manifest.id, &revision), bytes)?;
+        registry.installed.insert(
+            manifest.id.clone(),
+            Installed {
+                manifest,
+                current: revision,
+                current_signature: release.signature.clone(),
+                current_source: source,
+                previous,
+                previous_signature,
+                previous_source,
+                enabled,
+                update_checks,
+                readme_revision,
+                icon_png_revision,
+                icon_jpg_revision,
+            },
+        );
+        Ok(())
     }
     pub fn change(&self, action: &str, id: &str) -> Result<Catalog> {
         valid_id(id)?;
@@ -1191,6 +1239,9 @@ impl Manager {
                         p.update_checks = Some(action == "enable-update-checks");
                     }
                     "remove" => {
+                        // Remember explicit removal even in safe mode or when a
+                        // distributor adds this plugin in a later app release.
+                        atomic_write(&self.root.join("packaged-plugins").join(id), b"1")?;
                         registry.installed.remove(id);
                     }
                     "rollback" => {
@@ -1452,6 +1503,15 @@ fn prepare_artifact(directory: &Path) -> Result<Release> {
         cap_std::fs::Dir::open_ambient_dir(directory, cap_std::ambient_authority()).map_err(err)?;
     imports::read_package(&root, Path::new("."))
 }
+/// Validate a packed artifact without installing it or executing its code.
+pub fn artifact_manifest(file: &Path) -> Result<Manifest> {
+    Release {
+        bytes: read_limited(file)?.into_bytes(),
+        signature: None,
+    }
+    .validate()
+}
+
 pub fn release_manifest(directory: &Path) -> Result<Manifest> {
     prepare_artifact(directory)?.validate()
 }
@@ -1659,6 +1719,95 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
+
+    #[test]
+    fn packaged_plugin_preserves_disable_removal_and_newer_installs() {
+        let home = tempfile::tempdir().unwrap();
+        let open = || Manager::open(Some(home.path().into()), "default", false).unwrap();
+        let manager = open();
+        let bytes = artifact_from_text(
+            r#"{"id":"example.packaged","name":"Packaged","apiVersion":1}"#,
+            "export function apply() {}".into(),
+        )
+        .unwrap();
+        let provision = |manager: &Manager| {
+            let _lock = manager.lock().unwrap();
+            let mut registry = manager.read().unwrap();
+            let changed = manager.provision_packaged(&mut registry, &bytes).unwrap();
+            if changed {
+                manager.save(&registry).unwrap();
+            }
+            changed
+        };
+        assert!(provision(&manager));
+        let installed = || {
+            open()
+                .catalog()
+                .unwrap()
+                .plugins
+                .into_iter()
+                .find(|p| p.manifest.id == "example.packaged")
+        };
+        let plugin = installed().unwrap();
+        assert!(plugin.enabled);
+        assert_eq!(plugin.source, "external");
+        assert!(manager.module("example.packaged", &plugin.revision).is_ok());
+        assert!(!provision(&open()));
+        manager.change("disable", "example.packaged").unwrap();
+        assert!(!provision(&open()));
+        assert!(!installed().unwrap().enabled);
+        manager.change("remove", "example.packaged").unwrap();
+        assert!(!provision(&open()));
+        assert!(installed().is_none());
+
+        // An upgrade encountering an existing user installation records it
+        // without replacing its revision, source or enabled state.
+        let home = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(home.path().into()), "upgrade", false).unwrap();
+        let newer = Release {
+            bytes: artifact_from_text(
+                r#"{"id":"example.packaged","name":"User version","apiVersion":1}"#,
+                "export function apply() { /* newer */ }".into(),
+            )
+            .unwrap(),
+            signature: None,
+        };
+        manager.install_artifact(&newer, None).unwrap();
+        assert!(provision(&manager));
+        let plugin = manager
+            .catalog()
+            .unwrap()
+            .plugins
+            .into_iter()
+            .find(|p| p.manifest.id == "example.packaged")
+            .unwrap();
+        assert_eq!(plugin.manifest.name, "User version");
+        assert!(!plugin.enabled);
+    }
+
+    #[test]
+    fn packaged_plugin_is_absent_without_build_input_and_deferred_in_safe_mode() {
+        let home = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(home.path().into()), "default", true).unwrap();
+        let mut registry = super::Registry::default();
+        assert!(!manager.provision_packaged(&mut registry, b"").unwrap());
+        let bytes = artifact_from_text(
+            r#"{"id":"example.packaged","name":"Packaged","apiVersion":1}"#,
+            "export function apply() {}".into(),
+        )
+        .unwrap();
+        assert!(!manager.provision_packaged(&mut registry, &bytes).unwrap());
+        assert!(registry.installed.is_empty());
+        assert!(!manager.root.join("packaged-plugins").exists());
+        let manager = Manager::open(Some(home.path().into()), "default", false).unwrap();
+        assert!(manager
+            .provision_packaged(&mut registry, b"invalid")
+            .is_err());
+        assert!(!manager.root.join("packaged-plugins").exists());
+        assert!(!serde_json::to_string(&registry)
+            .unwrap()
+            .contains("provisionedPlugins"));
+    }
 
     #[test]
     fn compressed_png_profile_is_bounded_before_header_decode() {

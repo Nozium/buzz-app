@@ -161,6 +161,26 @@ fn federated_identity(
 
 #[cfg_attr(test, allow(dead_code))]
 fn main() {
+    println!("cargo:rerun-if-env-changed=BUZZ_BUILD_PACKAGED_PLUGIN");
+    let packaged = match std::env::var_os("BUZZ_BUILD_PACKAGED_PLUGIN").filter(|p| !p.is_empty()) {
+        Some(path) => {
+            let path = PathBuf::from(path);
+            println!("cargo:rerun-if-changed={}", path.display());
+            let bytes = std::fs::read(path).expect("Read packaged plugin artifact");
+            assert!(
+                bytes.len() <= 8 * 1024 * 1024,
+                "Packaged plugin exceeds 8 MiB"
+            );
+            serde_json::from_slice::<serde_json::Value>(&bytes).expect("Packaged plugin JSON");
+            bytes
+        }
+        None => Vec::new(),
+    };
+    std::fs::write(
+        PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("packaged-plugin.json"),
+        packaged,
+    )
+    .expect("Write packaged plugin build input");
     let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
     let local = root.join(".env.local");
     println!("cargo:rerun-if-changed={}", local.display());
