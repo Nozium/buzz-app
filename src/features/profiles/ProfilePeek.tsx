@@ -80,6 +80,7 @@ export function ProfilePeek({
 }: ProfilePeekProps) {
   const [open, setOpen] = useState(false);
   const [hoveredAction, setHoveredAction] = useState<"profile" | "message">();
+  const [handedOff, setHandedOff] = useState(false);
   const profileButton = useRef<HTMLButtonElement>(null);
   const returningFromProfile = useRef<"pending" | "returned" | null>(null);
   const [watchReturnPointer, setWatchReturnPointer] = useState(false);
@@ -146,6 +147,7 @@ export function ProfilePeek({
   const openProfile = () => {
     const avatar = document.getElementById(triggerId);
     avatar?.focus();
+    setHandedOff(true);
     setOpen(false);
     returningFromProfile.current = "pending";
     pointerLeft.current = !avatar?.matches(":hover");
@@ -208,11 +210,16 @@ export function ProfilePeek({
           details.cancel();
           return;
         }
-        if (next) setHoveredAction(undefined);
+        if (next) {
+          setHoveredAction(undefined);
+          setHandedOff(false);
+        }
         setOpen(next);
       }}
       side="right"
-      className={styles.card ?? ""}
+      className={[styles.card, handedOff && styles.handedOff]
+        .filter(Boolean)
+        .join(" ")}
       aria-label={`${name} profile preview`}
       actionRef={profileButton}
     >

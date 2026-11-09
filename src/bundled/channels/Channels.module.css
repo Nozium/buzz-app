@@ -582,7 +582,7 @@ details:not([open]) > summary .sectionChevron {
   .board,
   .board:has(> [data-panel-dock]:not([hidden], [data-closing])) {
     grid-template-columns: minmax(0, 1fr);
-    overflow: hidden;
+    overflow: clip;
   }
   .panelStack > [data-panel-resize] {
     display: none;
@@ -604,7 +604,7 @@ details:not([open]) > summary .sectionChevron {
   .board,
   .board:has(> [data-panel-dock]:not([hidden], [data-closing])) {
     grid-template-columns: minmax(0, 1fr);
-    overflow: hidden;
+    overflow: clip;
   }
   .panelStack > [data-panel-resize] {
     display: none;
@@ -626,7 +626,7 @@ details:not([open]) > summary .sectionChevron {
   .board,
   .board:has(> [data-panel-dock]:not([hidden], [data-closing])) {
     grid-template-columns: minmax(0, 1fr);
-    overflow: hidden;
+    overflow: clip;
   }
   .panelStack {
     grid-column: 1 / -1;
