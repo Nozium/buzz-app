@@ -18,8 +18,9 @@ Disabling or removing the plugin persists across restart and app upgrades. Remov
 keeps the receipt, so automatic provisioning does not reinstall it. Manual reinstall
 remains available. Safe mode defers provisioning and pauses external plugins as
 usual. Receipts live in the profile's `packaged-plugins/` folder, so older versions
-can still read the registry. Settings recovery retains the receipt and therefore
-does not reinstall a removed package. Erasing the profile removes both.
+can still read the registry. Receipts distinguish provisioning from explicit removal.
+Settings recovery restores packages the user kept and preserves explicit removals.
+Erasing the profile removes both.
 
 If provisioning fails, Buzz reports the error to stderr and retains its ordinary
 plugin catalog. No receipt is written for a failed installation; later reads retry.

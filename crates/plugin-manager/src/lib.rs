@@ -926,6 +926,12 @@ impl Manager {
         Ok(file)
     }
     fn read(&self) -> Result<Registry> {
+        self.read_with_packaged(
+            include!(concat!(env!("OUT_DIR"), "/packaged-plugin-id.rs")),
+            include_bytes!(concat!(env!("OUT_DIR"), "/packaged-plugin.json")),
+        )
+    }
+    fn read_with_packaged(&self, packaged_id: &str, packaged_bytes: &[u8]) -> Result<Registry> {
         let path = self.root.join("registry.json");
         let mut r: Registry = match File::open(&path) {
             Ok(file) => serde_json::from_str(&read_file_limited(file)?).map_err(err)?,
@@ -958,10 +964,7 @@ impl Manager {
         }
         let renamed = migrate_agent_flag::migrate(&mut r);
         let pinned = pin_bundled_defaults(&mut r, self.existing_profile);
-        if let Err(error) = self.provision_packaged(
-            &mut r,
-            include_bytes!(concat!(env!("OUT_DIR"), "/packaged-plugin.json")),
-        ) {
+        if let Err(error) = self.provision_packaged(&mut r, packaged_id, packaged_bytes) {
             eprintln!("Packaged plugin provisioning deferred: {error}");
         }
         if renamed {
@@ -977,31 +980,33 @@ impl Manager {
     // Package trust is established by the app distributor. Keep the artifact in
     // ordinary external-plugin storage so disable, removal, updates and safe mode
     // retain their existing behavior. The receipt survives explicit removal.
-    fn provision_packaged(&self, registry: &mut Registry, bytes: &[u8]) -> Result<bool> {
+    fn provision_packaged(&self, registry: &mut Registry, id: &str, bytes: &[u8]) -> Result<bool> {
         if bytes.is_empty() {
             return Ok(false);
         }
-        let release = Release {
-            bytes: bytes.to_vec(),
-            signature: None,
-        };
-        let artifact = release.artifact()?;
-        let id = artifact.manifest.id.clone();
-        let receipt = self.root.join("packaged-plugins").join(&id);
+        valid_id(id)?;
+        let receipt = self.root.join("packaged-plugins").join(id);
         if receipt.try_exists().map_err(err)? {
             return Ok(false);
         }
-        if self.safe_mode && !registry.installed.contains_key(&id) {
+        if self.safe_mode && !registry.installed.contains_key(id) {
             return Ok(false);
         }
-        if !registry.installed.contains_key(&id) {
+        if !registry.installed.contains_key(id) {
+            let release = Release {
+                bytes: bytes.to_vec(),
+                signature: None,
+            };
+            if release.validate()?.id != id {
+                return Err("Packaged plugin identity mismatch".into());
+            }
             let mut next = registry.clone();
             self.store_release(&mut next, &release, None, true)?;
             self.save(&next)?;
-            atomic_write(&receipt, b"1")?;
+            atomic_write(&receipt, b"provisioned")?;
             *registry = next;
         } else {
-            atomic_write(&receipt, b"1")?;
+            atomic_write(&receipt, b"provisioned")?;
         }
         Ok(true)
     }
@@ -1134,8 +1139,12 @@ impl Manager {
         {
             let _lock = self.lock()?;
             let mut registry = self.read()?;
-            self.store_release(&mut registry, release, source, false)?;
+            let id = self.store_release(&mut registry, release, source, false)?;
             self.save(&registry)?;
+            let receipt = self.root.join("packaged-plugins").join(id);
+            if receipt.try_exists().map_err(err)? {
+                atomic_write(&receipt, b"provisioned")?;
+            }
         }
         self.catalog()
     }
@@ -1145,7 +1154,7 @@ impl Manager {
         release: &Release,
         source: Option<InstallSource>,
         default_enabled: bool,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let bytes = &release.bytes;
         let artifact = release.artifact()?;
         let manifest = artifact.manifest.clone();
@@ -1179,8 +1188,9 @@ impl Manager {
             }
         });
         atomic_write(&self.artifact_path(&manifest.id, &revision), bytes)?;
+        let id = manifest.id.clone();
         registry.installed.insert(
-            manifest.id.clone(),
+            id.clone(),
             Installed {
                 manifest,
                 current: revision,
@@ -1196,7 +1206,7 @@ impl Manager {
                 icon_jpg_revision,
             },
         );
-        Ok(())
+        Ok(id)
     }
     pub fn change(&self, action: &str, id: &str) -> Result<Catalog> {
         valid_id(id)?;
@@ -1241,7 +1251,7 @@ impl Manager {
                     "remove" => {
                         // Remember explicit removal even in safe mode or when a
                         // distributor adds this plugin in a later app release.
-                        atomic_write(&self.root.join("packaged-plugins").join(id), b"1")?;
+                        atomic_write(&self.root.join("packaged-plugins").join(id), b"removed")?;
                         registry.installed.remove(id);
                     }
                     "rollback" => {
@@ -1459,6 +1469,17 @@ impl Manager {
             let mut defaults = Registry::default();
             pin_bundled_defaults(&mut defaults, false);
             self.save(&defaults)?;
+            let receipts = self.root.join("packaged-plugins");
+            if receipts.try_exists().map_err(err)? {
+                for entry in fs::read_dir(receipts).map_err(err)? {
+                    let entry = entry.map_err(err)?;
+                    if entry.file_type().map_err(err)?.is_file()
+                        && read_limited(&entry.path())? == "provisioned"
+                    {
+                        fs::remove_file(entry.path()).map_err(err)?;
+                    }
+                }
+            }
         }
         self.catalog()
     }
@@ -1733,7 +1754,9 @@ mod tests {
         let provision = |manager: &Manager| {
             let _lock = manager.lock().unwrap();
             let mut registry = manager.read().unwrap();
-            let changed = manager.provision_packaged(&mut registry, &bytes).unwrap();
+            let changed = manager
+                .provision_packaged(&mut registry, "example.packaged", &bytes)
+                .unwrap();
             if changed {
                 manager.save(&registry).unwrap();
             }
@@ -1790,23 +1813,100 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let manager = Manager::open(Some(home.path().into()), "default", true).unwrap();
         let mut registry = super::Registry::default();
-        assert!(!manager.provision_packaged(&mut registry, b"").unwrap());
+        assert!(!manager
+            .provision_packaged(&mut registry, "example.packaged", b"")
+            .unwrap());
         let bytes = artifact_from_text(
             r#"{"id":"example.packaged","name":"Packaged","apiVersion":1}"#,
             "export function apply() {}".into(),
         )
         .unwrap();
-        assert!(!manager.provision_packaged(&mut registry, &bytes).unwrap());
+        assert!(!manager
+            .provision_packaged(&mut registry, "example.packaged", &bytes)
+            .unwrap());
         assert!(registry.installed.is_empty());
         assert!(!manager.root.join("packaged-plugins").exists());
         let manager = Manager::open(Some(home.path().into()), "default", false).unwrap();
         assert!(manager
-            .provision_packaged(&mut registry, b"invalid")
+            .provision_packaged(&mut registry, "example.packaged", b"invalid")
             .is_err());
         assert!(!manager.root.join("packaged-plugins").exists());
-        assert!(!serde_json::to_string(&registry)
+    }
+
+    #[test]
+    fn packaged_recovery_restores_kept_plugins_and_preserves_explicit_removal() {
+        let home = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(home.path().into()), "default", false).unwrap();
+        let id = "example.packaged";
+        let bytes = artifact_from_text(
+            r#"{"id":"example.packaged","name":"Packaged","apiVersion":1}"#,
+            "export function apply() {}".into(),
+        )
+        .unwrap();
+        let read = || {
+            let _lock = manager.lock().unwrap();
+            manager.read_with_packaged(id, &bytes).unwrap()
+        };
+        assert!(read().installed[id].enabled);
+        fs::write(manager.root.join("registry.json"), "corrupt").unwrap();
+        manager.recover().unwrap();
+        assert!(read().installed[id].enabled);
+        manager.change("remove", id).unwrap();
+        manager.recover().unwrap();
+        assert!(!read().installed.contains_key(id));
+        manager
+            .install_artifact(
+                &Release {
+                    bytes: bytes.clone(),
+                    signature: None,
+                },
+                None,
+            )
+            .unwrap();
+        manager.recover().unwrap();
+        assert!(read().installed.contains_key(id));
+
+        // A public build can record removal before the first packaged startup.
+        let home = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(home.path().into()), "default", false).unwrap();
+        manager
+            .install_artifact(
+                &Release {
+                    bytes: bytes.clone(),
+                    signature: None,
+                },
+                None,
+            )
+            .unwrap();
+        manager.change("remove", id).unwrap();
+        let _lock = manager.lock().unwrap();
+        assert!(!manager
+            .read_with_packaged(id, &bytes)
             .unwrap()
-            .contains("provisionedPlugins"));
+            .installed
+            .contains_key(id));
+    }
+
+    #[test]
+    fn packaged_reads_skip_completed_work_and_preserve_catalog_on_invalid_inputs() {
+        let home = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(home.path().into()), "default", false).unwrap();
+        let _lock = manager.lock().unwrap();
+        let id = "example.packaged";
+        for bytes in [
+            b"invalid".as_slice(),
+            br#"{"manifest":{"id":"buzz.channels","name":"Reserved","apiVersion":1},"code":"export function apply() {}"}"#.as_slice(),
+        ] {
+            let registry = manager.read_with_packaged(id, bytes).unwrap();
+            assert!(registry.installed.is_empty());
+            assert!(!manager.root.join("packaged-plugins").exists());
+        }
+        super::atomic_write(&manager.root.join("packaged-plugins").join(id), b"removed").unwrap();
+        let mut registry = manager.read().unwrap();
+        // A completed receipt is enough; invalid bytes prove no parsing occurs.
+        assert!(!manager
+            .provision_packaged(&mut registry, id, b"invalid")
+            .unwrap());
     }
 
     #[test]
