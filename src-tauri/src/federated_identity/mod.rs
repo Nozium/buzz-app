@@ -85,6 +85,8 @@ pub(crate) struct Record {
     email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     device_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dpop_mode: Option<config::DpopMode>,
 }
 impl Drop for Record {
     fn drop(&mut self) {
@@ -1063,6 +1065,7 @@ impl FederatedIdentity {
                 serde_json::from_slice(&raw).map_err(|_| Failure::from("storage-corrupt"))?;
             if !matches!(record.version, 1 | 2)
                 || (record.version == 2) != record.device_key.is_some()
+                || (record.version == 2) != record.dpop_mode.is_some()
                 || record.fingerprint != self.0.fingerprint
                 || uuid::Uuid::parse_str(&record.revision).is_err()
                 || record.session_token.is_empty()
@@ -1071,7 +1074,7 @@ impl FederatedIdentity {
             {
                 return Err("storage-corrupt".into());
             }
-            if (record.version == 2) != self.config().is_some_and(|config| config.dpop.is_some()) {
+            if record.dpop_mode != self.config().and_then(|config| config.dpop) {
                 return Err("credential-mode-changed".into());
             }
             let key = match (
@@ -1426,6 +1429,7 @@ impl FederatedIdentity {
         let mut record = Record {
             version: if key.is_some() { 2 } else { 1 },
             device_key: key.as_ref().map(|key| key.handle().to_owned()),
+            dpop_mode: config.dpop,
             fingerprint: self.0.fingerprint.clone(),
             revision: uuid::Uuid::new_v4().to_string(),
             session_token: exchange.session_token.clone(),
@@ -1503,7 +1507,6 @@ impl FederatedIdentity {
         if let Some(key) = &session.key {
             key.retain();
         }
-        let retired_session = self.state().session.clone();
         let installed = {
             let mut state = self.state();
             if state.snapshot.revision == revision && !state.closed {
@@ -1525,10 +1528,16 @@ impl FederatedIdentity {
             abandon().await;
             return Err("session-changed".into());
         }
-        if let Some(retired) = retired_session
-            .filter(|old| old.key.is_some() && old.record.device_key != session.record.device_key)
-        {
-            self.revoke(&retired);
+        if let Some(replaced) = replacing {
+            // Retire a credential-mode/key migration, including a record restore could not install.
+            // Ordinary bearer renewal keeps its existing server rotation semantics.
+            let changed = serde_json::from_slice::<Record>(&replaced).is_ok_and(|old| {
+                old.dpop_mode != session.record.dpop_mode
+                    || old.device_key != session.record.device_key
+            });
+            if changed {
+                self.revoke_record(replaced);
+            }
         }
         Ok(())
     }
@@ -1597,19 +1606,48 @@ impl FederatedIdentity {
         } else {
             // Also retries an incomplete deletion or sign-out during restore.
             self.storage(|store| {
-                if let Some(raw) = store.read()? {
+                let raw = store.read()?;
+                if let Some(raw) = &raw {
                     let record: Record =
-                        serde_json::from_slice(&raw).map_err(|_| "storage-corrupt")?;
-                    store.remove(&raw, &record.revision)?;
+                        serde_json::from_slice(raw).map_err(|_| "storage-corrupt")?;
+                    store.remove(raw, &record.revision)?;
                 }
-                Ok(())
+                Ok(raw)
             })
             .await
+            .map(|raw| {
+                if let Some(raw) = raw {
+                    self.revoke_record(raw);
+                }
+            })
         };
         if let Err(failure) = result {
             self.cleanup_failed(&revision, failure.code);
         }
         self.snapshot()
+    }
+    /// Retire a replaced or signed-out stored credential even when restore refused its mode.
+    fn revoke_record(&self, raw: Zeroizing<Vec<u8>>) {
+        let Ok(record) = serde_json::from_slice::<Record>(&raw) else {
+            return;
+        };
+        if record.fingerprint != self.0.fingerprint {
+            return;
+        }
+        let key = match (&record.device_key, record.dpop_mode) {
+            (Some(handle), Some(mode)) => match dpop::DeviceKey::load(handle, mode) {
+                Ok(key) => Some(Arc::new(key)),
+                Err(_) => return, // Remote revocation is best effort if the old key is unavailable.
+            },
+            (None, None) if record.version == 1 => None,
+            _ => return,
+        };
+        self.revoke(&Session {
+            record,
+            raw,
+            key,
+            issued_at: 0,
+        });
     }
     /// Ask the server to end a signed-out session, so no copy of its token
     /// still works. Best effort: one detached attempt whose result is ignored,

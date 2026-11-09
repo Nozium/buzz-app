@@ -239,11 +239,12 @@ impl Config {
         })
     }
 
-    /// The deployment as it identifies saved sessions, without presentation.
+    /// The authority identity for saved sessions, independent of presentation and credential mode.
     pub(crate) fn identity(&self) -> Self {
         Self {
             sign_in: SignIn::OnDemand,
             organization: None,
+            dpop: None,
             ..self.clone()
         }
     }

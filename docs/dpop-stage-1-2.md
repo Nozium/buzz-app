@@ -73,9 +73,13 @@ on retries before enabling `humanProofReplayProtectionEnabled`.
 Bound sessions always enforce freshness at sensitive boundaries and human
 NIP-98 replay checks, independent of the legacy rollout flags.
 
-A bound record stores a key handle and uses a new version. Restore loads that
+The storage identity is stable across bearer, software, and Secure Enclave modes.
+A bound record stores a key handle and explicit key mode and uses a new version. Restore loads that
 same key; key loss or a credential-mode transition requires fresh sign-in and
-never reinterprets the token as bearer. Session revisions fence derived work.
+never reinterprets the token as bearer. Fresh login overwrites the same slot and
+attempts to revoke the superseded credential, including one refused during restore.
+Signing out removes that slot so rolling the mode back cannot restore an old session.
+Session revisions fence derived work.
 Rotation preserves the stored binding. Record removal, rollback and logout
 check current secure-store references before removing a key. Recovery owns a
 new key and a temporary session whose last native request owner attempts logout.
