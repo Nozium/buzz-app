@@ -1259,6 +1259,13 @@
     overflow: hidden;
   }
 
+  /* Count labels straddle the corner; other contributed marks keep their slot. */
+  .buzz-tabs[data-variant="dock"] .buzz-tabs-badge:has(.buzz-count-badge) {
+    inset-inline-end: calc(-1 * var(--space-1));
+    transform: translateY(-50%);
+    overflow: visible;
+  }
+
   .buzz-tabs[data-variant="dock"]:where([data-orientation="vertical"])
     .buzz-tabs-list {
     flex-direction: column;
@@ -2082,6 +2089,11 @@
     background: var(--affordance-subtle);
     color: var(--text-subtle);
     font-variant-numeric: tabular-nums;
+  }
+  .buzz-tabs[data-variant="dock"] .buzz-count-badge {
+    background: var(--surface-dock-count);
+    color: var(--text-dock-count);
+    box-shadow: 0 0 0 1px var(--bg-app);
   }
   .navigation-item[data-selected] .buzz-count-badge {
     background: var(--surface-row-selected-detail);

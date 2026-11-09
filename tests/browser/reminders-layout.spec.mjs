@@ -303,6 +303,7 @@ test("due reminder counts fit the dock at every supported text size", async ({
       continue;
     }
     await expect(badge).toHaveText(count > 99 ? "99+" : String(count));
+    await page.evaluate(() => document.fonts.ready);
     for (const width of [480, 1280]) {
       await page.setViewportSize({ width, height: 800 });
       for (const mode of ["light", "dark"]) {
@@ -319,7 +320,12 @@ test("due reminder counts fit the dock at every supported text size", async ({
             const wrapper = el
               .closest(".buzz-tabs-badge")
               .getBoundingClientRect();
-            const tile = el.closest('[role="tab"]').getBoundingClientRect();
+            const tab = el.closest('[role="tab"]');
+            const tile = tab.getBoundingClientRect();
+            const icon = tab.querySelector("svg").getBoundingClientRect();
+            const scrollport = el
+              .closest(".shell-dock-pages")
+              .getBoundingClientRect();
             const range = document.createRange();
             range.selectNodeContents(el);
             const text = range.getBoundingClientRect();
@@ -334,11 +340,13 @@ test("due reminder counts fit the dock at every supported text size", async ({
                 text.right <= wrapper.right &&
                 text.top >= wrapper.top &&
                 text.bottom <= wrapper.bottom,
-              insideTile:
-                rect.left >= tile.left &&
-                rect.right <= tile.right &&
-                rect.top >= tile.top &&
-                rect.bottom <= tile.bottom,
+              outsideCorner: rect.top < tile.top && rect.right > tile.right,
+              clearOfIcon: rect.bottom <= icon.top || rect.left >= icon.right,
+              insideScrollport:
+                rect.left >= scrollport.left &&
+                rect.right <= scrollport.right &&
+                rect.top >= scrollport.top &&
+                rect.bottom <= scrollport.bottom,
               overflow: el.scrollWidth - el.clientWidth,
               fontSize: Number.parseFloat(getComputedStyle(el).fontSize),
               tileWidth: tile.width,
@@ -350,7 +358,9 @@ test("due reminder counts fit the dock at every supported text size", async ({
             `${count}, ${width}, ${mode}, ${font}`,
           ).toBe(true);
           expect(geometry.textFits).toBe(true);
-          expect(geometry.insideTile).toBe(true);
+          expect(geometry.outsideCorner).toBe(true);
+          expect(geometry.clearOfIcon).toBe(true);
+          expect(geometry.insideScrollport).toBe(true);
           expect(geometry.overflow).toBe(0);
           expect(geometry.fontSize).toBeLessThan(geometry.tileWidth / 2);
           expect(geometry.background).not.toBe("rgba(0, 0, 0, 0)");
@@ -360,7 +370,8 @@ test("due reminder counts fit the dock at every supported text size", async ({
     // A corner badge must not intercept the tab's pointer or keyboard action.
     await page.goto(`${url}?dock&count=${count}&inactive`);
     await expect(tab).toHaveAttribute("aria-selected", "false");
-    await badge.click();
+    const tile = await tab.boundingBox();
+    await tab.click({ position: { x: tile.width - 2, y: 2 } });
     await expect(tab).toHaveAttribute("aria-selected", "true");
     await page.reload();
     await tab.focus();

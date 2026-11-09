@@ -17,6 +17,7 @@ import type {
 } from "../../src/features/relay/reminders";
 import type { RelayData } from "../../src/features/relay/service";
 import type { Navigation } from "../../src/features/navigation/controller";
+import "@fontsource-variable/inter/wght.css";
 import "../../src/shared/styles/globals.css";
 
 // The real Reminders page in a content region of `?width=` pixels, with one
@@ -212,14 +213,16 @@ function DockPreview() {
     params.has("inactive") ? "other" : pages[0].key,
   );
   return (
-    <div className="shell-background flex h-screen p-2">
-      <nav aria-label="Apps dock" className="flex flex-col">
-        <PageNavigation
-          pages={pages}
-          selected={selected}
-          onSelect={select}
-          placement="dock"
-        />
+    <div className="shell-background flex h-screen pt-2">
+      <nav aria-label="Apps dock" className="shell-side-dock">
+        <div className="shell-dock-pages">
+          <PageNavigation
+            pages={pages}
+            selected={selected}
+            onSelect={select}
+            placement="dock"
+          />
+        </div>
       </nav>
       <main className="flex-1 bg-panel" />
     </div>
