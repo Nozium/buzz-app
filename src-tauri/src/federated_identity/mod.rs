@@ -1507,6 +1507,7 @@ impl FederatedIdentity {
         if let Some(key) = &session.key {
             key.retain();
         }
+        let retired_session = self.state().session.clone();
         let installed = {
             let mut state = self.state();
             if state.snapshot.revision == revision && !state.closed {
@@ -1528,12 +1529,20 @@ impl FederatedIdentity {
             abandon().await;
             return Err("session-changed".into());
         }
+        let retired_session = retired_session
+            .filter(|old| old.key.is_some() && old.record.device_key != session.record.device_key);
+        if let Some(retired) = &retired_session {
+            self.revoke(retired);
+        }
         if let Some(replaced) = replacing {
             // Retire a credential-mode/key migration, including a record restore could not install.
             // Ordinary bearer renewal keeps its existing server rotation semantics.
             let changed = serde_json::from_slice::<Record>(&replaced).is_ok_and(|old| {
-                old.dpop_mode != session.record.dpop_mode
-                    || old.device_key != session.record.device_key
+                (old.dpop_mode != session.record.dpop_mode
+                    || old.device_key != session.record.device_key)
+                    && !retired_session
+                        .as_ref()
+                        .is_some_and(|retired| retired.record.revision == old.revision)
             });
             if changed {
                 self.revoke_record(replaced);

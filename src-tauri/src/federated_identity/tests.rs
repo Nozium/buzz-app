@@ -2036,3 +2036,82 @@ async fn disabling_dpop_retires_the_stored_bound_credential_and_its_key() {
         .iter()
         .any(|(name, value)| name == "x-bb-session-credential" && value == "new-bearer-token"));
 }
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn replacing_another_copys_record_also_retires_the_in_memory_bound_key() {
+    let expires = "2099-01-01T00:00:00Z";
+    let (base, server) = adapter(vec![
+        serde_json::json!({"token_type":"DPoP","session_token":"replacement","expires_at":expires}),
+        serde_json::json!({"expires_at":expires}),
+        serde_json::json!({}),
+        serde_json::json!({}),
+    ])
+    .await;
+    let memory = Arc::new(Memory::default());
+    let owner = mode_host(memory.clone(), &base, Some(config::DpopMode::Software));
+    let saved = |token: &str| {
+        let key = Arc::new(dpop::DeviceKey::create(config::DpopMode::Software).unwrap());
+        key.retain();
+        let mut record: Record = serde_json::from_slice(&record().raw).unwrap();
+        record.version = 2;
+        record.device_key = Some(key.handle().to_owned());
+        record.dpop_mode = Some(config::DpopMode::Software);
+        record.fingerprint = owner.0.fingerprint.clone();
+        record.session_token = token.to_owned();
+        let raw = Zeroizing::new(serde_json::to_vec(&record).unwrap());
+        Arc::new(Session {
+            key: Some(key),
+            record,
+            raw,
+            issued_at: 0,
+        })
+    };
+    let held = saved("held-session");
+    let other = saved("other-copy-session");
+    owner.state().session = Some(held.clone());
+    *memory.raw.lock().unwrap() = Some(other.raw.clone());
+    let key = Arc::new(dpop::DeviceKey::create(config::DpopMode::Software).unwrap());
+    let handle = key.handle().to_owned();
+    owner
+        .finish_bound_login(
+            "code",
+            "secret",
+            &owner.snapshot().revision,
+            &CancellationToken::new(),
+            Some(key),
+        )
+        .await
+        .unwrap();
+    for request in std::mem::take(&mut *owner.0.revocations.lock().unwrap()) {
+        request.await.unwrap();
+    }
+    for old in [held, other] {
+        assert!(dpop::DeviceKey::load(
+            old.record.device_key.as_ref().unwrap(),
+            config::DpopMode::Software
+        )
+        .is_err());
+    }
+    assert!(dpop::DeviceKey::load(&handle, config::DpopMode::Software).is_ok());
+    let requests = server.await.unwrap();
+    let revoked: std::collections::BTreeSet<_> = requests[2..]
+        .iter()
+        .map(|request| {
+            assert!(request.target.contains("/v1/auth/logout"));
+            request
+                .headers
+                .iter()
+                .find(|(name, _)| name == "authorization")
+                .unwrap()
+                .1
+                .as_str()
+        })
+        .collect();
+    assert_eq!(
+        revoked,
+        std::collections::BTreeSet::from(["DPoP held-session", "DPoP other-copy-session"])
+    );
+    let current = owner.state().session.clone().unwrap();
+    owner.remove(current).await.unwrap();
+}
