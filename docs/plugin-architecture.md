@@ -147,6 +147,14 @@ computer access, then select **Install plugin**. Opening the link does not insta
 enable, or grant access. You can close the dialog while the preview loads. A late
 result is discarded. Confirmed installation remains protected from dismissal.
 
+A link that carries both `commit` and `path` can also update a plugin already
+installed from the same Git repository and folder, under the same rules as a Git
+`requestInstall`: the review shows **Update** with the access changes and any change
+to the tracked branch or tag (native saves the requested `ref` for later updates), keeps the
+plugin's enabled or disabled state, and refuses a plugin installed from another
+source. Without both keys, a link to an installed plugin offers only **Open in Buzz**.
+If the installed plugin changes before you confirm, the update is refused.
+
 SSH uses known hosts and, unless a [repository access rule](repository-access.md)
 selects another agent, the desktop process's inherited `SSH_AUTH_SOCK`. The importer
 disables SSH config and interactive prompts. If terminal Git uses an `IdentityAgent`,
@@ -805,7 +813,9 @@ every gate to allow the target; the Dock asks about each conversation as a
 removed. A throwing gate is skipped. `gate` returns a remover, and disabling the
 plugin removes its gates. Gates never widen the host's own access and
 preference checks. A refused alert is dropped, not queued. Focus registers one
-only while Focus is on.
+only while Focus is on. Reminders re-targets a refused message alert to its
+Reminders page, so a gate that should silence reminders must refuse page
+targets too, as Focus does.
 
 A page may supply `icon`, a `data:image/<subtype>[;params],<payload>` URL; the
 scheme and type match case-insensitively. Search Buzz and the page navigation
@@ -1001,7 +1011,10 @@ cards such as Pair mobile that collect their own community address; it cannot be
 combined with `group` or `section`.
 Its section id is the contribution key (`plugin/card`) and disappears with the plugin. The optional `icon`
 uses the shared design-system icon gateway; the host supplies a fallback when omitted.
-Cards receive `active()` and use ordinary
+Cards receive `active()` and optional `navigation` for the current Settings visit.
+A Settings target can carry bounded `route: { version, params }` presentation
+data; the card interprets supported versions and ignores unknown routes. Opening
+a route must never submit a write. Cards use ordinary
 session capabilities through injection. Host boundaries isolate rendering errors;
 exact registration identity and mounted lifetime revoke callbacks on removal.
 
@@ -1730,12 +1743,36 @@ const saved = response && await ctx.host.saveBytes?.(response.body, { sha256 });
 
 `requestBytes({url,maxBytes,timeoutMs?})` performs only GET, with no caller headers,
 body or cookies and no redirects. The destination must be an exact declared
-HTTPS origin of the current enabled plugin revision, checked again before handoff.
+HTTPS origin of the current enabled plugin revision (or, with `host.publicImages`,
+any public HTTPS address, below), checked again before handoff.
 `maxBytes` is a required integer from 1 through 16777216 (16 MiB); actual chunks
 are counted regardless of Content-Length. The deadline defaults to 30000 ms and
 can be 1–30000 ms. Empty bodies and non-2xx statuses are returned, not reclassified
 as successful operations. Existing ordinary GET client retry semantics remain;
 this is not an at-most-one GET promise or an application retry policy.
+
+Declare `host: { publicImages: true }` to let `requestBytes` also read images from
+any public HTTPS site, outside `networkOrigins`: for example a link preview's
+`og:image`, whose host can't be known ahead of time. It widens only
+`requestBytes`: `request`, `upload` and `uploadBytesOnce` still need a declared
+origin. A declared origin keeps its ordinary behavior. Any other URL must use
+port 443, and native code resolves its name and refuses it unless every address is public (not loopback, private,
+shared 100.64.0.0/10, link-local, multicast, documentation or reserved space,
+including IPv4 embedded in IPv6), then connects only to those addresses, with no
+proxy, no cookies and Buzz's User-Agent. A redirect returns its status and
+`Location` alone: the plugin checks the next hop and asks again. A 2xx PNG,
+JPEG, GIF, WebP or AVIF response returns its `content-type` and body; anything
+else, including SVG and pages, returns its status with no headers or body.
+Names that resolve publicly but are reached only through a VPN (such as a
+company's internal hosts) are not visible to this check, so the plugin must
+refuse them by name on every hop. The site sees the user's IP address.
+
+Only images come back, but the plugin chooses each URL, so the grant lets it
+send data it holds to any public site in the path, query or hostname. It lifts
+the bound `networkOrigins` otherwise puts on where a plugin's data can go; the
+access review says so. Public image reads share the one-at-a-time byte request
+slot with every plugin's `requestBytes` and `saveBytes`, so pass a short
+`timeoutMs`.
 
 The internal raw response is a four-byte big-endian metadata length, UTF-8 JSON
 `{status,headers}` of at most 20 KiB, then the body. At most 64 response headers
@@ -2674,8 +2711,11 @@ that were not asked are dropped.
 
 The user chooses the provider in Settings > Decisions API, and the choice is
 kept on this device. Until they choose, the first default provider that is on
-answers: Builderlab (`block.builderlab/builderlab`), then TypeSafe
-(`buzz.typesafe/typesafe`). The same holds while a chosen default is not on.
+and can answer (`ready` or `unconfirmed`) does: Builderlab
+(`block.builderlab/builderlab`), then TypeSafe (`buzz.typesafe/typesafe`).
+When none can, TypeSafe is the provider, and the status is `checking` while
+another default is still finding out whether it can answer. The same holds
+while a chosen default is not on.
 Decision text can include private messages, so no other provider gets it
 without that choice: while a chosen provider that is not a default is not on,
 decisions are `unavailable` and are not sent to another provider. `ctx.decisions.backend()`
@@ -2687,7 +2727,7 @@ so send only what the decision needs.
 | Provider | Plugin | Credentials |
 |----------|--------|-------------|
 | `buzz.typesafe/typesafe` | TypeSafe (bundled, on by default) | The user's TypeSafe key, kept and read only by native code (`src-tauri/src/decisions.rs`) |
-| `block.builderlab/builderlab` | Builderlab (bundled, in desktop builds with a Builderlab); registered only while the user is signed in to an account Builderlab allows decisions for | The user's Builderlab sign-in, which native code sends with each call. Builderlab answers with Jev and bills the request's `community`; its server allows up to 32 questions per call |
+| `block.builderlab/builderlab` | Builderlab (bundled, in desktop builds with a Builderlab); registered while the user is signed in, and `needs-setup` unless Builderlab allows the account decisions | The user's Builderlab sign-in, which native code sends with each call. Builderlab answers with Jev and bills the request's `community`; its server allows up to 32 questions per call |
 
 ## In-app keyboard shortcuts
 
