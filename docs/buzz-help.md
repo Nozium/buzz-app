@@ -43,6 +43,14 @@ mention anyone. Explicit agent watches on that room can still receive them.
 
 ## Identity and getting connected
 
+- If Buzz can’t finish starting, the window says **Buzz couldn’t open**
+  instead of staying on the opening mark: **Reload** tries again, the desktop
+  app also offers **Restart Buzz**, and **Details** holds the error for
+  support. Your messages and settings are safe. A start that takes more than
+  about 20 seconds says **This is taking longer than usual.** with **Reload**,
+  and still opens by itself if it finishes. If Buzz hits an error it can’t
+  recover from after it has opened, the window says **Buzz stopped working**
+  with the same **Reload**, **Restart Buzz** and **Details**.
 - Buzz uses a key-based identity. On first launch, the welcome screen offers
   **Create account** and **Sign in**, which open the Builderlab account page;
   once this computer was set up through Builderlab, **Sign in** comes first.
@@ -81,7 +89,11 @@ mention anyone. Explicit agent watches on that room can still receive them.
   otherwise Buzz asks **Sync your identity with Builderlab?**, again on the
   next launch or sign-in if the dialog is closed. **Settings → Buzz → Identity
   → Identity sync** shows the sync status and, while backup is off, offers
-  **Sync with Builderlab**. After signing in to the
+  **Sync with Builderlab**. When the key isn’t linked to your Builderlab
+  account, or the account holds a different key, its **Builderlab** link opens
+  **Settings → Plugins → Builderlab**, where **Connect Buzz identity** links
+  this key, or **Switch to this device’s identity** replaces the account’s key
+  (this permanently unlinks the old one). After signing in to the
   public Builderlab, **Connect to a community** also offers **Create a
   community** when that account is linked to this device’s key and may create one.
   Choose an available address, then **Create community** joins it right away,
@@ -489,6 +501,8 @@ revokes all of them, and a pairing unused for 30 days expires.
   **Settings → Shortcuts → Sending messages → Send with ⌘ Enter** (Ctrl+Enter
   outside Apple platforms) swaps that on this device: Enter adds a line and
   ⌘/Ctrl+Enter sends. It starts off.
+- If a message can't be sent, **Retry** appears under it right away. If its
+  delivery is only unconfirmed, Buzz waits about ten seconds before saying so.
 - A plugin can require a recipient for a new conversation. Its default recipient
   also applies to a saved draft with no recipients. Your text and formatting stay.
   A recipient you select takes priority.
@@ -972,13 +986,6 @@ available rather than silently discarding it.
   no switch to turn on. A change shows as not saved when it is active but
   could not be saved on this device.
 
-- In communities where your build enables it, an agent running on this
-  device with a built-in harness can list your channels, including private and
-  archived ones, DMs and Solo chats it is not in, and see a channel's details
-  and members, read with your access. It cannot change anything this way, and
-  it stops working when you sign out, switch accounts, disconnect or stop its
-  turn.
-
 Saved teams from **Your teams** appear in the inline `@` suggestions and the
 mention picker. Select a team to insert its members as individual mentions.
 Typing its name alone does not notify it. Empty teams, teams with more than 32
@@ -1079,7 +1086,7 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   Each watch shows its source and Active or Paused state. Expand a
   watch, then expand “Activity” for a compact event timeline. Expand an event to read its full
   content, or expand “Watch details” for conditions and the execution destination. Select its status pill to
-  resume, pause, or delete it, or its source pill to inspect the watched channels or source. “Responds in” shows where the agent runs and replies; select that destination to open the conversation.
+  resume, pause, or delete it (Delete asks first), or its source pill to inspect the watched channels or source. “Responds in” shows where the agent runs and replies; select that destination to open the conversation.
   “Runs in” names its execution conversation; its instructions can specify a
   different place to report. A
   mention can still wake an agent when Attention is off; turning the plugin on does not grant new access.
