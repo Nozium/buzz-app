@@ -4,6 +4,7 @@ import type { Outbox } from "./outbox";
 import { MessageProjection } from "./message-projection";
 import { createRelayProfiler, type RelayProfiler } from "./profiling";
 import { isTransientFailure, ReadError, readErrorKind } from "./errors";
+import { refusalOfError } from "./http-admission";
 import type {
   ChannelReference,
   ChannelList,
@@ -924,6 +925,10 @@ export function createChannelStore(
     // A chat still starting is not there to deny yet; only a refused or
     // missing create ends it (see channelWrites.start).
     if (discovery?.isPending(channelId)) return;
+    // The community refused the account, not this channel. Its owner (the
+    // relay service's deny) ends the session, and keeps saved data for an
+    // ended sign-in; removing this channel here would lose it.
+    if (refusalOfError(error)) return;
     accessVersions.set(channelId, (accessVersions.get(channelId) ?? 0) + 1);
     discovery?.deny(channelId);
     allowed?.delete(channelId);
@@ -2083,7 +2088,12 @@ export function createChannelStore(
           };
       if (error instanceof ReadError && error.retryAfterMs !== undefined)
         listRetryAt = performance.now() + error.retryAfterMs;
-      if (denyAllOnFailure && readErrorKind(error) === "denied") {
+      if (
+        denyAllOnFailure &&
+        readErrorKind(error) === "denied" &&
+        // A community-wide refusal belongs to the relay service (see denyChannel).
+        !refusalOfError(error)
+      ) {
         discovery.denyAll();
         transport.revokeAccess(() => {
           for (const id of allowed ?? [])

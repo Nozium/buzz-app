@@ -2,6 +2,7 @@ import { assert, afterEach, expect, it, vi } from "vitest";
 import type { OutgoingEvent, OutboxStorage } from "./outbox";
 import type { ChannelStoreOptions } from "./store";
 import { createRelaySession } from "./session";
+import { ReadError } from "./errors";
 import type { RelayEvent } from "./events";
 import {
   type Key,
@@ -911,3 +912,69 @@ it("a profile subscriber cannot restore a persisted head after revoking and regr
   h.session.channels.ensure("a");
   expect(h.session.channels.window("a").rows).toEqual([]);
 });
+
+function emptyDisk() {
+  return {
+    read: vi.fn(async () => []),
+    write: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
+    retain: vi.fn(async () => {}),
+    clear: vi.fn(async () => {}),
+    close: vi.fn(),
+  };
+}
+
+it.each([
+  ["an ended sign-in", "auth-required: authentication required", 401],
+  ["lost community access", "restricted: authorization denied", 403],
+])(
+  "a channel read refused for %s leaves saved data to the community owner",
+  async (_case, reason, status) => {
+    const disk = emptyDisk();
+    const h = setup({ prepared: true, persistence: disk });
+    h.emit([roster(relay, "a", [viewer.pubkey], 10)]);
+    await flush();
+    h.session.channels.ensure("a");
+    await vi.waitFor(() => expect(h.pending.length).toBeGreaterThan(0));
+    for (const request of h.pending.splice(0))
+      request.fail(new ReadError("denied", reason, status));
+    await flush();
+    expect(disk.remove).not.toHaveBeenCalled();
+    expect(disk.clear).not.toHaveBeenCalled();
+  },
+);
+
+it("a channel read refused for that channel alone still forgets its saved copy", async () => {
+  const disk = emptyDisk();
+  const h = setup({ prepared: true, persistence: disk });
+  h.emit([roster(relay, "a", [viewer.pubkey], 10)]);
+  await flush();
+  h.session.channels.ensure("a");
+  await vi.waitFor(() => expect(h.pending.length).toBeGreaterThan(0));
+  for (const request of h.pending.splice(0))
+    request.fail(new ReadError("denied", "restricted: not a member", 403));
+  await flush();
+  await vi.waitFor(() => expect(disk.remove).toHaveBeenCalledWith("a"));
+});
+
+it.each([
+  [
+    "a community refusal keeps",
+    "auth-required: authentication required",
+    401,
+    0,
+  ],
+  ["a directory denial clears", "restricted: not a member", 403, 1],
+])(
+  "%s saved data when the first channel directory read is refused",
+  async (_case, reason, status, clears) => {
+    const disk = emptyDisk();
+    const h = setup({ persistence: disk });
+    h.session.channels.ensureList();
+    await vi.waitFor(() => expect(h.pending.length).toBeGreaterThan(0));
+    for (const request of h.pending.splice(0))
+      request.fail(new ReadError("denied", reason, status));
+    await flush();
+    expect(disk.clear).toHaveBeenCalledTimes(clears);
+  },
+);
