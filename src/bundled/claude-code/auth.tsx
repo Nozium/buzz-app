@@ -61,12 +61,15 @@ const nativeStore = ():
       status(): Promise<boolean>;
       /** Saves the key; it is never read back. */
       save(key: string): Promise<void>;
+      /** Deletes the key. */
+      clear(): Promise<void>;
     }>
   | undefined =>
   isTauri()
     ? {
         status: async () => (await invoke("claude_api_key_status")) === true,
         save: (value) => invoke("claude_api_key_set", { value }),
+        clear: () => invoke("claude_api_key_clear"),
       }
     : undefined;
 
@@ -140,6 +143,19 @@ export class ClaudeAuth {
     }
     for (const listener of this.listeners) listener();
     return "Saved the Anthropic API key.";
+  }
+
+  /** Deletes the key, so `claude` starts from now on without one and
+   * running sessions start again without it. */
+  async clear() {
+    const store = this.store;
+    if (!store) throw new Error("Claude runs only in the desktop app");
+    try {
+      await store.clear();
+    } finally {
+      this.saved = undefined;
+    }
+    for (const listener of this.listeners) listener();
   }
 
   /** `spawn`, starting each `claude` with the saved key, which native code
@@ -227,8 +243,8 @@ export function SignIn({
   );
 }
 
-/** Claude's settings once it can run: replacing the key. `onSaved` follows
- * a saved key, so a surface can close. */
+/** Claude's settings once it can run: replacing or removing the key.
+ * `onSaved` follows a saved key, so a surface can close. */
 export function SignedIn({
   setup,
   onSaved,
@@ -290,12 +306,13 @@ function KeyForm({
 }) {
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState<AbortController>();
+  const [removing, setRemoving] = useState(false);
   // Kept until the form closes.
   const [saved, setSaved] = useState<{ ok: boolean; text: string }>();
   // Closing the form cancels a save.
   useEffect(() => () => saving?.abort(), [saving]);
   const save = async () => {
-    if (!key.trim() || saving || disabled) return;
+    if (!key.trim() || saving || removing || disabled) return;
     const controller = new AbortController();
     setSaving(controller);
     setSaved(undefined);
@@ -312,9 +329,26 @@ function KeyForm({
       setSaving(undefined);
     }
   };
+  // Once removed, setup asks for a key again in place of this form.
+  const remove = async () => {
+    if (saving || removing || disabled) return;
+    setRemoving(true);
+    setSaved(undefined);
+    try {
+      await setup.auth.clear();
+      await setup.check();
+    } catch (error) {
+      setSaved({ ok: false, text: message(error) });
+    } finally {
+      setRemoving(false);
+    }
+  };
   return (
     // Not a form: it sits inside agent creation's and Settings' own.
-    <div className="grid gap-2" aria-busy={saving ? true : undefined}>
+    <div
+      className="grid gap-2"
+      aria-busy={saving || removing ? true : undefined}
+    >
       <Field
         label={replace ? "Replace API key" : "Anthropic API key"}
         {...(replace && {
@@ -326,8 +360,8 @@ function KeyForm({
           type="password"
           autoComplete="off"
           value={key}
-          readOnly={!!saving}
-          aria-disabled={saving || disabled ? true : undefined}
+          readOnly={!!saving || removing}
+          aria-disabled={saving || removing || disabled ? true : undefined}
           onValueChange={setKey}
           onKeyDown={(event) => {
             if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
@@ -341,13 +375,26 @@ function KeyForm({
           type="button"
           {...(!replace && { variant: "prominent" as const })}
           size={compact ? "sm" : "md"}
-          disabled={disabled || !key.trim()}
+          disabled={disabled || removing || !key.trim()}
           focusableWhenDisabled
           loading={!!saving}
           onClick={() => void save()}
         >
           Save key
         </Button>
+        {replace && (
+          <Button
+            type="button"
+            variant="outline"
+            size={compact ? "sm" : "md"}
+            disabled={disabled || !!saving}
+            focusableWhenDisabled
+            loading={removing}
+            onClick={() => void remove()}
+          >
+            Remove key
+          </Button>
+        )}
         {saved && (
           <p
             role={saved.ok ? "status" : "alert"}

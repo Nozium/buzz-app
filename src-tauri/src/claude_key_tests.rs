@@ -7,6 +7,8 @@ struct FakeStore {
     reads: StdMutex<usize>,
     /// Reads fail, as a locked or refused Keychain does.
     unreadable: StdMutex<bool>,
+    /// Deletes fail, as a refused Keychain does.
+    undeletable: StdMutex<bool>,
 }
 impl KeyStore for Arc<FakeStore> {
     fn read(&self) -> Result<Option<Zeroizing<String>>, String> {
@@ -18,6 +20,13 @@ impl KeyStore for Arc<FakeStore> {
     }
     fn replace(&self, key: &str) -> Result<(), String> {
         *self.key.lock().unwrap() = Some(key.into());
+        Ok(())
+    }
+    fn clear(&self) -> Result<(), String> {
+        if *self.undeletable.lock().unwrap() {
+            return Err("refused".into());
+        }
+        *self.key.lock().unwrap() = None;
         Ok(())
     }
 }
@@ -71,6 +80,24 @@ async fn a_check_rereads_a_key_replaced_or_removed_elsewhere() {
     *store.key.lock().unwrap() = None;
     assert!(!key.configured().await.unwrap());
     assert_eq!(kept(key.key().await), None);
+}
+
+#[tokio::test]
+async fn clearing_deletes_the_key_and_forgets_the_kept_one() {
+    let store = Arc::new(FakeStore::default());
+    let key = host(&store);
+    key.set("sk-ant-saved").await.unwrap();
+    // A refused delete keeps the key.
+    *store.undeletable.lock().unwrap() = true;
+    assert_eq!(key.clear().await, Err("refused".into()));
+    assert_eq!(kept(key.key().await).as_deref(), Some("sk-ant-saved"));
+    *store.undeletable.lock().unwrap() = false;
+    key.clear().await.unwrap();
+    assert_eq!(*store.key.lock().unwrap(), None);
+    assert_eq!(kept(key.key().await), None);
+    assert!(!key.configured().await.unwrap());
+    // Clearing no key succeeds.
+    key.clear().await.unwrap();
 }
 
 #[tokio::test]

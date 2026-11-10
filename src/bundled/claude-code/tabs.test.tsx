@@ -70,6 +70,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       await nativeKey.save(value);
       nativeKey.saved = true;
     }
+    if (command === "claude_api_key_clear") nativeKey.saved = false;
     return null;
   },
 }));
@@ -1048,6 +1049,24 @@ it("closes the configuration once a replacement key is saved", async () => {
     "sk-ant-api03-other{Enter}",
   );
   await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+});
+
+it("removes the key and asks for one again", async () => {
+  const { type } = installed();
+  const Setup = providerSetup(type);
+  const onClose = vi.fn();
+  render(<Setup onClose={onClose} />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Remove key" }));
+  expect(await screen.findByLabelText("Anthropic API key")).toBeVisible();
+  expect(nativeKey.saved).toBe(false);
+  expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
+  expect(type.provider?.snapshot()).toMatchObject({
+    readiness: "attention",
+    attentionLabel: "Add Claude API key",
+  });
+  // Removing leaves the dialog open, asking for a key.
+  expect(onClose).not.toHaveBeenCalled();
 });
 
 it("saves the key with Enter without submitting the form it sits in", async () => {

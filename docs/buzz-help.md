@@ -954,7 +954,10 @@ available rather than silently discarding it.
   them, so a newly granted or removed permission applies without signing in
   again; a failed check keeps the previous permissions.
   Claude runs with an Anthropic API key pasted under **Anthropic API key**
-  there, once for every Claude agent. When creating a Claude agent or editing
+  there, once for every Claude agent. With a key saved, **Edit configuration**
+  offers **Replace API key** and **Remove key**. Remove key deletes it from
+  this computer and restarts running Claude agents without it; they don't
+  answer until a key is saved again. When creating a Claude agent or editing
   one that runs on this computer, click **Add key** beside **Harness** to open
   **Set up Claude**. Builds with interactive authentication show **Sign in**
   instead. Selecting Claude does not open setup automatically; closing setup

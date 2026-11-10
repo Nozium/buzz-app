@@ -20,6 +20,12 @@ vi.mock("@tauri-apps/api/core", () => ({
       state.asked += 1;
       return state.saved;
     }
+    if (command === "claude_api_key_clear") {
+      const refusal = state.refusals.shift();
+      if (refusal) throw refusal;
+      state.saved = false;
+      return null;
+    }
     if (command !== "claude_api_key_set" || !args) return null;
     const refusal = state.refusals.shift();
     if (refusal) throw refusal;
@@ -172,4 +178,26 @@ it("links a turn that failed for want of a working key to Settings", async () =>
   expect(auth.explainTurn("Error: overloaded", settings)).toBe(
     "Error: overloaded",
   );
+});
+
+it("removes the key with native code and tells listeners, so claude runs without it", async () => {
+  const { spawn, started } = host();
+  const auth = new ClaudeAuth(spawn);
+  const told = vi.fn();
+  auth.subscribe(told);
+  // A key is kept once asked.
+  await expect(auth.check()).resolves.toEqual({});
+  state.refusals.push("Keychain access was denied. Allow access and retry");
+  await expect(auth.clear()).rejects.toBe(
+    "Keychain access was denied. Allow access and retry",
+  );
+  expect(told).not.toHaveBeenCalled();
+  await auth.clear();
+  expect(state.saved).toBe(false);
+  expect(told).toHaveBeenCalledTimes(1);
+  // The kept answer is gone: a turn's claude is refused.
+  await expect(
+    auth.authorize(spawn, true)("claude", { env: ENV }),
+  ).rejects.toThrow("Claude needs an Anthropic API key.");
+  expect(started).toEqual([]);
 });
