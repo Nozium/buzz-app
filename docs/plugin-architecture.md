@@ -6,6 +6,22 @@ Buzz should make it practical for people and agents to build new product experie
 
 Plugins are the unit of contribution and installation. They can contain substantial implementations: several components, their own layout and interactions, and multiple contributions. The foundation is ordinary React components, shared data and execution capabilities, and a small number of explicit extension points.
 
+## Stability
+
+Every service below is a preview tied to the host version. Nothing is promised
+across versions yet, and the author types are `0.0.0-preview.1`.
+
+- **Steady:** the plugin envelope (manifest, `inject`/`apply`, `ctx.effect`
+  cleanup) and capability services: host grants, `addTool` (the tool's shape, not
+  the whole client passed to `call`), shortcuts, notifications, settings cards, and
+  navigation `open` for plugin pages, Home and Settings. Owning a whole page or
+  panel is steady, but placement is not.
+- **Borderline:** decisions, and link and code-block renderers.
+- **Likely to break:** the relay session read model; conversation contributions;
+  sidebar sections and rows, the Solo region and backdrops; agent hooks, execution
+  targets and the harness kit; artifact storage, the installer, federated identity
+  and the browser view; and other navigation `open` targets.
+
 ## The first two authoring experiences
 
 **A page (target authoring experience).** A builder creates a plugin that registers
@@ -146,6 +162,14 @@ The link fetches a preview through the existing importer. Review the plugin and
 computer access, then select **Install plugin**. Opening the link does not install,
 enable, or grant access. You can close the dialog while the preview loads. A late
 result is discarded. Confirmed installation remains protected from dismissal.
+
+A link that carries both `commit` and `path` can also update a plugin already
+installed from the same Git repository and folder, under the same rules as a Git
+`requestInstall`: the review shows **Update** with the access changes and any change
+to the tracked branch or tag (native saves the requested `ref` for later updates), keeps the
+plugin's enabled or disabled state, and refuses a plugin installed from another
+source. Without both keys, a link to an installed plugin offers only **Open in Buzz**.
+If the installed plugin changes before you confirm, the update is refused.
 
 SSH uses known hosts and, unless a [repository access rule](repository-access.md)
 selects another agent, the desktop process's inherited `SSH_AUTH_SOCK`. The importer
@@ -805,7 +829,9 @@ every gate to allow the target; the Dock asks about each conversation as a
 removed. A throwing gate is skipped. `gate` returns a remover, and disabling the
 plugin removes its gates. Gates never widen the host's own access and
 preference checks. A refused alert is dropped, not queued. Focus registers one
-only while Focus is on.
+only while Focus is on. Reminders re-targets a refused message alert to its
+Reminders page, so a gate that should silence reminders must refuse page
+targets too, as Focus does.
 
 A page may supply `icon`, a `data:image/<subtype>[;params],<payload>` URL; the
 scheme and type match case-insensitively. Search Buzz and the page navigation
@@ -1001,7 +1027,10 @@ cards such as Pair mobile that collect their own community address; it cannot be
 combined with `group` or `section`.
 Its section id is the contribution key (`plugin/card`) and disappears with the plugin. The optional `icon`
 uses the shared design-system icon gateway; the host supplies a fallback when omitted.
-Cards receive `active()` and use ordinary
+Cards receive `active()` and optional `navigation` for the current Settings visit.
+A Settings target can carry bounded `route: { version, params }` presentation
+data; the card interprets supported versions and ignores unknown routes. Opening
+a route must never submit a write. Cards use ordinary
 session capabilities through injection. Host boundaries isolate rendering errors;
 exact registration identity and mounted lifetime revoke callbacks on removal.
 
