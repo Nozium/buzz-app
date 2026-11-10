@@ -927,7 +927,7 @@ it("shows the first server's failed restore as its own recovery text", async () 
     await listed.mock.results[0]?.value;
   });
   expect(screen.getByRole("alert")).toHaveTextContent(
-    /^Sign-in did not finish\. Try again\.$/,
+    /^Buzz couldn’t check your saved sign-in\. Check your connection, then choose Check again\.$/,
   );
   // Neither a sign-out retry nor a sign-in while the record is unchecked:
   // only a check that retries the restore and keeps the record.
@@ -945,7 +945,7 @@ it("shows the first server's failed restore as its own recovery text", async () 
   expect(block.service.recheck).toHaveBeenCalledOnce();
   // A check that fails again keeps its recovery text and its button.
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    /^Sign-in did not finish\. Try again\.$/,
+    /^Buzz couldn’t check your saved sign-in\. Check your connection, then choose Check again\.$/,
   );
   expect(
     within(card).getByRole("button", { name: "Check again" }),

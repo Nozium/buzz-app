@@ -1080,6 +1080,15 @@ it("asks the issuer again on Try again after a cached refusal", async () => {
     .click(within(sidebar()).getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(order).toEqual(["ask again", "retry"]));
   expect(h.service.askAgain).toHaveBeenCalledWith("wss://relay.example");
+  // So its issuer-refusal advice is that Try again, not a restart.
+  f.connection({
+    status: "error",
+    error: "grant-refused",
+    origin: "wss://relay.example",
+  });
+  expect(within(sidebar()).getByRole("alert")).toHaveTextContent(
+    "Buzz couldn’t confirm your organization sign-in for this community. Try again. If it keeps happening, contact your administrator.",
+  );
 });
 
 it("shows Try again beside a settled failure, and Connecting while the connection retries", async () => {

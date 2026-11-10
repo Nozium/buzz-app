@@ -42,10 +42,14 @@ export function CommunitySignIn({
   retry,
   relay,
   memberships = [],
+  asksAgain = false,
 }: {
   identity?: FederatedIdentity | undefined;
   error?: string | undefined;
   retry: () => void;
+  /** The caller shows its own Try again that asks the issuer again
+   * (`askAgain`), so an issuer refusal needn't wait for a restart. */
+  asksAgain?: boolean | undefined;
   /** The refusing community, so a switch names the others it affects. */
   relay?: string | undefined;
   memberships?: readonly Membership[] | undefined;
@@ -58,6 +62,7 @@ export function CommunitySignIn({
       retry={retry}
       relay={relay}
       memberships={memberships}
+      asksAgain={asksAgain}
     />
   );
 }
@@ -67,12 +72,14 @@ function Action({
   retry,
   relay,
   memberships,
+  asksAgain,
 }: {
   identity: FederatedIdentity;
   error?: string | undefined;
   retry: () => void;
   relay?: string | undefined;
   memberships: readonly Membership[];
+  asksAgain: boolean;
 }) {
   const state = useSyncExternalStore(
     identity.subscribe,
@@ -128,9 +135,9 @@ function Action({
   if (ISSUER_REFUSALS.has(refusal))
     return (
       <p role="alert" className="text-body-sm text-danger">
-        Buzz couldn’t confirm your organization sign-in for this community.
-        Restart Buzz to try again. If it keeps happening, contact your
-        administrator.
+        Buzz couldn’t confirm your organization sign-in for this community.{" "}
+        {asksAgain ? "Try again." : "Restart Buzz to try again."} If it keeps
+        happening, contact your administrator.
       </p>
     );
   if (

@@ -832,6 +832,15 @@ function OrganizationSignIn({
   if (!state.authority || state.status === "unconfigured") return null;
   // A failed restore keeps its stored session, which may still be valid: no
   // sign-in or sign-out, only a check that retries the restore.
+  // An unreachable server means no browser step ever ran: say what Check
+  // again does instead of the generic sign-in advice.
+  const explanation =
+    problem &&
+    (state.status === "unavailable" &&
+    identity.recheck &&
+    /^network-(unavailable|timeout)$/.test(problem)
+      ? "Buzz couldn’t check your saved sign-in. Check your connection, then choose Check again."
+      : recoveryMessage(problem));
   const recheck = state.status === "unavailable" && identity.recheck && (
     <Button
       size="sm"
@@ -846,7 +855,7 @@ function OrganizationSignIn({
       <>
         {problem && (
           <p role="alert" className="mt-6 text-body-sm text-danger">
-            {recoveryMessage(problem)}
+            {explanation}
           </p>
         )}
         {recheck && <div className={styles.accountActions}>{recheck}</div>}
@@ -968,7 +977,7 @@ function OrganizationSignIn({
           )}
           {listed && problem && (
             <p role="alert" className="text-body-sm text-danger">
-              {recoveryMessage(problem)}
+              {explanation}
             </p>
           )}
         </div>
@@ -981,7 +990,7 @@ function OrganizationSignIn({
           aria-label="Account sign-in error"
         >
           <p role="alert" className="m-0 text-body-sm">
-            {problem && recoveryMessage(problem)}
+            {explanation}
           </p>
         </PopoverPopup>
       </PopoverRoot>

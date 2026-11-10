@@ -1286,8 +1286,9 @@ A sign-out native could not finish (for example, secure storage refused) stays b
 server, with **Try again**; so does an ended session whose saved record native
 could not remove. A saved session native could not check, for example offline,
 is kept and offers no **Try again** and no sign-in: **Check again** retries the
-restore (`federated_identity_snapshot`) and keeps the stored record whatever it
-finds. Communities no server covers are not listed.
+restore (`federated_identity_snapshot`). It keeps the stored record while the
+check stays inconclusive; a record the server denies, or one already refused on
+this device, is cleaned up as on any restore. Communities no server covers are not listed.
 While the build’s Builderlab isn’t signed in, its row to sign in from stays listed alongside the other configured servers, with its recovery
 message when applicable.
 
