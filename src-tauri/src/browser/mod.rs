@@ -136,6 +136,12 @@ impl BrowserSession {
     }
 
     fn set_bounds(&self, bounds: BrowserBounds, visible: bool) -> Result<(), String> {
+        // A fullscreen page has left the panel: entering fullscreen hides the main
+        // window, and hiding or placing the guest would blank the fullscreen
+        // window. The host syncs it again once it is back in the panel.
+        if platform::fullscreen(&self.guest) {
+            return Ok(());
+        }
         self.guest
             .set_visible(false)
             .map_err(|error| error.to_string())?;
@@ -203,6 +209,9 @@ pub(crate) fn window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
         tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } => {
             BROWSERS.with(|browsers| {
                 for browser in browsers.borrow().iter() {
+                    if platform::fullscreen(&browser.guest) {
+                        continue;
+                    }
                     if let Err(error) = browser.guest.set_visible(false) {
                         browser.snapshot.borrow_mut().error = Some(error.to_string());
                     }

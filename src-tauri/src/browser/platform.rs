@@ -266,6 +266,16 @@ mod macos {
         unsafe { guest.webview().isLoading() }
     }
 
+    /// Whether WebKit has moved the guest into its own fullscreen window (or is
+    /// moving it in or out). WebKit owns its frame and visibility then.
+    pub fn fullscreen(guest: &WebView) -> bool {
+        let view = guest.webview();
+        // `fullscreenState` is macOS 13.3+; older WebKit reports no state.
+        view.respondsToSelector(sel!(fullscreenState))
+            && unsafe { view.fullscreenState() }
+                != objc2_web_kit::WKFullscreenState::NotInFullscreen
+    }
+
     pub fn focused(guest: &WebView) -> bool {
         let view = guest.webview();
         let Some(responder) = view.window().and_then(|window| window.firstResponder()) else {
@@ -461,8 +471,8 @@ pub(super) fn resize_guest(
 
 #[cfg(target_os = "macos")]
 pub(super) use macos::{
-    back, current_url, deny_permissions, focused, forward, install_builderlab_cookie, load,
-    loading, observe_navigation, set_media_suspended,
+    back, current_url, deny_permissions, focused, forward, fullscreen, install_builderlab_cookie,
+    load, loading, observe_navigation, set_media_suspended,
 };
 #[cfg(target_os = "macos")]
 pub(super) type Permissions = objc2::rc::Retained<macos::PermissionDelegate>;
@@ -491,6 +501,11 @@ pub(super) fn load(
     guest
         .load_url(url.as_str())
         .map_err(|error| error.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn fullscreen(_guest: &WebView) -> bool {
+    false
 }
 
 #[cfg(not(target_os = "macos"))]
