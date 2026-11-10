@@ -572,6 +572,54 @@ async function signedInAccount() {
 const pastedInvite = "https://relay.example/invite/v2.abc";
 const openedInvite = { community: "https://relay.example", code: "v2.abc" };
 
+it("keeps the address editable when automatic admission is cancelled during retry", async () => {
+  let claims = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const route = String(url).split("/").at(-1);
+      if (route === "register") return Response.json({});
+      if (route === "info")
+        return Response.json({
+          name: "Fixture",
+          membershipRequired: true,
+          policy: null,
+        });
+      if (route === "claim") {
+        claims++;
+        return Response.json({ error: "unavailable" }, { status: 503 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  api.inspectProfile.mockRejectedValueOnce(
+    new Error("Relay read failed (403)"),
+  );
+  render(
+    <CommunityDialog
+      communities={lookupCommunities}
+      federatedIdentity={await signedInAccount()}
+      mode="join"
+      close={() => {}}
+      invite={openedInvite}
+    />,
+  );
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(claims).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(screen.getByLabelText("Community URL")).toBeEnabled();
+    expect(screen.queryByLabelText("Invite code")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(claims).toBe(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it.each([
   ["an opened invite", "denied", undefined],
   // The link's code is claimed on the submission that parses it, before any

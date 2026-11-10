@@ -270,7 +270,7 @@ export function CommunityDialog({
               signal,
               inviteCode,
             ).catch((reason: unknown) => {
-              if (current()) {
+              if (!signal.aborted && current()) {
                 setStep("access");
                 if (
                   value.membershipRequired === true &&

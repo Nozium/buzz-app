@@ -280,6 +280,34 @@ it("retries a temporarily unavailable invite claim with the same code and receip
   }
 });
 
+it("gives the native retry only the time left from the first claim", async () => {
+  vi.useFakeTimers();
+  const budgets: number[] = [];
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    expect(command).toBe("relay_http");
+    if (!args || !("timeoutMs" in args) || typeof args.timeoutMs !== "number")
+      throw new Error("Expected a native request budget");
+    budgets.push(args.timeoutMs);
+    if (budgets.length === 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+      return { status: 503, headers: {}, body: "{}" };
+    }
+    return { status: 200, headers: {}, body: '{"status":"joined"}' };
+  });
+  try {
+    const result = communityRequest(community, "claim", {
+      code: "v2.invite",
+    }).catch((reason: unknown) => reason);
+    await vi.advanceTimersByTimeAsync(21_000);
+    expect(await result).toEqual({ status: "joined" });
+    expect(budgets).toEqual([25_000, 4_000]);
+  } finally {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  }
+});
+
 it("restores a signed community profile and preserves extra fields when publishing", async () => {
   const event = signed(key, {
     kind: 0,
