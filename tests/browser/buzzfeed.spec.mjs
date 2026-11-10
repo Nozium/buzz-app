@@ -98,7 +98,10 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
   await expect(
     page.getByRole("dialog", { name: "Search Buzz", exact: true }),
   ).toHaveCount(0);
-  await appDock.getByRole("button", { name: "Search Buzz" }).click();
+  await page
+    .getByRole("banner")
+    .getByRole("button", { name: "Search Buzz" })
+    .click();
   const identitySearch = page.getByRole("dialog", {
     name: "Search Buzz",
     exact: true,
@@ -128,7 +131,7 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
     .getByRole("button", { name: /^Open / });
   await expect(opener).toBeVisible();
   await expect(inbox.getByText("Checking recent activity…")).toHaveCount(0);
-  const newMessage = inbox.getByRole("region", {
+  const newMessage = page.getByRole("region", {
     name: "New message",
     exact: true,
   });
@@ -305,7 +308,14 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
       ),
     ).toBe(true);
     const bounds = await sheet.boundingBox();
-    const hostBounds = await inbox.boundingBox();
+    // The modal sheet makes the retained feed inert to accessibility queries.
+    const hostBounds = await page
+      .getByRole("region", {
+        name: "Activity",
+        exact: true,
+        includeHidden: true,
+      })
+      .boundingBox();
     if (width > 1000) {
       expect(bounds.x).toBeCloseTo(hostBounds.x, 1);
       expect(bounds.width).toBeCloseTo(hostBounds.width, 1);
@@ -338,10 +348,10 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
       page.getByRole("button", { name: "Search Buzz", exact: true }),
     ).toBeInViewport();
     await expect(
-      appDock.getByRole("button", { name: "Settings", exact: true }),
+      appDock.getByRole("button", { name: "View all plugins", exact: true }),
     ).toBeInViewport();
     await appDock
-      .getByRole("button", { name: "Settings", exact: true })
+      .getByRole("button", { name: "View all plugins", exact: true })
       .click({ trial: true });
     if (width <= 650)
       await page
@@ -395,7 +405,7 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
   );
   await page.getByRole("option", { name: /Alice Fixture/ }).click();
   await expect(
-    inbox.getByRole("button", { name: "Close new message", exact: true }),
+    page.getByRole("button", { name: "Close new message", exact: true }),
   ).toBeVisible();
   await expect(
     newMessage.getByText("Inbox DM fixture reply", { exact: true }),
@@ -413,7 +423,7 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
   expect(afterAddress.height).toBeCloseTo(beforeAddress.height, 1);
   expect(afterAddress.y).toBeCloseTo(beforeAddress.y, 1);
   await expectStableOpening(
-    inbox.getByRole("dialog", { name: "New message", exact: true }),
+    page.getByRole("dialog", { name: "New message", exact: true }),
   );
   const expansionFrames = await expansion.evaluate((recording) =>
     recording.stop(),
@@ -432,13 +442,13 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
   });
   await page.goBack();
   await expect(
-    inbox.getByRole("button", { name: "Close new message", exact: true }),
+    page.getByRole("button", { name: "Close new message", exact: true }),
   ).toHaveCount(0);
   await page.goForward();
   await expect(
     newMessage.getByText("Inbox DM fixture reply", { exact: true }),
   ).toBeVisible();
-  await inbox
+  await page
     .getByRole("button", { name: "Close new message", exact: true })
     .click();
   await expect(newEditor).toBeFocused();
