@@ -1001,3 +1001,47 @@ it("lets an explicit Check again try Git even when the browser reports offline",
     online.mockRestore();
   }
 });
+
+it("keeps the folder cadence running while background Git is pending", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const configuration = f.state().configuration;
+  if (configuration.status !== "ready") throw new Error("Expected catalog");
+  const folder = {
+    ...f.plugin,
+    manifest: { ...f.plugin.manifest, id: "example.folder" },
+    updateSource: { root: "/plugins/folder", path: "." },
+  };
+  const checkFolder = vi.fn(async () => "folder-new");
+  Object.assign(f.imports, { checkFolder });
+  f.emit({
+    configuration: {
+      ...configuration,
+      catalog: { ...configuration.catalog, plugins: [f.plugin, folder] },
+    },
+  });
+  let release!: () => void;
+  f.imports.checkGit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve(f.discovered);
+      }),
+  );
+  f.mount();
+  try {
+    await act(async () => {});
+    expect(f.imports.checkGit).toHaveBeenCalledOnce();
+    expect(checkFolder).toHaveBeenCalledOnce();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_600_000);
+    });
+    expect(checkFolder).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_600_000);
+    });
+    expect(checkFolder).toHaveBeenCalledTimes(3);
+    expect(f.imports.checkGit).toHaveBeenCalledOnce();
+  } finally {
+    await act(async () => release());
+  }
+});

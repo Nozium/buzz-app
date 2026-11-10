@@ -355,6 +355,24 @@ export function createPluginUpdates(
     }
     lastCheck = Math.min(now, ...[...checked.values()].map((item) => item.at));
   }
+  function delay(localOnly: boolean) {
+    if (
+      closed ||
+      !plugins.imports ||
+      plugins.snapshot().configuration.status !== "ready"
+    )
+      return;
+    const at = Math.min(
+      Date.now(),
+      ...[...checked]
+        .filter(
+          ([id]) =>
+            (!localOnly && online()) || !pluginUpdateSource(plugins, id),
+        )
+        .map(([, value]) => value.at),
+    );
+    return Math.max(0, at + 3_600_000 - Date.now());
+  }
   return {
     snapshot: () => updates,
     subscribe(listener: () => void) {
@@ -368,6 +386,7 @@ export function createPluginUpdates(
       dismissed.add(key(update));
       publish([...updates]);
     },
+    nextCheck: () => delay(!!pending),
     check(force = false): Promise<number | undefined> {
       checkFolders(force);
       retry ||= !!pending && (force || sourceIdentity() !== lastSources);
@@ -379,19 +398,7 @@ export function createPluginUpdates(
           forceNext = false;
           await run(forced);
         } while (retry && !closed);
-        if (
-          closed ||
-          !plugins.imports ||
-          plugins.snapshot().configuration.status !== "ready"
-        )
-          return;
-        const at = Math.min(
-          Date.now(),
-          ...[...checked]
-            .filter(([id]) => online() || !pluginUpdateSource(plugins, id))
-            .map(([, value]) => value.at),
-        );
-        return Math.max(0, at + 3_600_000 - Date.now());
+        return delay(false);
       })().finally(() => {
         pending = undefined;
       });

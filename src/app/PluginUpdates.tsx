@@ -102,7 +102,10 @@ export function PluginUpdates({
         force ||= failed();
       }
       running++;
-      const delay = await updates.check(force).finally(() => running--);
+      const pending = updates.check(force).finally(() => running--);
+      const localDelay = updates.nextCheck();
+      if (localDelay !== undefined) timer = setTimeout(scheduled, localDelay);
+      const delay = await pending;
       if (disposed || !ready()) return;
       if (reconnect) {
         reconnect = false;
