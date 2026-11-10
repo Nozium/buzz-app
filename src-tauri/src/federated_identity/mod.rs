@@ -70,6 +70,9 @@ pub(crate) struct Snapshot {
     /// A retired session's record is still stored because removing it
     /// failed. Signing out again retries the removal.
     cleanup: bool,
+    /// Signing in again waits on the browser while this session stays live;
+    /// `cancel_sign_in` ends only that wait. False once it commits.
+    renewing: bool,
 }
 
 // No Debug, no IPC serialization. Only the secure store serializes this record.
@@ -268,6 +271,7 @@ impl FederatedIdentity {
             expires_at: None,
             expiring: false,
             cleanup: false,
+            renewing: false,
         };
         let (changes, _) = watch::channel(snapshot.clone());
         let (account_changes, _) = watch::channel(None);
@@ -622,6 +626,15 @@ impl FederatedIdentity {
         state.snapshot.cleanup = true;
         self.publish(&state);
     }
+    /// Starts or ends a renewal's browser wait, and says so in the snapshot.
+    fn set_renewal(&self, state: &mut State, renewal: Option<CancellationToken>) {
+        let renewing = renewal.is_some();
+        state.renewal = renewal;
+        if state.snapshot.renewing != renewing {
+            state.snapshot.renewing = renewing;
+            self.publish(state);
+        }
+    }
     fn retire_state(
         &self,
         state: &mut State,
@@ -651,6 +664,7 @@ impl FederatedIdentity {
         // Synchronous cleanup lets a replacement login register immediately.
         state.callback.take();
         state.renewal = None;
+        state.snapshot.renewing = false;
         state.cancellation = CancellationToken::new();
     }
     pub(crate) fn close(&self) {
@@ -966,7 +980,7 @@ impl FederatedIdentity {
                 // Signing in again keeps the current session live until the
                 // new one is installed; ending that session ends this attempt.
                 let cancel = state.cancellation.child_token();
-                state.renewal = Some(cancel.clone());
+                self.set_renewal(&mut state, Some(cancel.clone()));
                 (state.snapshot.revision.clone(), cancel, true)
             } else {
                 // Admission and retirement are atomic with cancellation/sign-out.
@@ -998,7 +1012,7 @@ impl FederatedIdentity {
         if cancel.is_cancelled() || state.closed || state.snapshot.revision != revision {
             return Ok(());
         }
-        state.renewal = None;
+        self.set_renewal(&mut state, None);
         match result {
             Err(failure) if failure.code != "sign-in-canceled" => Err(failure.code),
             _ => Ok(()),
@@ -1145,7 +1159,7 @@ impl FederatedIdentity {
             }
             // Commit point: past here a renewal can't be canceled, only ended
             // with its session, so nothing below has to undo a cancel.
-            state.renewal = None;
+            self.set_renewal(&mut state, None);
         }
         let changing = matches!(&self.state().account, Some(previous) if *previous != record.email);
         // Held until this renewal installs or fails.
@@ -1244,6 +1258,7 @@ impl FederatedIdentity {
         if let Some(renewal) = state.renewal.take() {
             renewal.cancel();
             state.callback.take();
+            self.set_renewal(&mut state, None);
         } else if state.snapshot.status == Status::SigningIn {
             self.retire_state(&mut state, Status::SignedOut, None);
         }

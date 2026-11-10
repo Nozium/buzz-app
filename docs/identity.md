@@ -1280,7 +1280,8 @@ names and tooltips. **Sign out** confirms before ending that server’s session 
 Within seven days of expiry, **Renew sign-in** and the expiry date appear, with
 **Sign out** in the renewal caret menu. While the renewal's browser step runs,
 the card says "Finish in your browser" with **Cancel**; the current session stays
-signed in, and Cancel ends only that step. The Builderlab connection row observes
+signed in, and Cancel ends only that step. The native snapshot's `renewing`
+keeps that state when the page is left and opened again. The Builderlab connection row observes
 the existing plugin session and opens its settings; it starts no account read.
 A sign-out native could not finish (for example, secure storage refused) stays below the list, naming the
 server, with **Try again**; so does an ended session whose saved record native
@@ -1295,10 +1296,12 @@ message when applicable.
 NIP-FA issuer refusals (`refused()` in `assertion.rs`, including
 `authorization-denied`) are cached for the session revision, viewer and
 community, so automatic retries (reconnects, focus, network changes) repeat them
-without asking the issuer. A user's own retry asks again: the sidebar's
-**Try again** and the join dialog's **Continue** after a refusal call
-`federated_identity_ask_again`, which forgets that community's cached refusals
-before the retry. A restart or a new session revision also asks again.
+without asking the issuer. A user's own retry asks again: the relay service's
+`tryAgain()` (every **Try again**, **Retry connection** and **Check again**
+button, including the live socket's sign-in error in the sidebar) and each
+join-dialog **Continue** call `federated_identity_ask_again`, which forgets
+that community's cached refusals, before retrying. Automatic paths call
+`retry()` and never ask. A restart or a new session revision also asks again.
 
 When a community refuses a signed-in account (`authorization-denied` or
 `binding-mismatch`), its prompt names the community's server and account, and

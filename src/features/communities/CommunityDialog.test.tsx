@@ -879,7 +879,7 @@ it("opens a checked connection address separately without replacing or removing 
 
 // NIP-FA: an issuer refusal is not retried automatically; Continue after one
 // is the user's retry, so it asks the issuer again.
-it("asks the community's issuer again only when Continue follows a refusal", async () => {
+it("asks the community's issuer again before each Continue's request", async () => {
   const user = userEvent.setup();
   let refuse = true;
   const order: string[] = [];
@@ -928,11 +928,15 @@ it("asks the community's issuer again only when Continue follows a refusal", asy
       "Your account does not have access to this community. Contact its administrator.",
     ),
   ).toBeVisible();
-  expect(h.service.askAgain).not.toHaveBeenCalled();
   refuse = false;
   await user.click(screen.getByRole("button", { name: "Continue" }));
   expect(await screen.findByLabelText("Invite code")).toBeInTheDocument();
-  expect(order).toEqual(["info", "ask again https://relay.example", "info"]);
+  expect(order).toEqual([
+    "ask again https://relay.example",
+    "info",
+    "ask again https://relay.example",
+    "info",
+  ]);
 });
 
 it("offers federated sign-in when joining refuses for it, then lets Continue run the current step", async () => {

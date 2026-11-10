@@ -24,8 +24,9 @@ export function recoveryMessage(code: string) {
 }
 
 /** Issuer refusals native keeps for the session revision (`refused()` in
- * assertion.rs) until the app restarts or the user tries that community
- * again (`askAgain`); signing in or an automatic retry repeats them. */
+ * assertion.rs). An automatic retry repeats them; a person's Try again
+ * (`askAgain`), a sign-in that installs a new session, or a restart asks the
+ * issuer again. */
 const ISSUER_REFUSALS = new Set([
   "adapter-refused",
   "grant-refused",
@@ -34,6 +35,16 @@ const ISSUER_REFUSALS = new Set([
   "invalid-response",
   "response-too-large",
 ]);
+
+/** Refusals the sign-in server may answer differently when asked again, for
+ * example once an administrator fixes access or the identity link. */
+export function issuerMayAnswerAgain(error: string | undefined) {
+  return (
+    !!error &&
+    (ISSUER_REFUSALS.has(error) ||
+      /authorization[-_]denied|binding[-_]mismatch/.test(error))
+  );
+}
 
 /** Explicit recovery from native protected-community admission; never automatic login. */
 export function CommunitySignIn({

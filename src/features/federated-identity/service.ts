@@ -34,6 +34,9 @@ export type SessionSnapshot = Readonly<{
   /** A retired session's record is still stored because removing it
    * failed (`unavailable`); signing out again retries the removal. */
   cleanup: boolean;
+  /** Signing in again waits on the browser while this session stays
+   * signed in; `cancelSignIn` ends only that wait. */
+  renewing?: boolean;
 }>;
 /** First run's sign-in choices (`FirstRunIdentity`); plugins see `signIn()`. */
 export type SignInOptions = Readonly<{
@@ -323,7 +326,9 @@ export async function signInServers(): Promise<readonly SessionSnapshot[]> {
   return invoke<SessionSnapshot[]>("federated_identity_servers");
 }
 
-async function askAgain(relay: string) {
+/** Forgets the issuer refusals native cached for a community this session,
+ * so its next request asks the issuer again. Only for a person's retry. */
+export async function askAgain(relay: string) {
   if (!nativeIdentityEnabled()) return;
   try {
     await invoke("federated_identity_ask_again", { relay });

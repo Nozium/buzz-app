@@ -278,7 +278,7 @@ export function ChannelsPage({
                   <Button
                     type="button"
                     variant="primary"
-                    onClick={() => relay.retry()}
+                    onClick={() => relay.tryAgain()}
                   >
                     Try again
                   </Button>

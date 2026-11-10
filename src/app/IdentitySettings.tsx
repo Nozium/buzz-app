@@ -827,6 +827,7 @@ function OrganizationSignIn({
   const [errorOpen, setErrorOpen] = useState(false);
   const [confirmRevision, setConfirmRevision] = useState<string | null>(null);
   // The session a browser renewal started from, while that renewal runs.
+  // Native's `renewing` says so too, after this page was left and reopened.
   const [renewal, setRenewal] = useState<string | null>(null);
   useEffect(() => setErrorOpen(!!problem), [problem]);
   if (!state.authority || state.status === "unconfigured") return null;
@@ -917,7 +918,7 @@ function OrganizationSignIn({
             trigger.current = element?.querySelector("button") ?? null;
           }}
         >
-          {renewal === state.revision && signedIn ? (
+          {signedIn && (state.renewing || renewal === state.revision) ? (
             <span className="flex items-center gap-3">
               <span className="text-body-sm text-subtle" role="status">
                 Finish in your browser

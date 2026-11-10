@@ -201,15 +201,12 @@ export function CommunityDialog({
   }
   async function submit() {
     if (uploading || unavailable) return;
-    // Continue after a refusal is a manual retry: it asks the community's
-    // issuer again instead of repeating a refusal cached this session. A
-    // community native can't route (not a secure origin) has none cached.
-    const retrying = !!error;
+    // Continue is a person's action, so it asks the community's issuer
+    // again instead of repeating a refusal cached this session (even one an
+    // edit has since cleared from view). A community native can't route
+    // (not a secure origin) has none cached.
     const askAgain = async (url: string) => {
-      if (retrying)
-        await (federatedIdentity?.forCommunity?.(url) ?? federatedIdentity)
-          ?.askAgain?.(url)
-          ?.catch(() => {});
+      await federatedIdentity?.askAgain?.(url)?.catch(() => {});
     };
     if (step === "destination") {
       await work(async (signal) => {

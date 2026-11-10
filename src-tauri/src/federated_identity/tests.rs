@@ -600,7 +600,7 @@ async fn corrupt_storage_is_unavailable_and_public_snapshots_have_no_secret() {
         state.snapshot.status = Status::SignedIn;
     }
     let public = serde_json::to_value(host.snapshot()).unwrap();
-    assert_eq!(public.as_object().unwrap().len(), 8);
+    assert_eq!(public.as_object().unwrap().len(), 9);
     assert!(!public.to_string().contains("fixture-session-token"));
 }
 
@@ -1473,9 +1473,10 @@ async fn signing_in_again_keeps_the_session_until_the_new_one_is_installed() {
     let cancel = {
         let mut state = host.state();
         let cancel = state.cancellation.child_token();
-        state.renewal = Some(cancel.clone());
+        host.set_renewal(&mut state, Some(cancel.clone()));
         cancel
     };
+    assert!(host.snapshot().renewing);
     // The old session still lends its token while the browser flow runs.
     assert_eq!(
         host.with_session(|token, _, _| token.to_string())
@@ -1491,6 +1492,7 @@ async fn signing_in_again_keeps_the_session_until_the_new_one_is_installed() {
     assert_ne!(snapshot.revision, revision);
     assert_eq!(snapshot.expires_at.as_deref(), Some("2099-02-01T00:00:00Z"));
     assert!(host.state().renewal.is_none());
+    assert!(!snapshot.renewing);
     assert_eq!(host.state().callback.as_ref().unwrap().1, guard.1);
     assert_eq!(
         host.with_session(|token, _, _| token.to_string())
@@ -1515,25 +1517,33 @@ async fn a_canceled_or_failed_renewal_leaves_the_session_intact() {
     let renew = || {
         let mut state = host.state();
         let cancel = state.cancellation.child_token();
-        state.renewal = Some(cancel.clone());
+        host.set_renewal(&mut state, Some(cancel.clone()));
         cancel
     };
+    let changes = host.0.changes.subscribe();
 
     let canceled = renew();
+    // The snapshot says the renewal is waiting, so a remounted page can too.
+    assert!(host.snapshot().renewing);
+    assert!(changes.borrow().renewing);
     host.cancel_sign_in();
     assert!(canceled.is_cancelled());
+    assert!(!host.snapshot().renewing);
+    assert!(!changes.borrow().renewing);
     let result = host
         .finish_login("code", "secret", &revision, &canceled)
         .await;
     assert_eq!(host.renewed(&revision, &canceled, result), Ok(()));
 
     let failed = renew();
+    assert!(host.snapshot().renewing);
     let result = host
         .finish_login("code", "secret", &revision, &failed)
         .await;
     assert!(result.is_err());
     // Only the caller hears about it; the snapshot's failure is for others.
     assert!(host.renewed(&revision, &failed, result).is_err());
+    assert!(!host.snapshot().renewing);
 
     let snapshot = host.snapshot();
     assert!(snapshot.status == Status::SignedIn);

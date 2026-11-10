@@ -48,7 +48,12 @@ export type RelaySnapshot = Readonly<{
 export type RelayData = {
   snapshot(): RelaySnapshot;
   subscribe(listener: () => void): () => void;
+  /** Reconnects. Automatic callers (timers, network hints) use this. */
   retry(): void;
+  /** A person's Try again: asks the community's sign-in server again (it
+   * may have changed its answer since this session cached a refusal), then
+   * retries what failed. Never call it automatically (NIP-FA). */
+  tryAgain(): void;
   disconnect(): void;
   clearCache(): Promise<void>;
 };
@@ -69,6 +74,8 @@ export function provideRelay(
   resume?: { viewer: string; scope: string },
   localAgents?: LocalAgentSource,
   verifyStored?: ReadTransport["verifyStored"],
+  /** Forgets the sign-in server's cached refusals for a community. */
+  askAgain?: (relay: string) => Promise<void>,
 ) {
   let disposed = false;
   let generation = 0;
@@ -399,6 +406,19 @@ export function provideRelay(
       if (disposed) return;
       if (snapshot.status === "error") service.retry();
       else store.session.recovery?.retryAll();
+    },
+    tryAgain() {
+      if (disposed) return;
+      const relay = snapshot.origin ?? resume?.scope;
+      void Promise.resolve(relay && askAgain?.(relay))
+        // Asking again is best effort: the retry still runs.
+        .catch(() => {})
+        .finally(() => {
+          if (disposed) return;
+          if (snapshot.status === "ready" && !snapshot.cached)
+            store.session.recovery?.retryAll();
+          else service.retry();
+        });
     },
     disconnect() {
       if (disposed) return;

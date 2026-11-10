@@ -1048,7 +1048,7 @@ it("moves a refusal's recovery from the sidebar to its one notice", async () => 
 
 // NIP-FA: an issuer refusal is not retried automatically, but the user's
 // Try again asks the issuer again rather than repeating it from the cache.
-it("asks the issuer again on Try again after a cached refusal", async () => {
+it("makes Try again a person's retry, which asks the issuer again", async () => {
   const h = federatedFixture();
   const f = fixture(
     true,
@@ -1062,38 +1062,28 @@ it("asks the issuer again on Try again after a cached refusal", async () => {
       federatedIdentity: h.service,
     },
   );
-  const order: string[] = [];
-  vi.mocked(h.service.askAgain).mockImplementation(async () => {
-    order.push("ask again");
-  });
-  vi.spyOn(f.relay, "retry").mockImplementation(() => {
-    order.push("retry");
-  });
+  const retry = vi.spyOn(f.relay, "retry");
+  const tryAgain = vi.spyOn(f.relay, "tryAgain");
   const sidebar = () => screen.getByRole("complementary", { name: "Sidebar" });
-  f.connection({
-    status: "error",
-    error: "authorization-denied",
-    origin: "wss://relay.example",
-  });
-  await userEvent
-    .setup()
-    .click(within(sidebar()).getByRole("button", { name: "Try again" }));
-  await waitFor(() => expect(order).toEqual(["ask again", "retry"]));
-  expect(h.service.askAgain).toHaveBeenCalledWith("wss://relay.example");
-  // So its issuer-refusal advice is that Try again, not a restart.
   f.connection({
     status: "error",
     error: "grant-refused",
     origin: "wss://relay.example",
   });
+  // So its issuer-refusal advice is that Try again, not a restart.
   expect(within(sidebar()).getByRole("alert")).toHaveTextContent(
     "Buzz couldn’t confirm your organization sign-in for this community. Try again. If it keeps happening, contact your administrator.",
   );
+  await userEvent
+    .setup()
+    .click(within(sidebar()).getByRole("button", { name: "Try again" }));
+  expect(tryAgain).toHaveBeenCalledOnce();
+  expect(retry).not.toHaveBeenCalled();
 });
 
 it("shows Try again beside a settled failure, and Connecting while the connection retries", async () => {
   const f = fixture(true);
-  const retry = vi.spyOn(f.relay, "retry");
+  const retry = vi.spyOn(f.relay, "tryAgain");
   const sidebar = () => screen.getByRole("complementary", { name: "Sidebar" });
   const error = "ReadError: Relay read failed (502)";
   f.connection({ status: "error", error });

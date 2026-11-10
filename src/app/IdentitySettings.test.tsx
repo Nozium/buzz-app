@@ -342,6 +342,32 @@ it("shows a renewal in progress with a Cancel that ends only the browser step", 
   expect(h.service.signOut).not.toHaveBeenCalled();
 });
 
+it("shows a renewal that native reports as waiting, after the page reopens", async () => {
+  const h = federatedFixture();
+  // Settings was left mid-renewal: only native knows it still waits.
+  h.publish({
+    status: "signed-in",
+    email: "a@example.com",
+    expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    renewing: true,
+  });
+  vi.mocked(h.service.cancelSignIn).mockImplementation(async () => {
+    h.publish({ renewing: false });
+  });
+  render(<IdentitySettings viewer={viewer} federatedIdentity={h.service} />, {
+    wrapper: ToastProvider,
+  });
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Finish in your browser",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(h.service.cancelSignIn).toHaveBeenCalledOnce();
+  expect(
+    await screen.findByRole("button", { name: "Renew sign-in" }),
+  ).toBeVisible();
+  expect(screen.getByText("a@example.com")).toBeVisible();
+});
+
 it("signs in to the organization once when signed out", async () => {
   const h = federatedFixture();
   render(
