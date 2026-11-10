@@ -564,10 +564,17 @@ async function chooseChannel(
 ) {
   await user.click(screen.getByRole("button", { name: "Forward source" }));
   await screen.findByRole("dialog", { name: "Forward message" });
-  await user.click(screen.getByRole("radio", { name: "Channel" }));
-  await user.click(screen.getByRole("combobox", { name: "Channel" }));
-  await user.click(await screen.findByRole("option", { name }));
+  await user.type(
+    screen.getByRole("combobox", { name: "Message recipients" }),
+    name,
+  );
+  await user.click(await screen.findByRole("option", { name: `#${name}` }));
 }
+const channelOptions = () =>
+  screen
+    .getAllByRole("option")
+    .filter((option) => option.dataset.recipientKey?.startsWith("channel:"))
+    .map((option) => option.getAttribute("aria-label"));
 
 it("forwards a note and permalink into a chosen channel without opening a DM", async () => {
   const user = userEvent.setup();
@@ -575,9 +582,12 @@ it("forwards a note and permalink into a chosen channel without opening a DM", a
     channelList: writable,
   });
   await chooseChannel(user, "general");
-  expect(screen.getByRole("combobox", { name: "Channel" })).toHaveTextContent(
-    "#general",
-  );
+  expect(
+    screen.getByRole("button", { name: "Remove #general" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("combobox", { name: "Message recipients" }),
+  ).toHaveAttribute("placeholder", "1 channel selected");
   await user.type(
     screen.getByRole("textbox", { name: "Note (optional)" }),
     "For the team",
@@ -646,34 +656,58 @@ it("offers only current channels the viewer can post in", async () => {
   });
   await user.click(screen.getByRole("button", { name: "Forward source" }));
   await screen.findByRole("dialog", { name: "Forward message" });
-  await user.click(
-    within(screen.getByRole("radiogroup", { name: "Forward to" })).getByRole(
-      "radio",
-      { name: "Channel" },
-    ),
+  // Every listed channel's name holds an "e"; only postable ones are offered.
+  await user.type(
+    screen.getByRole("combobox", { name: "Message recipients" }),
+    "e",
   );
-  expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled();
-  await user.click(screen.getByRole("combobox", { name: "Channel" }));
-  await screen.findByRole("option", { name: "general" });
-  expect(
-    screen.getAllByRole("option").map((option) => option.textContent),
-  ).toEqual(["general", "ideas", "leads"]);
+  await screen.findByRole("option", { name: "#general" });
+  expect(channelOptions()).toEqual(["#general", "#ideas", "leads"]);
   await user.click(screen.getByRole("option", { name: "leads" }));
   // A private channel is named without the public channel's hash.
-  expect(screen.getByRole("combobox", { name: "Channel" })).toHaveTextContent(
-    /^leads$/,
-  );
+  expect(
+    screen.getByRole("button", { name: "Remove leads" }),
+  ).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Forward" })).toBeEnabled();
 });
 
-it("sends to the chosen channel, not a person chosen before switching", async () => {
+it("finds people and channels in the same To list", async () => {
+  const user = userEvent.setup();
+  setup({
+    channelList: [
+      ...writable,
+      { id: "avery", name: "avery-team", channelType: "stream" },
+    ] as ChannelSummary[],
+  });
+  await user.click(screen.getByRole("button", { name: "Forward source" }));
+  await screen.findByRole("dialog", { name: "Forward message" });
+  const to = screen.getByRole("combobox", { name: "Message recipients" });
+  expect(to).toHaveAttribute("placeholder", "Find a person or channel…");
+  await user.type(to, "avery");
+  const list = await screen.findByRole("listbox", {
+    name: "People and channels",
+  });
+  expect(
+    await within(list).findByRole("option", { name: /Avery Chen/ }),
+  ).toBeInTheDocument();
+  expect(channelOptions()).toEqual(["#avery-team"]);
+  expect(within(list).getAllByRole("option")[0]).toHaveAttribute(
+    "aria-label",
+    "#avery-team",
+  );
+});
+
+it("sends to a channel chosen after removing the person", async () => {
   const user = userEvent.setup();
   const { directMessages, messages } = setup({ channelList: writable });
   await choose(user);
-  await user.click(screen.getByRole("radio", { name: "Channel" }));
+  await user.click(screen.getByRole("button", { name: /^Remove Avery Chen/ }));
   expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled();
-  await user.click(screen.getByRole("combobox", { name: "Channel" }));
-  await user.click(await screen.findByRole("option", { name: "general" }));
+  await user.type(
+    screen.getByRole("combobox", { name: "Message recipients" }),
+    "gen",
+  );
+  await user.click(await screen.findByRole("option", { name: "#general" }));
   await user.click(screen.getByRole("button", { name: "Forward" }));
   await waitFor(() => expect(messages.send).toHaveBeenCalledTimes(1));
   expect(messages.send.mock.calls[0]?.[0]).toBe(general);
@@ -701,10 +735,9 @@ it("restores a saved channel forward after reload and confirms its exact event",
   });
   await user.click(screen.getByRole("button", { name: "Forward source" }));
   const retry = await screen.findByRole("button", { name: "Retry forward" });
-  expect(screen.getByRole("radio", { name: "Channel" })).toBeChecked();
-  expect(screen.getByRole("combobox", { name: "Channel" })).toHaveTextContent(
-    "#general",
-  );
+  expect(
+    screen.getByRole("button", { name: "Remove #general" }),
+  ).toBeInTheDocument();
   await user.click(retry);
   await waitFor(() =>
     expect(
@@ -913,11 +946,11 @@ it("closes the people list on Escape, then the dialog, retiring its visit", asyn
   await user.click(screen.getByRole("button", { name: "Forward source" }));
   const dialog = await screen.findByRole("dialog", { name: "Forward message" });
   // Focusing To opens the people list.
-  await screen.findByRole("listbox", { name: "People" });
+  await screen.findByRole("listbox", { name: "People and channels" });
   await user.keyboard("{Escape}");
   await waitFor(() =>
     expect(
-      screen.queryByRole("listbox", { name: "People" }),
+      screen.queryByRole("listbox", { name: "People and channels" }),
     ).not.toBeInTheDocument(),
   );
   expect(dialog).toBeInTheDocument();
@@ -990,11 +1023,11 @@ it.each(["Cancel", "Escape"])(
     expect(item).not.toBeInTheDocument();
     if (dismissal === "Cancel") await cancelForward(user);
     else {
-      await screen.findByRole("listbox", { name: "People" });
+      await screen.findByRole("listbox", { name: "People and channels" });
       await user.keyboard("{Escape}");
       await waitFor(() =>
         expect(
-          screen.queryByRole("listbox", { name: "People" }),
+          screen.queryByRole("listbox", { name: "People and channels" }),
         ).not.toBeInTheDocument(),
       );
       await user.keyboard("{Escape}");

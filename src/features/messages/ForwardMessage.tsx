@@ -10,16 +10,14 @@ import {
   type ReactNode,
 } from "react";
 import { Button } from "../../shared/design-system/ui/Button";
-import { Combobox } from "../../shared/design-system/ui/Combobox";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Field } from "../../shared/design-system/ui/Field";
-import { Radio, RadioGroup } from "../../shared/design-system/ui/RadioGroup";
 import { Textarea } from "../../shared/design-system/ui/Textarea";
 import { ToastNotice } from "../../shared/design-system/ui/Toast";
 import { BuzzLinkPreview } from "../conversation/BuzzLinkPreview";
 import { useConversationPresentation } from "../conversation/ConversationPresentation";
 import { canMessageAgent } from "../agents/choices";
-import { channelIcon, channelText } from "../channels/channel-icon";
+import { channelText } from "../channels/channel-icon";
 import { RecipientPicker } from "../direct-messages/RecipientPicker";
 import type { Recipient } from "../direct-messages/usePeople";
 import {
@@ -32,7 +30,6 @@ import type { ChannelMessage, ChannelSummary } from "../relay/contracts";
 import type { OutgoingEvent } from "../relay/outbox";
 import { splitPartition } from "../relay/partition";
 import type { RelaySession } from "../relay/session";
-import { matchName } from "../search/match";
 import styles from "./ForwardMessage.module.css";
 
 type Source = Extract<OpenTarget, { kind: "conversation" }> & {
@@ -326,20 +323,15 @@ function ForwardMessageDialog({
     pending?.target.kind === "person" ? [pending.target.person] : [];
   const recoveredChannel = (pending?: PendingForward) =>
     pending?.target.kind === "channel" ? pending.target.channel.id : "";
-  const [kind, setKind] = useState<ForwardTarget["kind"]>(
-    () => recovered?.target.kind ?? "person",
-  );
   const [people, setPeople] = useState<Recipient[]>(() =>
     recoveredPeople(recovered),
   );
   const [channelId, setChannelId] = useState(() => recoveredChannel(recovered));
-  const [channelQuery, setChannelQuery] = useState("");
   const [note, setNote] = useState(() => recovered?.note ?? "");
   const restored = useRef(recovered?.id);
   // The outbox can finish loading after the dialog mounts.
   if (recovered && restored.current !== recovered.id) {
     restored.current = recovered.id;
-    setKind(recovered.target.kind);
     setPeople(recoveredPeople(recovered));
     setChannelId(recoveredChannel(recovered));
     setNote(recovered.note);
@@ -388,31 +380,24 @@ function ForwardMessageDialog({
   const person = people[0];
   const channel = channels.find((item) => item.id === channelId);
   // A recovered channel keeps its saved label until the list names it.
-  const target: ForwardTarget | undefined =
-    kind === "person"
-      ? person && { kind, person }
-      : channel
-        ? {
-            kind,
-            channel: {
-              id: channel.id,
-              name: channel.name,
-              ...(channel.private ? { private: true } : {}),
-            },
-          }
-        : recovered?.target.kind === "channel" &&
-            recovered.target.channel.id === channelId
-          ? recovered.target
-          : undefined;
+  const target: ForwardTarget | undefined = person
+    ? { kind: "person", person }
+    : channel
+      ? {
+          kind: "channel",
+          channel: {
+            id: channel.id,
+            name: channel.name,
+            ...(channel.private ? { private: true } : {}),
+          },
+        }
+      : recovered?.target.kind === "channel" &&
+          recovered.target.channel.id === channelId
+        ? recovered.target
+        : undefined;
   const locked = pending || !!recovered;
   const submit = async () => {
-    if (
-      !open ||
-      !target ||
-      (target.kind === "person" && typed) ||
-      operation.current
-    )
-      return;
+    if (!open || !target || typed || operation.current) return;
     const controller = new AbortController();
     operation.current = controller;
     lock(true);
@@ -589,9 +574,7 @@ function ForwardMessageDialog({
             <Button
               variant="prominent"
               loading={pending}
-              disabled={
-                pending || !target || (target.kind === "person" && typed)
-              }
+              disabled={pending || !target || typed}
               onClick={() => void submit()}
             >
               {recovered ? "Retry forward" : "Forward"}
@@ -600,89 +583,22 @@ function ForwardMessageDialog({
         }
       >
         <div className={styles.form} ref={fields}>
-          <Field
-            label="Forward to"
-            labelVisibility="hidden"
-            nativeLabel={false}
-          >
-            <RadioGroup<ForwardTarget["kind"]>
-              aria-label="Forward to"
-              name="forward-target"
-              size="sm"
-              value={kind}
-              disabled={locked}
-              onValueChange={(next) => {
-                setKind(next);
-                // Text left in the person field does not follow it away.
-                setTyped(false);
-              }}
-            >
-              <Radio size="sm" value="person" label="Person" />
-              <Radio size="sm" value="channel" label="Channel" />
-            </RadioGroup>
-          </Field>
-          {kind === "person" ? (
-            <RecipientPicker
-              session={session}
-              scope={scope}
-              selected={people}
-              labels={named}
-              disabled={locked}
-              maxRecipients={1}
-              appearance="field"
-              initiallyOpen={false}
-              onChange={setPeople}
-              onTyped={setTyped}
-              onComplete={() => noteField.current?.focus()}
-            />
-          ) : (
-            <Combobox.Root
-              items={channels}
-              value={channel ?? null}
-              itemToStringLabel={(item: ChannelSummary) => item.name}
-              itemToStringValue={(item: ChannelSummary) => item.id}
-              isItemEqualToValue={(a, b) => a.id === b.id}
-              filter={(item: ChannelSummary, query: string) =>
-                !query.trim() ||
-                !!matchName(item.name, query.trim().toLowerCase())
-              }
-              inputValue={channelQuery}
-              onInputValueChange={setChannelQuery}
-              onOpenChange={(next) => {
-                if (next) setChannelQuery("");
-              }}
-              autoHighlight
-              disabled={locked}
-              onValueChange={(item: ChannelSummary | null) => {
-                if (item) setChannelId(item.id);
-              }}
-            >
-              <Combobox.Trigger label="Channel" disabled={locked}>
-                {target?.kind === "channel"
-                  ? targetName(target)
-                  : "Choose a channel"}
-              </Combobox.Trigger>
-              <Combobox.Popup
-                search
-                size="compact"
-                empty="No channels you can post in match."
-              >
-                <Combobox.List>
-                  {(item: ChannelSummary) => {
-                    const Icon = channelIcon(item);
-                    return (
-                      <Combobox.Item key={item.id} value={item}>
-                        <span className={styles.channel}>
-                          <Icon size={16} aria-hidden="true" />
-                          {item.name}
-                        </span>
-                      </Combobox.Item>
-                    );
-                  }}
-                </Combobox.List>
-              </Combobox.Popup>
-            </Combobox.Root>
-          )}
+          <RecipientPicker
+            session={session}
+            scope={scope}
+            selected={people}
+            labels={named}
+            disabled={locked}
+            maxRecipients={1}
+            appearance="field"
+            initiallyOpen={false}
+            channels={channels}
+            channel={target?.kind === "channel" ? target.channel : undefined}
+            onChannel={(item) => setChannelId(item?.id ?? "")}
+            onChange={setPeople}
+            onTyped={setTyped}
+            onComplete={() => noteField.current?.focus()}
+          />
           <Field label="Note (optional)">
             <Textarea
               ref={noteField}

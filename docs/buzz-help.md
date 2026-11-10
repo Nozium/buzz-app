@@ -336,10 +336,10 @@ revokes all of them, and a pairing unused for 30 days expires.
   and panel links become unavailable.
 - **Forward message** in a message's hover actions or message menu sends its link
   to one person or one channel in the current community, with an optional note.
-  For a person, Buzz sends it in your direct message with them, starting one if
-  needed; the channel list shows only channels you can post in. You stay where
-  you are; select the confirmation notice while it's showing to open the
-  forwarded message. The link previews the original message; recipients still
+  Typing in To finds both people and the channels you can post in. For a
+  person, Buzz sends it in your direct message with them, starting one if
+  needed. You stay where you are; select the confirmation notice while it's
+  showing to open the forwarded message. The link previews the original message; recipients still
   need access to its conversation. Forwarding is unavailable when the connection
   cannot start DMs or the message has no link yet.
 
