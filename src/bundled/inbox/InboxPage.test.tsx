@@ -2741,8 +2741,10 @@ it("under Unread only, reading a neighbor in another view keeps the open convers
   await waitFor(() =>
     expect(
       reader().querySelector(`[data-message-id="${h.reply.id}"]`),
-    ).toHaveFocus(),
+    ).toBeInTheDocument(),
   );
+  // A delayed reveal must leave the editor alone once drafting has started.
+  expect(editor).toHaveFocus();
   await waitFor(() =>
     expect(
       screen.getByRole("list", { name: "Activity", hidden: true }),
@@ -2764,6 +2766,7 @@ it("under Unread only, reading a neighbor in another view keeps the open convers
   expect(sideTabs()).toEqual(opened);
   expect(screen.getByRole("textbox")).toBe(editor);
   expect(editor).toHaveTextContent("Keep this unread-only draft");
+  expect(editor).toHaveFocus();
   expect(
     reader().querySelector(`[data-message-id="${h.reply.id}"]`),
   ).toBeInTheDocument();

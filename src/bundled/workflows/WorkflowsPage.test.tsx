@@ -1270,7 +1270,7 @@ function channelFilteredPage() {
   return { fixture, user, openChannels, otherDefinition };
 }
 
-it("opens a selected card in the side pane and closes its tab", async () => {
+it("opens a selected card in the detail rail and closes from its keyboard controls", async () => {
   const { user } = channelFilteredPage();
   expect(
     screen.getByRole("button", { name: /^Channels(?::|$)/ }).closest("header"),
@@ -1285,8 +1285,13 @@ it("opens a selected card in the side pane and closes its tab", async () => {
   );
   expect(open).toHaveAttribute("aria-pressed", "true");
   const detail = screen.getByRole("dialog", { name: "Message helper" });
-  fireEvent.keyDown(detail, { key: "Escape" });
-  expect(screen.queryByRole("region", { name: "Workflow details" })).toBeNull();
+  within(detail).getByRole("button", { name: "Close" }).focus();
+  await user.keyboard("{Escape}");
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("region", { name: "Workflow details" }),
+    ).toBeNull(),
+  );
   expect(open).toHaveAttribute("aria-pressed", "false");
   await user.click(open);
   await user.click(
@@ -1295,7 +1300,11 @@ it("opens a selected card in the side pane and closes its tab", async () => {
       { name: "Close" },
     ),
   );
-  expect(screen.queryByRole("region", { name: "Workflow details" })).toBeNull();
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("region", { name: "Workflow details" }),
+    ).toBeNull(),
+  );
 });
 
 it("combines channel selections and resets them while closing filtered details", async () => {
