@@ -218,6 +218,59 @@ it("keeps the next older edge when an unanchored page reaches the byte budget", 
   expect([...seen].sort()).toEqual(h.history.map((row) => row.id).sort());
 });
 
+it("keeps a buffered deletion whose auxiliary arrives with an interrupted older page", async () => {
+  const h = setup({ count: 100, maxHistoryRows: 40 });
+  await h.open();
+  const target = h.history[75];
+  assert.exists(target);
+  const thread = h.owner.session.thread("c", target.id, { exact: true });
+  await thread.refresh();
+  const reaction = signed(h.alice, {
+    kind: 7,
+    content: "+",
+    created_at: T0 + 101 * HOUR,
+    tags: [
+      ["e", target.id],
+      ["p", target.pubkey],
+    ],
+  });
+  h.live.receive([reaction]);
+  expect(thread.snapshot().target?.reactions).toHaveLength(1);
+  expect(h.window().rows.some((row) => row.id === target.id)).toBe(false);
+  h.gate.aux = [reaction];
+  let release!: () => void;
+  h.gate.hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const before = h.reads.length;
+  h.channels.loadOlder("c");
+  try {
+    await vi.waitFor(() => expect(h.reads.length).toBeGreaterThan(before));
+    h.live.receive([
+      signed(h.alice, {
+        kind: 5,
+        content: "",
+        created_at: T0 + 102 * HOUR,
+        tags: [["e", reaction.id]],
+      }),
+    ]);
+    expect(thread.snapshot().target?.reactions).toHaveLength(0);
+    h.live.receive(
+      Array.from({ length: 41 }, (_, i) =>
+        message(h.alice, "c", `evict ${i}`, T0 + (103 + i) * HOUR),
+      ),
+    );
+  } finally {
+    h.gate.hold = undefined;
+    release();
+  }
+  await vi.waitFor(() => expect(h.window().loadingOlder).toBe(false));
+  const row = h.window().rows.find((row) => row.id === target.id);
+  assert.exists(row);
+  expect(row.reactions).toHaveLength(0);
+  thread.dispose();
+});
+
 it("seek installs a segment and resolves the first row at or after from", async () => {
   const h = setup();
   await h.open();

@@ -1141,7 +1141,7 @@ export function createChannelStore(
       const combined = new Map(
         (cursor
           ? [
-              ...relatedEvents(pending, roots),
+              ...relatedEvents([...pending, ...page.events], roots),
               ...(interrupted ? [] : state.events),
             ]
           : []
