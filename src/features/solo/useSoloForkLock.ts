@@ -9,8 +9,7 @@ export function useSoloForkLock(
   channel?: ChannelSummary,
 ) {
   const id = channel?.id;
-  const enabled =
-    !!channel && (channel.channelType === "solo" || !!channel.metadataPending);
+  const enabled = channel?.forkClaim === true;
   const pending = !!(channel?.pending || channel?.metadataPending);
   const [attempt, retry] = useState(0);
   // Fence in render, not just effect cleanup: retries and pending transitions
@@ -48,8 +47,9 @@ export function useSoloForkLock(
           ? { signingAuthority: session.workflowAuthority }
           : {},
       );
-      if (!controller.signal.aborted)
-        setResult({ request, ...(seed ? { seed } : {}) });
+      if (!seed)
+        throw new Error("The fork’s signed ancestry could not be confirmed.");
+      if (!controller.signal.aborted) setResult({ request, seed });
     })().catch((error: unknown) => {
       if (!controller.signal.aborted)
         setResult({

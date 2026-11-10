@@ -733,6 +733,7 @@ export function createChannelWrites(
       channels.start?.({
         id,
         name: title,
+        ...(options?.forkedFrom ? { forkClaim: true as const } : {}),
         members,
         labels: [
           SOLO_LABEL,
