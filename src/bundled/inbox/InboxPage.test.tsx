@@ -15,6 +15,7 @@ import {
 import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { PageTabs } from "../channels/PageTabs";
+import { InboxBadge } from "./InboxBadge";
 import { InboxPage } from "./InboxPage";
 import { InboxPreview } from "./InboxPreview";
 import { huddleDescription } from "../../features/huddle/lifecycle";
@@ -610,6 +611,23 @@ it("previews recent conversations and opens a row directly", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Open Activity" }));
   expect(close).toHaveBeenCalledTimes(2);
   expect(h.open).toHaveBeenLastCalledWith(inboxTarget);
+});
+
+it("counts unread conversations on the sidebar row until they are read", async () => {
+  const h = fixture({ withDm: true });
+  render(<InboxBadge relay={h.relay} />);
+  // The same three conversations the hover card's header totals.
+  expect(
+    await screen.findByRole("img", { name: "3 unread" }),
+  ).toHaveTextContent("3");
+  await markRead(h, "dm-room");
+  expect(
+    await screen.findByRole("img", { name: "2 unread" }),
+  ).toBeInTheDocument();
+  await markRead(h, "room");
+  await waitFor(() =>
+    expect(screen.queryByRole("img")).not.toBeInTheDocument(),
+  );
 });
 
 it("keeps Unread only to the card and offers recent activity once caught up", async () => {

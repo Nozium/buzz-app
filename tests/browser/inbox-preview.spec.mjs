@@ -71,6 +71,12 @@ test("hovering the sidebar Activity row previews recent conversations and opens 
   const inboxRow = activityRow(page);
   const card = page.getByRole("dialog", { name: "Activity", exact: true });
   const rows = card.getByRole("list", { name: "Recent activity" });
+  // The row counts unread conversations before Activity or its card opens.
+  const badge = inboxRow.getByRole("img", { name: /^\d+ unread$/ });
+  await expect(badge).toBeVisible();
+  const unreadCount = async () =>
+    (await badge.count()) ? Number(await badge.textContent()) : 0;
+  const initialUnread = await unreadCount();
   // Beside the row, inside the window, in both themes, at an intermediate
   // width and with enlarged text.
   for (const [mode, width, fontSize] of [
@@ -94,6 +100,10 @@ test("hovering the sidebar Activity row previews recent conversations and opens 
       rows.getByText("Unread reply 1", { exact: true }),
     ).toBeVisible();
     await expect(card.getByText("Checking recent activity…")).toHaveCount(0);
+    // The row's count is the total the card's header leads with.
+    await expect(card.locator("header").getByRole("status")).toHaveText(
+      new RegExp(`^${await unreadCount()} unread\\b`),
+    );
     const reactionRow = rows.getByRole("button", {
       name: /reacted with heart/,
     });
@@ -206,6 +216,8 @@ test("hovering the sidebar Activity row previews recent conversations and opens 
   await expect(
     page.getByRole("region", { name: "Activity", exact: true }),
   ).toHaveCount(0);
+  // Reading that conversation lowers the row's count.
+  await expect.poll(unreadCount).toBeLessThan(initialUnread);
 
   // While Activity is the open page, its row offers no preview.
   await inboxRow.click();

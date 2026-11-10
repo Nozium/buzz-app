@@ -396,12 +396,15 @@ revokes all of them, and a pairing unused for 30 days expires.
   threads stay separate. Agent-only coordination stays out. The tabs (All, Threads, Mentions, DMs, Reactions) narrow it by
   kind, and **From** by sender (Anyone, People or Agents). Turn on **Unread** to see only what you haven't read:
   there, a row's ✓ marks it as read and it leaves the list, with **Undo** for a moment; when nothing is left it
-  says **All caught up**. If loading fails, use **Retry activity** on the page or preview to retry; recovered
+  says **All caught up**. The sidebar's Activity row shows how many conversations are unread, the number
+  Unread lists under All from Anyone; unread rows carry a dot and stronger text, and the count drops as you
+  open or mark them read. It counts the recent activity Buzz has loaded, so it is not an exact total, and
+  muted conversations still count. If loading fails, use **Retry activity** on the page or preview to retry; recovered
   activity clears the loading error.
   A DM row whose unread messages are all in one thread opens that thread; later DM messages outside it stay
   unread until you open the whole DM, which its row then does.
   **Reactions** shows recent reactions to your messages, with shared emoji grouped together per message and each person’s remaining emoji in their own row; selecting it turns Unread off.
-  Reactions have no unread state or badge count. Clicking one opens your exact message in its conversation or thread.
+  Reactions have no unread state and do not add to the Activity count. Clicking one opens your exact message in its conversation or thread.
   New reactions from updated clients appear; older unaddressed reactions are not backfilled.
   While Buzz is visible, a live reaction briefly replaces the Activity bell with its emoji for three seconds.
   Further reactions during that hold do not change the icon; history loading does not trigger it.
