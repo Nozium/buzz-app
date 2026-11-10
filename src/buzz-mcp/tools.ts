@@ -1620,7 +1620,9 @@ async function post(
   const mentions = await tools.mentions(channel, content, list(args.mentions));
   const waits = args.needs_reply === true;
   if (waits && !mentions.length)
-    throw new Error("needs_reply needs a mention: name who must answer.");
+    throw new Error(
+      "needs_reply needs a mention: tag who must answer with @Name or mentions.",
+    );
   const event = await tools.client.publish({
     kind: 9,
     content,

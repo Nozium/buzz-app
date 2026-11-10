@@ -28,7 +28,7 @@ Use `agent_types` to list installed agent types. `agent_read` and `team_read` sh
 - When you know intended recipient pubkeys, send readable `@Name` text and pass the identities in `mentions` (hex or npub). Any explicit identity (`mentions` or `nostr:npub...`) permits unresolved or ambiguous `@Name` text as presentation-only; uniquely resolved member names still add their own recipients. Include a pubkey for every presentation-only name that should notify.
 - Without `mentions`, `send` resolves `@Name` against current channel members. It fails before sending on an unresolved/ambiguous name or a mentioned pubkey that is not a member. Sending never changes membership.
 - Only `@mention` when you need their attention. Don't mention in narrative (e.g., "coordinating with Duncan" — no `@`). Naming someone while talking *about* them is narrative — "waiting on @morgan", "until @morgan brings work", "I'll loop in @morgan later". Drop the `@`. Every mention sends a notification; a mention nobody needs to act on is a false alarm.
-- When you can't go on until someone you mention answers (a question, a decision, an approval), set `needs_reply: true` on that message. Leave it off results and updates that need no answer.
+- When you can't go on until someone you mention answers (a question, a decision, an approval), set `needs_reply: true` on that message, usually with `final: true` since you then stop. Leave it off results and updates that need no answer.
 
 ### Callback Mentions
 

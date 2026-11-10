@@ -530,6 +530,7 @@ it("marks a message that waits on the people it mentions, and needs one", async 
       needs_reply: true,
     }),
   ).rejects.toThrow("needs_reply needs a mention");
+  expect(published).toHaveLength(1);
   await callTool(client, context, "send", {
     text: "@Bob done",
     audience: "everyone",
@@ -4383,6 +4384,23 @@ it("tags a nested reply for agents only, signing its request", async () => {
     ["e", nested, "", "reply"],
     ["audience", "agents"],
     ["buzz:request", "f".repeat(64)],
+  ]);
+});
+
+it("marks a nested reply that waits on the people it mentions", async () => {
+  const { client, published } = fake(community);
+  await callTool(client, { channel: "chan", root }, "reply_in_subthread", {
+    parent: nested,
+    audience: "everyone",
+    needs_reply: true,
+    text: "@Bob which branch?",
+  });
+  expect(published[0]?.tags).toEqual([
+    ["h", "chan"],
+    ["e", root, "", "root"],
+    ["e", nested, "", "reply"],
+    ["p", bob],
+    ["buzz:needs-reply"],
   ]);
 });
 
