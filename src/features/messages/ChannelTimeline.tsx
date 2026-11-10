@@ -815,7 +815,8 @@ function Timeline({
     inset: 0,
   });
   const heldReader = useRef<
-    { id: string; y: number; inset: number; intent: number; ended: boolean } | undefined
+    | { id: string; y: number; inset: number; intent: number; ended: boolean }
+    | undefined
   >(undefined);
   const previousBoundaryId = useRef<string | undefined>(undefined);
   const upwardGesture = useRef<false | "candidate" | "moving">(false);
