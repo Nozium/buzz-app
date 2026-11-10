@@ -59,6 +59,28 @@ export type ThreadResume = Readonly<{
   canLoadMore: boolean;
   limited: boolean;
 }>;
+/** Every ID a deletion among these events names, valid or not. */
+function deletionTargets(events: Iterable<EventData>) {
+  const ids = new Set<string>();
+  for (const event of events)
+    if (event.kind === 5 || event.kind === 9005)
+      for (const [name, id] of event.tags) if (name === "e" && id) ids.add(id);
+  return ids;
+}
+/** A resume without the rows any of these retained events deletes. A thread
+ * view admits a deletion only beside its target, so a tombstone retained
+ * alone would not hide a resumed row. */
+export function resumeAfter(
+  resume: ThreadResume,
+  events: readonly EventData[],
+): ThreadResume | undefined {
+  const deleted = deletionTargets(events);
+  if (deleted.has(resume.root.id)) return undefined;
+  const replies = resume.replies.filter((row) => !deleted.has(row.id));
+  return replies.length === resume.replies.length
+    ? resume
+    : Object.freeze({ ...resume, replies });
+}
 export type ThreadRetarget =
   | "selected"
   | "different"
@@ -358,13 +380,8 @@ export function createThreadView({
     if (shown && !rootUnavailable) {
       // Evidence wins. A resumed row fills in only an event not read yet, and
       // never one a retained deletion names, valid or not: the refresh decides.
-      const read = new Set<string>();
-      for (const event of inputs.values()) {
-        read.add(event.id);
-        if (event.kind === 5 || event.kind === 9005)
-          for (const [name, id] of event.tags)
-            if (name === "e" && id) read.add(id);
-      }
+      const read = deletionTargets(inputs.values());
+      for (const event of inputs.values()) read.add(event.id);
       nextReplies.push(...shown.replies.filter((row) => !read.has(row.id)));
       nextReplies.sort(compareMessages);
       if (!read.has(shown.root.id)) nextRoot ??= shown.root;
@@ -429,8 +446,7 @@ export function createThreadView({
     resume.root.id === messageId &&
     (!rootId || rootId === messageId)
   ) {
-    // The root stays unread: like a first open without a seed, this view
-    // admits no retained event until its own read finds the root.
+    rootId = messageId;
     shown = resume;
     publish({
       status: "ready",

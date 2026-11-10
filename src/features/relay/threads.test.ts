@@ -4,6 +4,7 @@ import type { ChannelMessage } from "./contracts";
 import { shareMessageRows } from "./row-identity";
 import {
   createThreadView,
+  resumeAfter,
   threadReference,
   type ThreadResume,
 } from "./threads";
@@ -429,8 +430,15 @@ it("reopens a thread from scratch after a cache clear, a close mid-read or an ex
  * seen into a new view, so a resume would not be its only source of rows. */
 const direct = (
   events: (typeof root)[] | Error,
-  resume?: ThreadResume,
-  seed?: typeof root,
+  {
+    resume,
+    seed,
+    sending = [],
+  }: {
+    resume?: ThreadResume;
+    seed?: typeof root;
+    sending?: (typeof root)[];
+  } = {},
 ) =>
   createThreadView({
     channelId: "a",
@@ -445,7 +453,11 @@ const direct = (
     } as unknown as RelayReader,
     canRefresh: () => false,
     seed,
-    local: undefined,
+    local: {
+      snapshot: () =>
+        sending.map((event) => ({ event, delivery: "sending" as const })),
+      subscribe: () => () => {},
+    },
     resume,
     canAccess: () => true,
     visible: (events) => events,
@@ -453,6 +465,8 @@ const direct = (
   });
 const first = reply("first", 10);
 const gone = reply("deleted while closed", 11);
+const deletion = (event: typeof root) =>
+  signed(alice, { kind: 5, content: "", tags: [["e", event.id]] });
 async function closed() {
   const closing = direct([root, first, gone]);
   await closing.view.refresh();
@@ -467,13 +481,13 @@ const replyIds = (thread: ReturnType<typeof direct>) =>
 it("drops a resumed row its repair does not read again", async () => {
   const resume = await closed();
   // The relay omits a deleted row, and its deletion with it.
-  const view = direct([root, first], resume);
+  const view = direct([root, first], { resume });
   expect(view.view.snapshot().status).toBe("ready");
   expect(replyIds(view)).toEqual([first.id, gone.id]);
   await view.view.refresh();
   expect(replyIds(view)).toEqual([first.id]);
   // A repair that fails leaves nothing it could not confirm on screen.
-  const failing = direct(new Error("offline"), resume);
+  const failing = direct(new Error("offline"), { resume });
   expect(failing.view.snapshot().replies).toHaveLength(2);
   await failing.view.refresh();
   expect(failing.view.snapshot()).toMatchObject({
@@ -482,22 +496,56 @@ it("drops a resumed row its repair does not read again", async () => {
   });
 });
 
-it("never shows a resumed row over its own evidence or before its root is read", async () => {
+it("never shows a resumed row over its own evidence or a retained deletion", async () => {
   const resume = await closed();
-  // With only the resume, a retained reply waits for the root read, as it
-  // would on a first open with nothing retained.
-  const unread = direct([root, first], resume);
-  unread.receive([gone]);
-  await unread.view.refresh();
-  expect(replyIds(unread)).toEqual([first.id]);
-  // A retained deletion hides the resumed row before any read.
-  const seeded = direct([root, first], resume, root);
+  // A deletion admitted beside its target hides the resumed row before any read.
+  const seeded = direct([root, first], { resume, seed: root });
   seeded.receive([gone]);
   expect(replyIds(seeded)).toEqual([first.id, gone.id]);
-  seeded.receive([
-    signed(alice, { kind: 5, content: "", tags: [["e", gone.id]] }),
-  ]);
+  seeded.receive([deletion(gone)]);
   expect(replyIds(seeded)).toEqual([first.id]);
+  // A tombstone retained alone never reaches a view, so the session takes
+  // what it deletes out of the resume first.
+  expect(
+    resumeAfter(resume, [deletion(gone)])?.replies.map((row) => row.id),
+  ).toEqual([first.id]);
+  expect(resumeAfter(resume, [deletion(root)])).toBeUndefined();
+  expect(resumeAfter(resume, [first])).toBe(resume);
+});
+
+it("shows a reply sent from a reopened thread before its first read lands", async () => {
+  const resume = await closed();
+  const mine = reply("mine", 12);
+  const view = direct([root, first], { resume, sending: [mine] });
+  expect(view.view.snapshot().replies.at(-1)).toMatchObject({
+    id: mine.id,
+    delivery: "sending",
+  });
+});
+
+it("reopens without admitting retained replies when only the resume holds the root", async () => {
+  const h = live();
+  const loaded = h.view.refresh();
+  h.next().respond([root, first, gone]);
+  await loaded;
+  h.view.dispose();
+  // Unrelated traffic evicts the root from the session's recent events, then
+  // a replay brings back the reply the relay has since deleted.
+  h.traffic.receive(
+    Array.from({ length: 9 }, (_, index) =>
+      message(alice, "a", "x".repeat(1024 * 1024), 100 + index),
+    ),
+  );
+  h.traffic.receive([gone]);
+  const view = h.session.thread("a", root.id);
+  expect(view.snapshot().replies.map((row) => row.id)).toEqual([
+    first.id,
+    gone.id,
+  ]);
+  const repair = view.refresh();
+  h.next().respond([root, first]);
+  await repair;
+  expect(view.snapshot().replies.map((row) => row.id)).toEqual([first.id]);
 });
 
 it("keeps a reply selected during a reopened thread's repair", async () => {

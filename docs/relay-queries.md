@@ -249,9 +249,9 @@ target, leaves an earlier resume in place. The next ordinary view of that root
 starts `ready` showing those rows, after the existing access check, so the panel
 positions it without the loader. Resumed rows are display only and never evidence:
 the closed view missed the stream, and the relay omits deleted rows with their
-deletions. A resumed row never shows over that row's own evidence or a retained
-deletion of it, and a view with only a resume admits no retained event until its
-own read finds the root, as a first open would. The view's first refresh runs in the background with the same reads as a
+deletions. A resumed row never shows over that row's own evidence or any retained
+deletion of it. A view opened from a resume with no retained root skips the
+session's replay of retained events, which a first open without the root ignores. The view's first refresh runs in the background with the same reads as a
 first open, then replaces them; if it fails they are dropped. Exact views neither
 use nor replace a resume. Any access change, cache clear or session disposal drops
 every resume.

@@ -122,7 +122,7 @@ import { browserThreadFollows } from "./thread-follows";
 import { createMessages } from "./messages";
 import { retryRead } from "./read-retry";
 import { messageAuthor } from "./fold";
-import { createThreadView, type ThreadResume } from "./threads";
+import { createThreadView, resumeAfter, type ThreadResume } from "./threads";
 import { ByteLru } from "./budget";
 import { createRelayProfiler } from "./profiling";
 import { liveRecoveryStatus } from "./live-recovery";
@@ -2827,6 +2827,12 @@ export function createRelaySession(
           return events.filter((event) => event.kind !== PRODUCT_FEEDBACK_KIND);
         },
       };
+      const seed = recent.peek(messageId)?.event ?? retainedEvent(messageId);
+      const retained = recent.entries().map(([, item]) => item.event);
+      const saved = options?.exact
+        ? undefined
+        : resumes.get(`${channelId}:${messageId}`);
+      const resume = saved && resumeAfter(saved, retained);
       const thread = createThreadView({
         channelId,
         messageId,
@@ -2839,10 +2845,8 @@ export function createRelaySession(
         exact: options?.exact ?? false,
         priority: options?.priority,
         admit: options?.exact ? (events) => accept(events, false) : undefined,
-        seed: recent.peek(messageId)?.event ?? retainedEvent(messageId),
-        resume: options?.exact
-          ? undefined
-          : resumes.get(`${channelId}:${messageId}`),
+        seed,
+        resume,
         local: localViews,
         clock,
         canAccess: () => !closed && canAccess(channelId),
@@ -2853,7 +2857,10 @@ export function createRelaySession(
         now: storeNow,
       });
       threads.add(thread);
-      thread.receive(recent.entries().map(([, item]) => item.event));
+      // Without its root retained, a first open admits none of these; a view
+      // shown from a resume must not either, or a reply the relay no longer
+      // returns would outlive its refresh.
+      if (seed || !resume) thread.receive(retained);
       observations.add(thread.receive);
       const unsubscribe = localViews?.subscribe(thread.localChanged);
       const unsubscribeOwner = profiles.queries.subscribe(thread.ownersChanged);
