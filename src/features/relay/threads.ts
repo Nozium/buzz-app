@@ -49,14 +49,13 @@ export type ThreadSnapshot = Readonly<{
   target?: ChannelMessage | undefined;
   targetStatus?: "loading" | "ready" | "unavailable" | "error" | undefined;
 }>;
-/** A closed ordinary thread's verified evidence and traversal. A view opened
- * from it shows those rows at once and repairs them in the background. */
+/** What a closed ordinary thread last showed. A view opened from it shows
+ * these rows at once, as display only: they are never evidence, and the
+ * view's first refresh replaces them. */
 export type ThreadResume = Readonly<{
-  rootId: string;
-  events: readonly RelayEvent[];
-  cursor: ThreadCursor | undefined;
-  mode: "older" | "legacy";
-  pages: number;
+  root: ChannelMessage;
+  replies: readonly ChannelMessage[];
+  direction: "older" | "forward";
   canLoadMore: boolean;
   limited: boolean;
 }>;
@@ -210,11 +209,9 @@ export function createThreadView({
   let again: false | "refresh" | "established" = false;
   /** An older page requested during a background repair, which stays ready. */
   let older = false;
-  /** Resumed events no refresh has read again. The relay omits deleted rows
-   * and a closed view missed the stream, so until a refresh succeeds these are
-   * shown but not evidence: it keeps only what it reads, as a fresh view would,
-   * and repairs in the background. */
-  let provisional: ReadonlySet<string> | undefined;
+  /** Resumed rows shown beside the evidence until the first refresh settles.
+   * That refresh reads as a fresh view would, in the background. */
+  let shown: ThreadResume | undefined;
   let snapshot: ThreadSnapshot = Object.freeze({
     status: "idle",
     root: undefined,
@@ -355,6 +352,16 @@ export function createThreadView({
       .sort(compareMessages);
     for (const row of nextReplies)
       clock.observe(channelId, row.createdAtMs ?? row.createdAt * 1000);
+    let nextRoot = !rootUnavailable
+      ? readable.find((row) => row.id === rootId)
+      : undefined;
+    if (shown) {
+      // Evidence wins; a resumed row fills in only what is not read yet.
+      const read = new Set(nextReplies.map((row) => row.id));
+      nextReplies.push(...shown.replies.filter((row) => !read.has(row.id)));
+      nextReplies.sort(compareMessages);
+      nextRoot ??= shown.root;
+    }
     const replies =
       snapshot.replies.length === nextReplies.length &&
       snapshot.replies.every((row, index) => row === nextReplies[index])
@@ -363,9 +370,7 @@ export function createThreadView({
     emit({
       ...snapshot,
       ...patch,
-      root: !rootUnavailable
-        ? readable.find((row) => row.id === rootId)
-        : undefined,
+      root: nextRoot,
       replies,
       ...(exact ? { target, targetStatus } : {}),
     });
@@ -383,6 +388,7 @@ export function createThreadView({
       pages = 0;
       again = false;
       older = false;
+      shown = undefined;
       if (exact) targetStatus = "error";
       publish({
         status: "error",
@@ -409,26 +415,21 @@ export function createThreadView({
     if (seed.id === rootId) remote = [seed];
     publish();
   }
-  // Resumed rows were verified when read; visibility is checked again now.
-  if (resume && !exact && resume.rootId === messageId && canAccess()) {
-    const events = visible(resume.events);
-    if (
-      (!rootId || rootId === resume.rootId) &&
-      events.some((event) => event.id === resume.rootId) &&
-      retain(union(remote, events))
-    ) {
-      rootId = resume.rootId;
-      cursor = resume.cursor;
-      mode = resume.mode;
-      pages = resume.pages;
-      provisional = new Set(events.map((event) => event.id));
-      publish({
-        status: "ready",
-        direction: mode === "older" ? "older" : "forward",
-        canLoadMore: resume.canLoadMore,
-        limited: resume.limited,
-      });
-    }
+  if (
+    resume &&
+    !exact &&
+    canAccess() &&
+    resume.root.id === messageId &&
+    (!rootId || rootId === messageId)
+  ) {
+    rootId = messageId;
+    shown = resume;
+    publish({
+      status: "ready",
+      direction: resume.direction,
+      canLoadMore: resume.canLoadMore,
+      limited: resume.limited,
+    });
   }
   function purge(clear = false) {
     // A purged view no longer holds what the stream delivered before the drop.
@@ -442,6 +443,7 @@ export function createThreadView({
     again = false;
     older = false;
     staged = [];
+    shown = undefined;
     if (exact) targetStatus = "loading";
     if (clear || !canAccess()) {
       remote = [];
@@ -545,11 +547,6 @@ export function createThreadView({
     const combined = union(remote, related(accepted, id));
     if (!retain(combined)) return "error";
     stage([]);
-    // Read just now: evidence a running repair must keep, not resumed display.
-    if (provisional) {
-      const read = new Set(accepted.map((event) => event.id));
-      provisional = new Set([...provisional].filter((id) => !read.has(id)));
-    }
     if (
       expectedRoot &&
       !foldMessages(channelId, relayAuthor, combined, {
@@ -620,8 +617,7 @@ export function createThreadView({
       return;
     }
     if (!replace && (!snapshot.canLoadMore || snapshot.limited)) return;
-    const unproven = replace ? provisional : undefined;
-    const background = established || !!unproven;
+    const background = established || (replace && !!shown);
     const owned = new AbortController();
     controller = owned;
     const startedAt = now();
@@ -718,11 +714,7 @@ export function createThreadView({
       // A strict refresh re-reads from the newest end. Live replay covers
       // minutes, not a long disconnect, so keep paging until a reply kept
       // across the drop is reached.
-      const kept = new Set(
-        replace
-          ? [...(held ?? unverified())].filter((id) => !unproven?.has(id))
-          : [],
-      );
+      const kept = replace ? (held ?? unverified()) : new Set<string>();
       let reached = !kept.size;
       let more = false;
       // Where the loop passed the range the reader had, so a fill that never
@@ -863,18 +855,13 @@ export function createThreadView({
       if (
         !retain(
           union(
-            remote.filter(
-              (event) =>
-                !(unreached && kept.has(event.id)) &&
-                !(unproven && provisional?.has(event.id)),
-            ),
+            unreached ? remote.filter((event) => !kept.has(event.id)) : remote,
             fetched,
           ),
         )
       )
         return;
       rootUnavailable = false;
-      if (unproven) provisional = undefined;
       cursor = nextCursor;
       pages = nextPages;
       if (replace) readAt = startedAt;
@@ -883,6 +870,7 @@ export function createThreadView({
       // takes the replies now.
       if (replace && !dropped) held = undefined;
       else if (replace && (unreached || !held?.size)) held = unverified();
+      if (replace) shown = undefined;
       publish({
         status: "ready",
         error: undefined,
@@ -897,6 +885,11 @@ export function createThreadView({
         // would clear that error.
         older = false;
         if (targetStatus === "loading") targetStatus = "error";
+        // A failed refresh shows what is read, as a fresh view would.
+        if (replace && shown) {
+          shown = undefined;
+          publish();
+        }
         publishStatus({ status: "error", error: String(error) });
       }
     } finally {
@@ -925,30 +918,29 @@ export function createThreadView({
     events: () => [...remote, ...staged, ...selectionStaged],
     receive,
     purge,
-    /** What a later view of this thread may start from: only a settled,
-     * ordinary view of a root, read while the stream was up. `reading` while
-     * a read runs: it settles nothing, so an earlier resume still stands. */
-    resume(): ThreadResume | "reading" | undefined {
-      if (controller) return "reading";
+    /** What a later view of this thread may show at once: a settled ordinary
+     * view of a root. `keep` leaves an earlier resume in place: a read runs,
+     * rows are still resumed, or a retarget made this view exact. */
+    resume(): ThreadResume | "keep" | undefined {
+      if (controller || shown || exact) return "keep";
+      const { status, root, replies, direction, canLoadMore, limited } =
+        snapshot;
       if (
         disposed ||
-        exact ||
         rootId !== messageId ||
         rootUnavailable ||
-        dropped ||
-        mode === "probe" ||
-        snapshot.status !== "ready" ||
-        !snapshot.root
+        status !== "ready" ||
+        !root ||
+        !direction
       )
         return undefined;
       return Object.freeze({
-        rootId,
-        events: remote,
-        cursor,
-        mode,
-        pages,
-        canLoadMore: snapshot.canLoadMore,
-        limited: snapshot.limited,
+        root,
+        // Pending local sends are the outbox's to show, not a resume's.
+        replies: replies.filter((row) => !row.delivery),
+        direction,
+        canLoadMore,
+        limited,
       });
     },
     /** The stream dropped: the replies held now are what its establishment

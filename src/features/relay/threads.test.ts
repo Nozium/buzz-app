@@ -2,7 +2,11 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createRelaySession } from "./session";
 import type { ChannelMessage } from "./contracts";
 import { shareMessageRows } from "./row-identity";
-import { createThreadView, threadReference } from "./threads";
+import {
+  createThreadView,
+  threadReference,
+  type ThreadResume,
+} from "./threads";
 import { byteSize } from "./budget";
 import { ReadError } from "./errors";
 import { foldMessages } from "./fold";
@@ -421,24 +425,51 @@ it("reopens a thread from scratch after a cache clear, a close mid-read or an ex
   expect(h.session.thread("a", root.id).snapshot().status).toBe("idle");
 });
 
-it("keeps only what a reopened thread's repair reads again", async () => {
-  const h = live();
+it("drops a resumed row its repair does not read again", async () => {
   const first = reply("first", 10);
   const gone = reply("deleted while closed", 11);
-  const loaded = h.view.refresh();
-  h.next().respond([root, first, gone]);
-  await loaded;
-  h.view.dispose();
+  // Built directly: a session also replays the events it has seen into a new
+  // view, so the resume would not be the only place this reply came from.
+  const open = (events: (typeof root)[] | Error, resume?: ThreadResume) =>
+    createThreadView({
+      channelId: "a",
+      messageId: root.id,
+      relayAuthor: relay.pubkey,
+      agentOwner: () => undefined,
+      reader: {
+        read: async () => {
+          if (events instanceof Error) throw events;
+          return events;
+        },
+      } as unknown as RelayReader,
+      canRefresh: () => false,
+      seed: undefined,
+      local: undefined,
+      resume,
+      canAccess: () => true,
+      visible: (events) => events,
+      notify: (listener) => listener(),
+    });
+  const closing = open([root, first, gone]);
+  await closing.view.refresh();
+  const resume = closing.resume();
+  closing.view.dispose();
+  if (typeof resume !== "object") throw new Error("No resume");
   // The relay omits a deleted row, and its deletion with it.
-  const view = h.session.thread("a", root.id);
-  expect(view.snapshot().replies.map((row) => row.id)).toEqual([
-    first.id,
-    gone.id,
-  ]);
-  const repair = view.refresh();
-  h.next().respond([root, first]);
-  await repair;
-  expect(view.snapshot().replies.map((row) => row.id)).toEqual([first.id]);
+  const view = open([root, first], resume);
+  const ids = () => view.view.snapshot().replies.map((row) => row.id);
+  expect(view.view.snapshot().status).toBe("ready");
+  expect(ids()).toEqual([first.id, gone.id]);
+  await view.view.refresh();
+  expect(ids()).toEqual([first.id]);
+  // A repair that fails leaves nothing it could not confirm on screen.
+  const failing = open(new Error("offline"), resume);
+  expect(failing.view.snapshot().replies).toHaveLength(2);
+  await failing.view.refresh();
+  expect(failing.view.snapshot()).toMatchObject({
+    status: "error",
+    replies: [],
+  });
 });
 
 it("keeps a reply selected during a reopened thread's repair", async () => {

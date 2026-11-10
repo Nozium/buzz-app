@@ -123,7 +123,7 @@ import { createMessages } from "./messages";
 import { retryRead } from "./read-retry";
 import { messageAuthor } from "./fold";
 import { createThreadView, type ThreadResume } from "./threads";
-import { ByteLru, listByteSize } from "./budget";
+import { ByteLru } from "./budget";
 import { createRelayProfiler } from "./profiling";
 import { liveRecoveryStatus } from "./live-recovery";
 import {
@@ -2857,7 +2857,11 @@ export function createRelaySession(
       observations.add(thread.receive);
       const unsubscribe = localViews?.subscribe(thread.localChanged);
       const unsubscribeOwner = profiles.queries.subscribe(thread.ownersChanged);
+      let disposed = false;
       const dispose = () => {
+        // Navigation cancellation and effect cleanup may both dispose.
+        if (disposed) return;
+        disposed = true;
         // Exact views neither use nor replace an ordinary thread's resume.
         if (!options?.exact) {
           const key = `${channelId}:${messageId}`;
@@ -2865,8 +2869,7 @@ export function createRelaySession(
             !closed && !cacheClearing && canAccess(channelId)
               ? thread.resume()
               : undefined;
-          if (typeof resume === "object")
-            resumes.set(key, resume, listByteSize(resume.events));
+          if (typeof resume === "object") resumes.set(key, resume);
           else if (!resume) resumes.delete(key);
         }
         thread.view.dispose();
