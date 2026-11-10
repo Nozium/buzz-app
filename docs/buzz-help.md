@@ -389,9 +389,11 @@ revokes all of them, and a pairing unused for 30 days expires.
   to address a channel member. A full name typed after **@** and followed by
   Space or closing punctuation, such as `,`, `.` or `'`, selects that person or
   agent unless a namesake or a longer name that begins the same way could be
-  meant; then pick from the list. Typing a name alone does not guarantee a
-  notification. Selecting someone outside the channel does not grant access;
-  inviting them requires an explicit decision from someone with permission.
+  meant; then pick from the list. A longer name of someone outside the channel
+  does not stop a channel member's name from selecting. Typing a name alone
+  does not guarantee a notification. Selecting someone outside the channel does
+  not grant access; inviting them requires an explicit decision from someone
+  with permission.
 - **Workspaces** group Solo chats and provide starting folders and instructions.
   Folders are optional unless **Work in a new worktree** is on. In that mode,
   add at least one project folder; the form shows a message beside Folders
