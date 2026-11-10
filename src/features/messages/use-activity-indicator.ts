@@ -54,7 +54,6 @@ export function useActivityIndicator(
         (!row.threadRootId || work.threadRootId === row.threadRootId),
     );
     return (
-      !requestId ||
       !local.length ||
       local.some(
         (work) =>
