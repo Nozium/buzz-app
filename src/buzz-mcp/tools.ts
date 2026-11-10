@@ -39,6 +39,7 @@ import {
 import { imageType } from "../features/relay/attachment-limits";
 import { LIVE_CANVAS_BYTES } from "../features/channel-templates/model";
 import { threadReference } from "../features/relay/thread-reference";
+import { NEEDS_REPLY_TAG } from "../features/relay/contracts";
 import { parseBuzzLink } from "../features/navigation/buzz-links";
 import { soloChannelMetadata } from "../features/relay/discovery";
 import { channelLabelTags } from "../features/relay/channel-labels";
@@ -73,6 +74,10 @@ const request = {
 const final = {
   type: "boolean",
   description: "Your last message this turn; ends the turn.",
+} as const;
+const needsReply = {
+  type: "boolean",
+  description: "You can't go on until someone you mention answers.",
 } as const;
 /** The channel types a channel list can ask for, as NIP-CL names them. */
 const CHANNEL_TYPES = ["stream", "forum", "dm", "workflow", "system"];
@@ -190,12 +195,13 @@ export const TOOLS: readonly Tool[] = [
       audience,
       request,
       final,
+      needs_reply: needsReply,
     },
     ["audience"],
   ),
   tool(
     "reply_in_subthread",
-    "Reply under a specific message, nested in a subthread below it rather than in the main thread. Use when asked to reply in a subthread, or to keep a side discussion under the message it is about. Takes send's text, path, files, mentions, audience, request and final; the channel is the parent's.",
+    "Reply under a specific message, nested in a subthread below it rather than in the main thread. Use when asked to reply in a subthread, or to keep a side discussion under the message it is about. Takes send's text, path, files, mentions, audience, request, final and needs_reply; the channel is the parent's.",
     {
       parent: { ...str, description: "Id of the message to reply under" },
       text: str,
@@ -205,6 +211,7 @@ export const TOOLS: readonly Tool[] = [
       audience,
       request,
       final,
+      needs_reply: needsReply,
     },
     ["parent", "audience"],
   ),
@@ -1611,6 +1618,9 @@ async function post(
   const files = await tools.attach(list(args.files));
   const content = `${(await tools.body(args, !files.links)) ?? ""}${files.links}`;
   const mentions = await tools.mentions(channel, content, list(args.mentions));
+  const waits = args.needs_reply === true;
+  if (waits && !mentions.length)
+    throw new Error("needs_reply needs a mention: name who must answer.");
   const event = await tools.client.publish({
     kind: 9,
     content,
@@ -1621,6 +1631,7 @@ async function post(
       ...files.tags,
       ...(await tools.emoji(content)),
       ...extra,
+      ...(waits ? [[NEEDS_REPLY_TAG]] : []),
     ],
   });
   return `sent ${event.id}`;

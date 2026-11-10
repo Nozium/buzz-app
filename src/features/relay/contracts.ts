@@ -112,6 +112,8 @@ export type Attachment = Readonly<{
 }>;
 /** Signed URL binding a timecoded reply to one attachment in a media gallery. */
 export const MEDIA_TARGET_TAG = "buzz:media";
+/** Signed one-field tag: the author can't go on until someone it mentions answers. */
+export const NEEDS_REPLY_TAG = "buzz:needs-reply";
 /** Relay-authored membership activity, not a membership grant or user message. */
 export type MembershipChange = Readonly<{
   type: "member_joined" | "member_left" | "member_removed";

@@ -509,6 +509,40 @@ it("signs the turn's triggering request separately from the flattened reply", as
   expect(published).toHaveLength(1);
 });
 
+it("marks a message that waits on the people it mentions, and needs one", async () => {
+  const { client, published } = fake(community);
+  const context = { channel: "chan", root };
+  await callTool(client, context, "send", {
+    text: "@Bob which branch?",
+    audience: "everyone",
+    needs_reply: true,
+  });
+  expect(published[0]?.tags).toEqual([
+    ["h", "chan"],
+    ["e", root, "", "reply"],
+    ["p", bob],
+    ["buzz:needs-reply"],
+  ]);
+  await expect(
+    callTool(client, context, "send", {
+      text: "Which branch?",
+      audience: "everyone",
+      needs_reply: true,
+    }),
+  ).rejects.toThrow("needs_reply needs a mention");
+  await callTool(client, context, "send", {
+    text: "@Bob done",
+    audience: "everyone",
+    needs_reply: false,
+  });
+  expect(published).toHaveLength(2);
+  expect(published[1]?.tags).toEqual([
+    ["h", "chan"],
+    ["e", root, "", "reply"],
+    ["p", bob],
+  ]);
+});
+
 it("refuses to post a name it cannot resolve unless told who it means", async () => {
   const { client, published } = fake(community);
   const context = { channel: "chan", root };

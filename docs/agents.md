@@ -1418,6 +1418,11 @@ pending, failed, or uncertain lifecycle evidence. Durable cross-host completion
 would require retained request/turn relationships and terminal events; the
 current live-only feed does not provide that guarantee.
 
+An agent that can't go on until someone answers sets `needs_reply` on `send` or
+`reply_in_subthread`. The post is refused without a mention, and otherwise
+carries a signed one-field `["buzz:needs-reply"]` tag. The flag does not end the
+turn; `final` still does. Buzz does not display the tag yet.
+
 Outcomes use the same response frame and inline disclosure as recorded history.
 Confirmed failure shows a danger warning and “Couldn’t finish”; stopped requests
 use neutral “Stopped”. Passive uncertainty creates no outcome balloon and remains
