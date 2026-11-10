@@ -106,6 +106,12 @@ See the [capability contract](../src/features/workflows/types.ts).
   configuration (the editor's Run now is unavailable while the draft has
   unsaved changes), and on-demand run/trace history in
   20-row pages with the relay's exact `(before,beforeId)` cursor.
+- Archived channels: the relay accepts saves and runs there, but every run
+  fails. Their group and Recently updated rows say Archived. Run now and
+  turning a workflow on are unavailable in rows, details and the editor, whose
+  Save is blocked only while the draft is enabled; turning off and Delete stay
+  available. New workflow omits them; the landing keeps them so an open editor
+  keeps its draft.
 - No approval UI, lifecycle negotiation, plugin command-replay API or JSON
   trigger inputs.
 
@@ -260,8 +266,8 @@ Builds can withhold this delegation per community. In communities listed by
 authorizes a local agent request, whatever its signer, owner or mention tags, in
 bundled or plugin harnesses. Workflow messages there stay visible but do not start
 or steer local Claude, Codex, Goose or Pi agents, including for owner-created
-static templates and scheduled workflows. Desktop preview releases list bb-block
-only; bb-public and other communities keep the delegation above. The restriction
+static templates and scheduled workflows. Each build lists its own restricted
+communities; communities it does not list keep the delegation above. The restriction
 does not prevent workflow output from influencing a later authorized turn. See
 [configuration](configuration.md#workflow-restriction-community-flag).
 
