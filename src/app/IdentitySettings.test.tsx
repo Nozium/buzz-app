@@ -306,6 +306,42 @@ it("only shows renewal and expiry within seven days, with the default caret and 
   );
 });
 
+it("shows a renewal in progress with a Cancel that ends only the browser step", async () => {
+  const h = federatedFixture();
+  h.publish({
+    status: "signed-in",
+    email: "a@example.com",
+    expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+  });
+  // Like native: a renewal keeps the session signed in until the browser
+  // step ends, and canceling ends it without a new session.
+  let finish: () => void = () => {};
+  vi.mocked(h.service.signIn).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve(h.service.snapshot());
+      }),
+  );
+  vi.mocked(h.service.cancelSignIn).mockImplementation(async () => finish());
+  render(<IdentitySettings viewer={viewer} federatedIdentity={h.service} />, {
+    wrapper: ToastProvider,
+  });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Renew sign-in" }));
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Finish in your browser",
+  );
+  expect(screen.queryByRole("button", { name: "Renew sign-in" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(h.service.cancelSignIn).toHaveBeenCalledOnce();
+  expect(
+    await screen.findByRole("button", { name: "Renew sign-in" }),
+  ).toBeVisible();
+  expect(screen.queryByText("Finish in your browser")).toBeNull();
+  expect(screen.getByText("a@example.com")).toBeVisible();
+  expect(h.service.signOut).not.toHaveBeenCalled();
+});
+
 it("signs in to the organization once when signed out", async () => {
   const h = federatedFixture();
   render(
@@ -853,6 +889,24 @@ it("offers no sign-out retry for a server whose restore failed", async () => {
   expect(screen.queryByText(/Couldn’t sign out/)).toBeNull();
   expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   expect(pub.service.signOut).not.toHaveBeenCalled();
+  // Only a check of the stored session, which a restore that works answers.
+  const row = screen.getByRole("article", {
+    name: "app.builderlab.xyz",
+  });
+  vi.mocked(pub.service.recheck).mockImplementation(async () =>
+    pub.publish({ status: "signed-in", failure: null }),
+  );
+  await userEvent.click(
+    within(row).getByRole("button", { name: "Check again" }),
+  );
+  expect(pub.service.recheck).toHaveBeenCalledOnce();
+  expect(
+    await within(row).findByRole("button", {
+      name: "Sign out of app.builderlab.xyz",
+    }),
+  ).toBeVisible();
+  expect(pub.service.signIn).not.toHaveBeenCalled();
+  expect(pub.service.signOut).not.toHaveBeenCalled();
 });
 
 it("shows the first server's failed restore as its own recovery text", async () => {
@@ -875,13 +929,28 @@ it("shows the first server's failed restore as its own recovery text", async () 
   expect(screen.getByRole("alert")).toHaveTextContent(
     /^Sign-in did not finish\. Try again\.$/,
   );
-  // Neither a sign-out retry nor a sign-in while the record is unchecked.
+  // Neither a sign-out retry nor a sign-in while the record is unchecked:
+  // only a check that retries the restore and keeps the record.
   expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  const card = screen.getByRole("article", {
+    name: "Acme (acme.builderlab.xyz)",
+  });
+  expect(within(card).queryByRole("button", { name: "Sign in" })).toBeNull();
+  vi.mocked(block.service.recheck).mockImplementation(async () =>
+    block.publish({ status: "unavailable", failure: "network-unavailable" }),
+  );
+  await userEvent.click(
+    within(card).getByRole("button", { name: "Check again" }),
+  );
+  expect(block.service.recheck).toHaveBeenCalledOnce();
+  // A check that fails again keeps its recovery text and its button.
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    /^Sign-in did not finish\. Try again\.$/,
+  );
   expect(
-    within(
-      screen.getByRole("article", { name: "Acme (acme.builderlab.xyz)" }),
-    ).queryByRole("button", { name: "Sign in" }),
-  ).toBeNull();
+    within(card).getByRole("button", { name: "Check again" }),
+  ).toBeVisible();
+  expect(block.service.signIn).not.toHaveBeenCalled();
   expect(block.service.signOut).not.toHaveBeenCalled();
 });
 

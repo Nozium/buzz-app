@@ -24,7 +24,8 @@ export function recoveryMessage(code: string) {
 }
 
 /** Issuer refusals native keeps for the session revision (`refused()` in
- * assertion.rs) until the app restarts; signing in or retrying repeats them. */
+ * assertion.rs) until the app restarts or the user tries that community
+ * again (`askAgain`); signing in or an automatic retry repeats them. */
 const ISSUER_REFUSALS = new Set([
   "adapter-refused",
   "grant-refused",

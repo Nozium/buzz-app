@@ -1046,6 +1046,42 @@ it("moves a refusal's recovery from the sidebar to its one notice", async () => 
   expect(within(sidebar()).queryByText(/sign-in/)).toBeNull();
 });
 
+// NIP-FA: an issuer refusal is not retried automatically, but the user's
+// Try again asks the issuer again rather than repeating it from the cache.
+it("asks the issuer again on Try again after a cached refusal", async () => {
+  const h = federatedFixture();
+  const f = fixture(
+    true,
+    false,
+    undefined,
+    undefined,
+    0,
+    undefined,
+    undefined,
+    {
+      federatedIdentity: h.service,
+    },
+  );
+  const order: string[] = [];
+  vi.mocked(h.service.askAgain).mockImplementation(async () => {
+    order.push("ask again");
+  });
+  vi.spyOn(f.relay, "retry").mockImplementation(() => {
+    order.push("retry");
+  });
+  const sidebar = () => screen.getByRole("complementary", { name: "Sidebar" });
+  f.connection({
+    status: "error",
+    error: "authorization-denied",
+    origin: "wss://relay.example",
+  });
+  await userEvent
+    .setup()
+    .click(within(sidebar()).getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(order).toEqual(["ask again", "retry"]));
+  expect(h.service.askAgain).toHaveBeenCalledWith("wss://relay.example");
+});
+
 it("shows Try again beside a settled failure, and Connecting while the connection retries", async () => {
   const f = fixture(true);
   const retry = vi.spyOn(f.relay, "retry");

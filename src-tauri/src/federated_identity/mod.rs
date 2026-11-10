@@ -1440,6 +1440,17 @@ pub(crate) async fn federated_identity_requires(
         .requires_federated_identity(&relay)
         .await
 }
+/// The user asked to try a community again: its next admission asks the
+/// issuer again instead of repeating a refusal cached this session (NIP-FA).
+#[tauri::command]
+pub(crate) fn federated_identity_ask_again(
+    host: tauri::State<'_, FederatedIdentity>,
+    relay: String,
+) -> Result<(), String> {
+    let relay = config::canonical_relay(&relay)?;
+    host.server_for(&relay)?.forget_refusals(&relay);
+    Ok(())
+}
 #[tauri::command]
 pub(crate) async fn federated_identity_sign_in<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

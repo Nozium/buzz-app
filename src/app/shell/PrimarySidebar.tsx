@@ -416,7 +416,23 @@ function ScopedSidebar({
                         relay={connection.origin}
                         memberships={props.memberships}
                       />
-                      <Button onClick={props.relay.retry}>Try again</Button>
+                      <Button
+                        onClick={() =>
+                          // A manual retry asks the issuer again; automatic
+                          // ones repeat a refusal cached this session.
+                          void Promise.resolve(
+                            connection.origin &&
+                              communityIdentity(
+                                props.federatedIdentity,
+                                connection.origin,
+                              )?.askAgain?.(connection.origin),
+                          )
+                            .catch(() => {})
+                            .finally(props.relay.retry)
+                        }
+                      >
+                        Try again
+                      </Button>
                     </>
                   )}
                 </div>
