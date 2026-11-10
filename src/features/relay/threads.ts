@@ -355,12 +355,19 @@ export function createThreadView({
     let nextRoot = !rootUnavailable
       ? readable.find((row) => row.id === rootId)
       : undefined;
-    if (shown) {
-      // Evidence wins; a resumed row fills in only what is not read yet.
-      const read = new Set(nextReplies.map((row) => row.id));
+    if (shown && !rootUnavailable) {
+      // Evidence wins. A resumed row fills in only an event not read yet, and
+      // never one a retained deletion names, valid or not: the refresh decides.
+      const read = new Set<string>();
+      for (const event of inputs.values()) {
+        read.add(event.id);
+        if (event.kind === 5 || event.kind === 9005)
+          for (const [name, id] of event.tags)
+            if (name === "e" && id) read.add(id);
+      }
       nextReplies.push(...shown.replies.filter((row) => !read.has(row.id)));
       nextReplies.sort(compareMessages);
-      nextRoot ??= shown.root;
+      if (!read.has(shown.root.id)) nextRoot ??= shown.root;
     }
     const replies =
       snapshot.replies.length === nextReplies.length &&
@@ -422,7 +429,8 @@ export function createThreadView({
     resume.root.id === messageId &&
     (!rootId || rootId === messageId)
   ) {
-    rootId = messageId;
+    // The root stays unread: like a first open without a seed, this view
+    // admits no retained event until its own read finds the root.
     shown = resume;
     publish({
       status: "ready",

@@ -425,51 +425,79 @@ it("reopens a thread from scratch after a cache clear, a close mid-read or an ex
   expect(h.session.thread("a", root.id).snapshot().status).toBe("idle");
 });
 
-it("drops a resumed row its repair does not read again", async () => {
-  const first = reply("first", 10);
-  const gone = reply("deleted while closed", 11);
-  // Built directly: a session also replays the events it has seen into a new
-  // view, so the resume would not be the only place this reply came from.
-  const open = (events: (typeof root)[] | Error, resume?: ThreadResume) =>
-    createThreadView({
-      channelId: "a",
-      messageId: root.id,
-      relayAuthor: relay.pubkey,
-      agentOwner: () => undefined,
-      reader: {
-        read: async () => {
-          if (events instanceof Error) throw events;
-          return events;
-        },
-      } as unknown as RelayReader,
-      canRefresh: () => false,
-      seed: undefined,
-      local: undefined,
-      resume,
-      canAccess: () => true,
-      visible: (events) => events,
-      notify: (listener) => listener(),
-    });
-  const closing = open([root, first, gone]);
+/** A thread view built directly: a session also replays the events it has
+ * seen into a new view, so a resume would not be its only source of rows. */
+const direct = (
+  events: (typeof root)[] | Error,
+  resume?: ThreadResume,
+  seed?: typeof root,
+) =>
+  createThreadView({
+    channelId: "a",
+    messageId: root.id,
+    relayAuthor: relay.pubkey,
+    agentOwner: () => undefined,
+    reader: {
+      read: async () => {
+        if (events instanceof Error) throw events;
+        return events;
+      },
+    } as unknown as RelayReader,
+    canRefresh: () => false,
+    seed,
+    local: undefined,
+    resume,
+    canAccess: () => true,
+    visible: (events) => events,
+    notify: (listener) => listener(),
+  });
+const first = reply("first", 10);
+const gone = reply("deleted while closed", 11);
+async function closed() {
+  const closing = direct([root, first, gone]);
   await closing.view.refresh();
   const resume = closing.resume();
   closing.view.dispose();
   if (typeof resume !== "object") throw new Error("No resume");
+  return resume;
+}
+const replyIds = (thread: ReturnType<typeof direct>) =>
+  thread.view.snapshot().replies.map((row) => row.id);
+
+it("drops a resumed row its repair does not read again", async () => {
+  const resume = await closed();
   // The relay omits a deleted row, and its deletion with it.
-  const view = open([root, first], resume);
-  const ids = () => view.view.snapshot().replies.map((row) => row.id);
+  const view = direct([root, first], resume);
   expect(view.view.snapshot().status).toBe("ready");
-  expect(ids()).toEqual([first.id, gone.id]);
+  expect(replyIds(view)).toEqual([first.id, gone.id]);
   await view.view.refresh();
-  expect(ids()).toEqual([first.id]);
+  expect(replyIds(view)).toEqual([first.id]);
   // A repair that fails leaves nothing it could not confirm on screen.
-  const failing = open(new Error("offline"), resume);
+  const failing = direct(new Error("offline"), resume);
   expect(failing.view.snapshot().replies).toHaveLength(2);
   await failing.view.refresh();
   expect(failing.view.snapshot()).toMatchObject({
     status: "error",
     replies: [],
   });
+});
+
+it("never shows a resumed row over its own evidence or before its root is read", async () => {
+  const resume = await closed();
+  // With only the resume, a retained reply waits for the root read, as it
+  // would on a first open with nothing retained.
+  const unread = direct([root, first], resume);
+  unread.receive([gone]);
+  await unread.view.refresh();
+  expect(replyIds(unread)).toEqual([first.id]);
+  // A retained deletion hides the resumed row before any read.
+  const seeded = direct([root, first], resume, root);
+  seeded.receive([gone]);
+  expect(replyIds(seeded)).toEqual([first.id, gone.id]);
+  seeded.receive([
+    signed(alice, { kind: 5, content: "", tags: [["e", gone.id]] }),
+  ]);
+  expect(replyIds(seeded)).toEqual([first.id]);
 });
 
 it("keeps a reply selected during a reopened thread's repair", async () => {
