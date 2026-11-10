@@ -21,6 +21,7 @@ import { usePanelSplit } from "../../features/panels/usePanelSplit";
 import type { Profile } from "../../features/relay/contracts";
 import type { EventData } from "../../features/relay/events";
 import { useRelayConnection } from "../../features/relay/react";
+import { useRecoverableRead } from "../../features/relay/RecoveryNotice";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
 import {
@@ -229,6 +230,20 @@ export function NotesCommunity({
   scope?: NavigationScope | undefined;
 } & NotesNavigation) {
   const choices = useAgentChoices(session);
+  const refreshAgents = () => {
+    void session.agentChoices.refresh().catch(() => {});
+  };
+  // The inventory loads by itself: a connectivity failure joins session
+  // recovery, which retries it, and shows only the recovery notice.
+  const { quiet } = useRecoverableRead(
+    session.recovery,
+    {
+      status: choices.pending ? "loading" : undefined,
+      error: choices.error,
+      transient: choices.transient,
+    },
+    refreshAgents,
+  );
   const resolveName = useIdentityNames(session.names);
   const candidates = useMemo(
     () => choices.identities.map((agent) => agent.pubkey),
@@ -261,10 +276,9 @@ export function NotesCommunity({
       agents={agents}
       pending={choices.pending}
       complete={choices.complete}
-      inventoryError={choices.error}
-      refreshAgents={() => {
-        void session.agentChoices.refresh().catch(() => {});
-      }}
+      inventoryError={quiet ? undefined : choices.error}
+      inventoryQuiet={quiet}
+      refreshAgents={refreshAgents}
     />
   );
 }
@@ -277,6 +291,7 @@ function NoteCollection({
   pending,
   complete,
   inventoryError,
+  inventoryQuiet,
   refreshAgents,
   navigation,
   navigator,
@@ -293,6 +308,8 @@ function NoteCollection({
   pending: boolean;
   complete: boolean;
   inventoryError: string | undefined;
+  /** Recovery owns the inventory failure; show neither its error nor Retry. */
+  inventoryQuiet: boolean;
   refreshAgents(): void;
 }) {
   const [request, setRequest] = useState({ version: 0, more: false });
@@ -304,6 +321,9 @@ function NoteCollection({
     partial: boolean;
     error?: string | undefined;
     sharedError?: string | undefined;
+    /** What each failed read rejected with, so recovery can classify it. */
+    cause?: { reason: unknown } | undefined;
+    sharedCause?: { reason: unknown } | undefined;
   }>({ notes: [], loading: true, partial: false });
   const profiles = useSyncExternalStore(
     session.profiles.subscribe,
@@ -340,6 +360,21 @@ function NoteCollection({
         }) || a.pubkey.localeCompare(b.pubkey),
     );
   }, [ownedAgents, result.notes, profiles, resolveName]);
+  // The notes load by themselves: a connectivity failure joins session
+  // recovery, which retries it, and shows only the recovery notice.
+  const retryNotes = () =>
+    setRequest((old) => ({ ...old, version: old.version + 1 }));
+  const status = result.loading ? "loading" : undefined;
+  const ownQuiet = useRecoverableRead(
+    session.recovery,
+    { status, error: result.cause?.reason },
+    retryNotes,
+  ).quiet;
+  const sharedQuiet = useRecoverableRead(
+    session.recovery,
+    { status, error: result.sharedCause?.reason },
+    retryNotes,
+  ).quiet;
   const [author, setAuthor] = useState("");
   const [opened, setOpened] = useState<EventData[]>([]);
   const [selected, setSelected] = useState("");
@@ -449,9 +484,17 @@ function NoteCollection({
             ownResult.status === "rejected"
               ? "Couldn’t read notes. Try again."
               : undefined,
+          cause:
+            ownResult.status === "rejected"
+              ? { reason: ownResult.reason }
+              : undefined,
           sharedError:
             sharedResult.status === "rejected"
               ? "Other agents’ notes could not be checked. Refresh to try again."
+              : undefined,
+          sharedCause:
+            sharedResult.status === "rejected"
+              ? { reason: sharedResult.reason }
               : undefined,
         });
         setAuthor((current) =>
@@ -708,7 +751,7 @@ function NoteCollection({
           )}
           {routeError && <p role="alert">{routeError}</p>}
           {pending && <p role="status">Loading your agents…</p>}
-          {!pending && !complete && !inventoryError && (
+          {!pending && !complete && !inventoryError && !inventoryQuiet && (
             <div role="status">
               <p>
                 Some agents could not be checked. Showing notes from available
@@ -723,12 +766,12 @@ function NoteCollection({
               <Button onClick={refreshAgents}>Retry agents</Button>
             </div>
           )}
-          {result.sharedError && (
+          {result.sharedError && !sharedQuiet && (
             <p role="status" className="text-body-sm text-secondary">
               {result.sharedError}
             </p>
           )}
-          {result.error && (
+          {result.error && !ownQuiet && (
             <div role="alert">
               <p>{result.error}</p>
               <Button
