@@ -21,6 +21,11 @@ test("manage saved communities preserves navigation, keyboard focus and Personal
   await page.getByRole("button", { name: "Alpha", exact: true }).click();
   await page.getByRole("button", { name: "Beta", exact: true }).click();
   const picker = await openCommunityPicker(page);
+  // Visibility precedes Base UI's next-frame initial focus. Send navigation
+  // keys only after the switcher owns focus, especially in Linux WebKit.
+  await expect(
+    picker.getByRole("button", { name: "Personal space", exact: true }),
+  ).toBeFocused();
   await page.keyboard.press("End");
   const manage = picker.getByRole("button", {
     name: "Manage communities…",
