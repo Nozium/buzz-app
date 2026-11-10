@@ -37,6 +37,7 @@ import type { SignInOptions } from "../federated-identity/service";
 import { readErrorKind } from "../relay/errors";
 import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
 import { Button } from "../../shared/design-system/ui/Button";
+import { Checkbox } from "../../shared/design-system/ui/Checkbox";
 import { BackupError } from "./backup";
 import { BackupConsent } from "./BackupConsent";
 import {
@@ -225,9 +226,11 @@ export function Welcome({
   const session = useSession(federatedIdentity);
   // Whether the key Replace would sign out has a confirmed backup.
   const [replacingBackedUp, setReplacingBackedUp] = useState(false);
-  // Whether that key, with no confirmed backup, was revealed or copied: until
-  // then Replace would lose it, so it waits.
+  // Whether that key, with no confirmed backup, was revealed or copied and the
+  // user says they have it, as Settings' Remove from device asks: until then
+  // Replace would lose it, so it waits.
   const [replacingKeyKept, setReplacingKeyKept] = useState(false);
+  const [replacingHaveKey, setReplacingHaveKey] = useState(false);
   // The unreadable saved key's removal: asking, then its native refusal.
   const [removingKey, setRemovingKey] = useState<{
     pending: boolean;
@@ -624,6 +627,7 @@ export function Welcome({
    */
   const askToReplace = async (onDevice: string): Promise<Resting> => {
     setReplacingKeyKept(false);
+    setReplacingHaveKey(false);
     setReplacingBackedUp(await identity.backedUp(onDevice).catch(() => false));
     return { status: "paused", at: "replace-key" };
   };
@@ -1032,7 +1036,10 @@ export function Welcome({
                   <Button onClick={switchAccount}>Cancel</Button>
                   <Button
                     variant="destructive"
-                    disabled={!replacingBackedUp && !replacingKeyKept}
+                    disabled={
+                      !replacingBackedUp &&
+                      !(replacingKeyKept && replacingHaveKey)
+                    }
                     onClick={() => void setup.start([replaceKey(linked)])}
                   >
                     Replace
@@ -1041,10 +1048,20 @@ export function Welcome({
               }
             >
               {!replacingBackedUp && (
-                <PrivateKey
-                  identity={identity}
-                  onInteraction={() => setReplacingKeyKept(true)}
-                />
+                <>
+                  <PrivateKey
+                    identity={identity}
+                    onInteraction={() => setReplacingKeyKept(true)}
+                  />
+                  <div className="mt-6">
+                    <Checkbox
+                      label="I have my key"
+                      checked={replacingHaveKey}
+                      disabled={!replacingKeyKept}
+                      onCheckedChange={setReplacingHaveKey}
+                    />
+                  </div>
+                </>
               )}
             </AlertDialog>
           </>

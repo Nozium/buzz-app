@@ -8484,14 +8484,22 @@ const BACKED_UP =
   "Its key was backed up in Builderlab: sign in to that account again to restore it.";
 const MAYBE_NOT_BACKED_UP =
   "Its key may not be backed up: copy its private key first, or you could lose that account.";
-/** Replace, which waits on a copy of a device key with no backup. */
+/** Replace, which waits on a copy of a device key with no backup and "I have my key". */
 const replaceKeyButton = () => screen.getByRole("button", { name: "Replace" });
+const haveKeyBox = () =>
+  screen.getByRole("checkbox", { name: "I have my key" });
 async function copyDeviceKey(user: ReturnType<typeof userEvent.setup>) {
   const dialog = await replaceDialog();
   await user.click(
     within(dialog).getByRole("button", { name: "Copy private key" }),
   );
-  await waitFor(() => expect(replaceKeyButton()).toBeEnabled());
+  await waitFor(() =>
+    expect(haveKeyBox()).not.toHaveAttribute("aria-disabled"),
+  );
+  // A copy alone is not enough: the user also says they have the key.
+  expect(replaceKeyButton()).toBeDisabled();
+  await user.click(haveKeyBox());
+  expect(replaceKeyButton()).toBeEnabled();
 }
 
 it("a sign-in to another account with a key kept here asks even for a backed-up device key, saying it is backed up, and Replace restarts to sign in again", async () => {
@@ -8504,6 +8512,7 @@ it("a sign-in to another account with a key kept here asks even for a backed-up 
   expect(await replaceDialog()).toHaveTextContent(BACKED_UP);
   expect(signOuts()).toEqual([]);
   expect(screen.queryByRole("button", { name: "Copy private key" })).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: "I have my key" })).toBeNull();
   expect(replaceKeyButton()).toBeEnabled();
   await user.click(screen.getByRole("button", { name: "Replace" }));
   await waitFor(() =>
@@ -8579,7 +8588,44 @@ it("a sign-out that never restarts Buzz fails setup instead of waiting forever",
   }
 });
 
-it("Replace waits until a device key with no backup is copied, then signs it out to restart and sign in again", async () => {
+it("revealing a device key with no backup, or a failed copy, doesn't enable Replace without “I have my key”", async () => {
+  anotherKeyOnDevice(false);
+  const fallback = vi.mocked(invoke).getMockImplementation();
+  let exportFails = true;
+  vi.mocked(invoke).mockImplementation((command, args) =>
+    command === "identity_export" && exportFails
+      ? Promise.reject({ message: "denied" })
+      : (fallback as typeof invoke)(command, args),
+  );
+  const identity = createIdentity();
+  const user = userEvent.setup();
+  await relaunchToAnotherAccount(user, identity);
+  const dialog = await replaceDialog();
+  await user.click(
+    within(dialog).getByRole("button", { name: "Copy private key" }),
+  );
+  expect(
+    await within(dialog).findByText(/Couldn’t copy your private key/),
+  ).toBeVisible();
+  expect(haveKeyBox()).toHaveAttribute("aria-disabled", "true");
+  expect(replaceKeyButton()).toBeDisabled();
+  exportFails = false;
+  await user.click(
+    within(dialog).getByRole("button", { name: "Reveal private key" }),
+  );
+  await waitFor(() =>
+    expect(haveKeyBox()).not.toHaveAttribute("aria-disabled"),
+  );
+  expect(replaceKeyButton()).toBeDisabled();
+  await user.click(haveKeyBox());
+  expect(replaceKeyButton()).toBeEnabled();
+  await user.click(haveKeyBox());
+  expect(replaceKeyButton()).toBeDisabled();
+  expect(signOuts()).toEqual([]);
+  identity.dispose();
+});
+
+it("Replace waits until a device key with no backup is copied and the user has it, then signs it out to restart and sign in again", async () => {
   anotherKeyOnDevice(false);
   const identity = createIdentity();
   const user = userEvent.setup();

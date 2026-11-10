@@ -207,8 +207,9 @@ device's key in place. When this device has confirmed a stored backup of the key
 service receipted or a restore wrote), the question says the key is backed up
 in Builderlab and that signing in to its account again restores it; otherwise
 it says the key may not be backed up and shows the same private-key controls
-as Settings' **Remove from device**: **Replace** stays disabled until the key
-was revealed or copied. A local receipt is not consent, and the backup may since
+as Settings' **Remove from device**, with its gate: **Replace** stays disabled
+until the key was revealed or copied and **I have my key** is checked. Each new
+question starts unchecked. A local receipt is not consent, and the backup may since
 have been deleted, so a confirmed backup only changes the wording and drops that
 wait. Creating or importing a key still refuses while one is on the device.
 
@@ -533,7 +534,10 @@ parse (`MALFORMED`) gets the same bytes on every read, so that page offers
 **Remove from device** instead of a retry. It confirms first, then signs out as
 **Sign out of Buzz** does without erase: the next launch deletes the key and
 opens first run, which restores the account's backup or imports a key. A
-refused sign-out stays in the dialog with its reason.
+refused sign-out stays in the dialog with its reason. On Windows and Linux,
+several keyring items matching one entry (`Ambiguous`) refuse deletes as well
+as reads, so native answers `AMBIGUOUS` instead, and the page keeps **Retry**:
+the user removes the extra items with their keyring app.
 
 The key setup screen (`IdentitySetup`) is no longer shown on first launch; the
 fixture below still renders it. It offers **Create a new identity** or **Use an
