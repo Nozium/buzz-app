@@ -140,8 +140,18 @@ export function createPluginUpdates(
         installed(update.id),
       );
       if (!result || result.checking) return [update];
+      if (result.error)
+        return [
+          result.error === update.error
+            ? update
+            : {
+                id: update.id,
+                source: update.source,
+                installedRevision: update.installedRevision,
+                error: result.error,
+              },
+        ];
       if (
-        !result.error &&
         result.candidate &&
         result.revision !== update.installedRevision &&
         result.revision !== update.candidate?.revision
@@ -154,11 +164,7 @@ export function createPluginUpdates(
             candidate: result.candidate,
           },
         ];
-      return (
-        update.error
-          ? result.error === update.error
-          : !result.error && result.revision === update.candidate?.revision
-      )
+      return !update.error && result.revision === update.candidate?.revision
         ? [update]
         : [];
     });

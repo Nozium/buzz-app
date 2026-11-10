@@ -861,3 +861,33 @@ it.each([
     ).toEqual(expected);
   },
 );
+
+it("retains the latest explicit check failure after discovering an update and clears it after recovery", async () => {
+  const f = fixture();
+  const updates = createPluginUpdates(f.manager, f.authorize);
+  try {
+    await updates.check();
+    expect(updates.snapshot()[0]?.candidate?.revision).toBe("new");
+    f.checkGit.mockRejectedValueOnce(new Error("connection dropped"));
+    await sharedPluginUpdateChecks(f.manager.imports).check(
+      f.plugin,
+      f.authorize,
+    );
+    expect(updates.snapshot()).toEqual([
+      {
+        id: f.plugin.manifest.id,
+        source: f.plugin.updateSource,
+        installedRevision: "old",
+        error: "Error: connection dropped",
+      },
+    ]);
+    f.candidate.revision = f.plugin.revision;
+    await sharedPluginUpdateChecks(f.manager.imports).check(
+      f.plugin,
+      f.authorize,
+    );
+    expect(updates.snapshot()).toEqual([]);
+  } finally {
+    updates.dispose();
+  }
+});
