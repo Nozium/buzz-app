@@ -11488,6 +11488,20 @@ async function handleOf(
   return run.mock.calls.at(-1)?.[0].agent as Delivery["agent"];
 }
 
+it("routes effective edit lookups through the running agent's custody", async () => {
+  const { service, native, run, emit } = await setup();
+  await service.create({ type: "example/echo", name: "Echo" });
+  const handle = await handleOf(run, emit);
+  const head = event("head", { kind: 40003, tags: [["h", channel]] });
+  native.effectiveEdit.mockResolvedValueOnce(head);
+  expect(await handle.effectiveEdit("target", channel)).toBe(head);
+  expect(native.effectiveEdit).toHaveBeenCalledWith(
+    expect.objectContaining({ pubkey: bot, relay: expect.any(String) }),
+    "target",
+    channel,
+  );
+});
+
 it("lets a run read and write its attention with expected-state tokens", async () => {
   const { service, run, emit } = await setup();
   await service.create({ type: "example/echo", name: "Echo" });
@@ -16665,7 +16679,10 @@ it("revoking the runner while a protected shared tool waits cancels it before an
       readOnlyPaths: ["/provider"],
       hiddenPaths: ["/reviews"],
     },
-    check: async (_request, signal) => {
+    checkEvidence: async (_request, evidence, signal) => {
+      for await (const _part of evidence.read()) {
+        /* consume before deciding */
+      }
       checking = signal;
       entered();
       await allow;

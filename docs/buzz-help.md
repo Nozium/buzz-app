@@ -94,14 +94,15 @@ mention anyone. Explicit agent watches on that room can still receive them.
   without Builderlab sign-in do not upload a backup during setup. Later, while
   signed in to Builderlab on a build with backup, a key with no backup choice is
   backed up automatically if you belong to a Builderlab-hosted community;
-  otherwise Buzz asks **Sync your identity with Builderlab?**, again on the
-  next launch or sign-in if the dialog is closed. **Settings → Buzz → Identity
-  → Identity sync** shows the sync status and, while backup is off, offers
-  **Sync with Builderlab**. When the key isn’t linked to your Builderlab
-  account, or the account holds a different key, its **Builderlab** link opens
-  **Settings → Plugins → Builderlab**, where **Connect Buzz identity** links
-  this key, or **Switch to this device’s identity** replaces the account’s key
-  (this permanently unlinks the old one). After signing in to the
+  otherwise Buzz asks **Back up your key?**, again on the
+  next launch or sign-in if the dialog is closed. In **Settings → Buzz → Identity**,
+  the ID card shows backup status. Open **More options** at the top-left of its
+  container for **Retry backup** or, while backup is off, **Back up key**, which
+  opens the consent dialog. When the key isn’t linked to your Builderlab
+  account, or the account holds a different key, the notice’s **Builderlab** link
+  opens **Settings → Plugins → Builderlab**, where **Connect Buzz identity**
+  links this key, or **Switch to this device’s identity** replaces the account’s
+  key (this permanently unlinks the old one). After signing in to the
   public Builderlab, **Connect to a community** also offers **Create a
   community** when that account is linked to this device’s key and may create one.
   Choose an available address, then **Create community** joins it right away,
@@ -127,19 +128,41 @@ mention anyone. Explicit agent watches on that room can still receive them.
   `nsec`, lets someone act as that identity. Never ask anyone to paste a
   private key into a conversation or send it to you.
 - In native desktop builds, **Settings → Buzz → Security → Authorize external identity** creates an
-  ownership proof for an application such as Nexus that holds its own agent key.
+  ownership proof for an application that holds its own agent key.
   Enter that application's public key in hex, select **Authorize identity**,
   review the exact identity and permission in the confirmation, then select
   **Authorize this key** and copy the proof into its owner attestation field.
   This lets the key direct your Buzz coding agents to run commands as you.
   Authorize only keys you recognize: the proof has no time or event-kind limits. Your private key stays
   in Buzz. This does not join the agent to a community or sign it in to an organization.
+- The back of your Identity badge shows known backup and recovery details below
+  the private-key strip and scrolls when its details run long. Buzz starts checking
+  when the Identity page opens. The back always explains that the key is stored
+  securely on this device. It names the backup account when a configured service
+  confirms a backup and the account lookup has not failed. A failed lookup hides
+  that account sentence until recovery. Initial status loading stays quiet; a
+  failed check shows **Backup status unknown** with **Retry backup** in the
+  bottom action space on the back. This rereads local status and then starts a
+  backup attempt for the current key
+  when the read succeeds. It stays disabled and shows a spinner through both steps.
+  The private-key menu contains
+  the **Private key** heading above Copy and Reveal. If a confirmed backup’s
+  latest backup attempt fails, **Check backup** flips the card while the back
+  keeps the confirmed-backup explanation. Unconfirmed failures also show
+  **Check backup**. A spinner appears only while a backup attempt is running.
+  **Retry backup** uses that same space above **Remove from device** on the
+  back and shows a disabled loading button during an attempt. A confirmed, settled backup
+  shows **Backed up** with a destination tooltip. Only one recovery button
+  appears at a time. Initial status loading shows no pill.
+  **Remove from device** opens a confirmation before removing Buzz’s saved key
+  from this device’s secure storage and signing out. Account backups and copies
+  saved elsewhere stay. Other local data stays unless erasing is also selected.
 - **Settings → Buzz → Identity → Copy private key** lets someone make their own
   backup, for example in a password manager. They should handle it privately.
   When Builderlab backup is on, the same page shows the account's linked key
-  when it is backed up, with when it was last active in the current community;
-  until the organization is signed in, that row asks them to sign in instead.
-  Backups of other keys are not shown, and the row is read-only.
+  when it is backed up and differs from this device’s key.
+  Account lookup failures use the card’s **Backup status unknown** caption and
+  **Retry backup** action. Backups of other keys are not shown, and the row is read-only.
   Backup and restore options depend on the build and account; do not promise
   recovery or assume automatic backup is on. Losing every copy of the private
   key can mean losing the identity.
@@ -177,15 +200,16 @@ mention anyone. Explicit agent watches on that room can still receive them.
   **Not now** opens Buzz anyway, but that organization's communities stay
   unavailable until you sign in. Sign-in, sign-out and when the current
   sign-in ends also live under
-  **Settings → Buzz → Identity → Organization sign-in**.
+  **Settings → Buzz → Identity → Community sign-ins**.
 - When a community requires organization sign-in, the sidebar or join dialog
   explains why and offers **Sign in with** the organization’s name or server
   address. Complete sign-in to reconnect; in the join dialog, choose **Continue**.
-- Signed in to more than one organization server? **Organization sign-in**
-  lists each one you're signed in to, with the communities that require it, and
-  each **Sign out** ends only that server's sign-in. Your organization's own
-  server stays listed with **Sign in** until you sign in to it. **Sign out of
-  Buzz** still ends them all.
+- The **Community sign-ins** cards show each configured server, its account
+  and the saved communities that require its sign-in. Each **Sign out** asks for
+  confirmation and ends only that server’s sign-in. Signed-out servers keep **Sign in**.
+  **Renew sign-in** and the expiry date appear within seven days of expiry;
+  its caret menu offers **Sign out**. A Builderlab connection link opens its
+  existing settings. Removing the Buzz key still ends all server sign-ins.
 - Buzz apps on this computer that use the same organization server, such as
   Buzz and Buzz Staging, share its sign-in, like the private key. After you sign
   in in one, **Sign in** in the other finishes without the browser. Signing out
@@ -242,7 +266,7 @@ Other communities cannot grant access.
 Start setup in the external app. Buzz desktop shows an **Authorize app**
 dialog. Select a community and an agent, then select **Authorize**. The app
 gets full access as that agent: every Buzz tool the agent has, including tools
-plugins add later, the Nexus workers the agent may run, and changes to Buzz
+plugins add later, the Solo workers the agent may run, and changes to Buzz
 settings on this device. It gets the agent's Git access to its community's
 repositories, can wake the agent in its conversations, and can post any file
 your account can read on this device, including outside the agent's workspace;
@@ -383,11 +407,19 @@ revokes all of them, and a pairing unused for 30 days expires.
   Further reactions during that hold do not change the icon; history loading does not trigger it.
 - **New messages** marks the first known unread incoming channel message when
   you enter. Once established, the divider stays in place for that visit as you
-  read, reveal another message, or receive new messages. It is absent for a visit
-  that starts with incomplete or unverified history, even if older rows load
-  later. It may also be absent when unread evidence is incomplete, or when read
-  intent or the read evidence needed to locate the boundary changes before it is
-  established.
+  read, reveal another message, or receive new messages. In a channel with more
+  history than loads on entry, it appears when the oldest unread message is
+  among the rows loaded on entry, below a message you read by reaching the
+  bottom of the channel or marking the channel read. When the unread messages
+  start at the first loaded row or further up, or the messages above them were
+  only read one by one as you scrolled past, there is no divider for that visit,
+  even if older rows load later. While Buzz is still checking such a channel's
+  older history for unread messages, the channel waits to mark anything read,
+  so opening it then does not hide its own divider; if that check fails, there
+  is no divider for that visit and reading resumes. It may also be absent when
+  unread evidence is incomplete, or when
+  read intent or the read evidence needed to locate the boundary changes
+  elsewhere before it is established.
 - **Opening a channel or DM** while Buzz is visible and focused clears its sidebar row: the bold name, the mention
   dot and the thread dot. Switching away from Buzz pauses this: new messages
   can light the row even while that conversation stays selected. The macOS Dock dot follows the rows. Nothing is marked
@@ -879,15 +911,27 @@ available rather than silently discarding it.
   thread placement setting), and can be moved, renamed, or closed. Collapsing
   the side pane keeps its open threads and reply drafts. Its header includes the
   same DM controls and actions, including Huddle when supported and enabled.
+  On the Bestie page, ⌘F (Ctrl+F elsewhere) searches the Bestie conversation,
+  and ⌘K (Ctrl+K elsewhere) offers **Search conversation with** your Bestie.
   A verified existing DM stays available if
   agent discovery fails. If a replacement save fails, the last confirmed Bestie
   remains selected and the confirmation offers another attempt. Being the bestie
   does not prove an agent is ready or running. **Remove as bestie** in the
   Bestie's card menu asks, then saves no Bestie to the account. On desktop it
   works on every device, including one where the agent doesn't run.
-- With the **Bestie** plugin on and no saved choice, **Choose your bestie agent**
-  offers a searchable agent picker and **Create agent**. Choosing a known remote
-  agent, including one created through Builderlab, asks for confirmation:
+- With the **Bestie** plugin on, open **Create an agent** in the left navigation
+  when you haven’t chosen a Bestie. You can create one or choose an existing agent.
+  The placeholder cycles through character avatars; reduced motion keeps it still.
+  If you have no eligible agents in this community, **Create your first agent**
+  offers **Create an agent**, which opens the usual form for name, avatar and
+  provider settings. Otherwise, **Choose your bestie agent** offers a searchable
+  picker and **Create agent**. Creating and choosing your Bestie opens its private DM;
+  merely opening setup does not create an agent or send a welcome message.
+  After creating your first agent here, the pinned DM shows a local welcome on
+  this device. It is not a sent message and does not start an agent response;
+  send a message when you’re ready to begin.
+  Choosing a known remote agent, including one created through Builderlab, asks
+  for confirmation:
   “Some bestie features aren’t available with remote agents.” Cancel leaves the
   Bestie choice unchanged; it does not delete a newly created agent. A hosted
   Bestie whose provider holds its instructions (Builderlab does) shows a
@@ -918,8 +962,8 @@ available rather than silently discarding it.
   saved, Claude agents don't answer and Claude reviews fail closed.
   Codex security reviews for protected agents need a ChatGPT sign-in made
   there, and fail until there is one, or while Codex's sign-in is for another
-  workspace; once signed in elsewhere, use Codex's **Sign in again**. API key
-  and keyring sign-ins can't run them.
+  workspace. Codex's harness defaults offer that sign-in while Codex is signed
+  out. API key and keyring sign-ins can't run them.
 - **Settings → Agent details** says where an agent's configuration lives:
   **Synced in** its community, or **Only on this Mac** with why (the relay
   doesn't sync agent settings, or the first copy failed and Buzz will try
@@ -971,8 +1015,11 @@ available rather than silently discarding it.
   message shows an agent working, it is that agent's only working indicator.
   Otherwise dots remain at the end of the conversation while agents work,
   alongside current step details when available. With Reduce Motion enabled,
-  the dots stay still. Open the live indicator or expand recorded work to view
-  the agent’s activity or **Stop** the running request. The live indicator
+  the dots stay still. For one agent, click the live activity bubble to open
+  its activity; hover or focus the bubble to reveal **Stop** (always visible on
+  touch screens). For several agents, open or hover the bubble to choose an
+  agent’s activity or stop an individual request. Expand recorded work for its
+  activity controls. The live indicator
   keeps its controls while recorded updates are visible. Stop availability
   depends on the agent type.
 - Agent-to-agent messages stay in the conversation as collapsed history after
@@ -1044,9 +1091,18 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   Save unfinished forms and stop active plugin workers before you update.
   **Later** hides the notice for this candidate until the next app run. The
   update stays in the profile menu under **Plugins**. A newer candidate can show
-  a notice again. Failed checks offer **Retry**. If the updated plugin cannot
-  start, use **Retry activation** or its recovery menu to **Roll back**, when
-  available. Checks, review, Later, and cancellation keep plugin work running.
+  a notice again. A check that fails shows no notice; the plugin keeps
+  working. Its row in Manage plugins says **Couldn’t check for
+  updates.** with **Check again**, and Git’s own text under **Details**. Buzz
+  skips background checks while offline and checks again when the connection
+  returns, including a check that failed because the connection dropped.
+  **Check again** clears the row while it checks; if the check fails again,
+  the row shows the failure again. When Git couldn’t find the repository, or
+  asked for a sign-in Buzz couldn’t provide, the row adds a sentence saying so.
+  **Check again** stays available, since access can be restored.
+  If the updated plugin cannot start, use **Retry activation** or its recovery
+  menu to **Roll back**, when available. Checks, review, Later, and
+  cancellation keep plugin work running.
 - A `buzz://plugin-install` Git link pinned to both a commit and a folder can
   update a plugin installed from that same repository and folder: it opens an
   **Update** review showing access changes and any change to the branch or tag
@@ -1058,9 +1114,10 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   whether it is enabled; the old bundled choice is not carried over. Browser installations
   cannot load external plugins. Existing shared notes and the agents' built-in
   `notes_get`, `notes_set`, and `notes_rm` tools remain available without the reader.
-- **Reminders** and **Workflows** start off on fresh installs. Upgrades preserve
-  their previous state, including when no choice was saved. Enable or disable
-  them in **Manage plugins**; saved choices persist.
+- **Bestie** starts on, and **Reminders** and **Workflows** start off, on fresh
+  local installs. Upgrades preserve their previous state, including Bestie off
+  when no choice was saved. Enable or disable them in **Manage plugins**; saved
+  choices persist. A deliberate plugin-settings reset uses the current defaults.
 - A plugin's details in Manage plugins link to the Settings sections that hold
   its settings: sections it adds, such as GitHub comment authors, and Decisions
   API for a decision provider, such as TypeSafe. Only sections the Settings
@@ -1116,7 +1173,10 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   dialog starts with and ⌥F uses. Turning the plugin off mid-Focus shows everything again
   at once; 🔭 stays until it expires.
 - **Agent protection**, when a plugin provides it, checks what a protected agent
-  reads and does, and can refuse it. When refusing what a protected Codex agent
+  reads and does, and can refuse it. Large evidence is transferred in sections and retained locally for review.
+  The plugin and selected model control what they can inspect.
+  The review model has its own context capacity; a failed review never grants
+  permission to act. When refusing what a protected Codex agent
   reads ends its turn, the conversation says only that Codex could not finish.
   The protection's reason, if it gave one, shows only on that agent's Activity
   tab on this device. A reviewing model may have written it, quoting the refused
@@ -1160,6 +1220,10 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   standalone Buzz MCP server checks that channel's members and privacy against
   the key its relay advertises; where the relay does not advertise one, the
   tools find none.
+- Agent text edits retain the message's current attachments, including removals
+  made by an earlier edit. Editing requires a community that supports effective
+  edit lookup; if that read fails, the tool leaves the message alone. The agent
+  must still have permission to publish every retained file.
 - The community authorizes reads and writes. An agent's name, profile, picture,
   or appearance in a list does not prove access, ownership, or running status.
   When helping someone explore a community, use only your available access and

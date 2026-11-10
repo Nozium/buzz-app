@@ -261,6 +261,31 @@ review and remains subject to native signing rules. **Later** hides the notice
 for the current app run and candidate. The update stays in the profile menu's
 **Plugins** submenu. A newer candidate can show a notice again.
 
+A check that fails raises no notice. The plugin's row in Settings → Plugins says
+**Couldn’t check for updates.** with **Check again**, and keeps the raw Git text
+behind **Details**. Background checks wait while the browser reports
+offline and run on its `online` event. Checks are throttled to one an hour, but
+when a row holds a failure, `online` forces one, so a connection that dropped
+during a check is retried when it returns. That intent is kept until a check
+can run: if `online` arrives while the window is hidden, the next check the
+window's return triggers is forced. A check that starts on the returned
+connection spends the intent, so its own failure isn't checked again; one that
+joins a check already in flight keeps it, and a forced check follows that
+check's failure. An `online` that finds nothing failed is throttled like any
+other trigger.
+**Check again** forces a check and clears the row's status while it runs,
+leaving the row as it is during any check, with a screen-reader-only "Checking
+for updates…" status. If the check fails again, the status returns, announced as
+an alert. Once the row clears, a later background failure returns unannounced.
+`updateFailure()` in `src/plugins/updates.ts` adds a sentence for the Git text
+Buzz recognizes: a repository Git couldn't find, and a missing username on an
+HTTPS source. Both are hints, not verdicts: "not found" also answers a
+repository that denies access, and a missing username means this check sent no
+credentials (`authorizeGit` was unavailable, or the repository is private). Every
+failure keeps **Check again** and counts for the forced `online` check. A failed
+authentication gets no hint, since it follows an expired `authorizeGit` token.
+Failures don't appear in the profile menu's **Plugins** submenu.
+
 An update action fetches a fresh immutable preview. The importer checks access
 and publisher data from that preview before it applies the update. It checks
 the live source again before installation. A managed source retains its commit
@@ -946,9 +971,9 @@ contracts with their own layout and local navigation.
 
 ### Bundled defaults
 
-**Channels is the only required bundled plugin.** Bestie,
-Todos, Usage, Reminders, Workflows and Shared compute are off by default for fresh installs. Feedback, Diff viewer, Identity
-Naming, Agent Activity, Terminal, Links, GitHub, Inbox,
+**Channels is the only required bundled plugin.** Todos, Usage, Reminders,
+Workflows and Shared compute are off by default for fresh installs. Bestie,
+Feedback, Diff viewer, Identity Naming, Agent Activity, Terminal, Links, GitHub, Inbox,
 Repositories, Agents, Claude, Codex, Builderlab,
 Membership, and Moderation are on by default, but optional. Both browser and
 native catalogs declare that policy.
@@ -963,9 +988,10 @@ Both storage owners persist resolved bundled states. Native default snapshots
 are best effort: a failed write keeps the readable catalog usable and is retried
 on the next read; explicit edits and resets still report write failures.
 Existing profiles without saved Reminders or Workflows choices retain
-their former On state; fresh profiles start both Off. Reopening preserves either
-result, and an explicit reset uses current defaults. Future default-off changes
-must follow [the fresh-install decision](plugin-defaults.md), including legacy
+their former On state; fresh profiles start both Off. Bestie starts On for fresh
+profiles; existing profiles without a saved choice retain its former Off state.
+Reopening preserves these results, and an explicit reset uses current defaults.
+Future default changes must follow [the fresh-install decision](plugin-defaults.md), including legacy
 backfills for releases without saved states.
 Default-on does not promise platform support: Terminal contributes UI
 only on macOS/Linux desktop; Builderlab's hosted communities need either the desktop app or
