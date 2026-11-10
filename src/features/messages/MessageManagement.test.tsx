@@ -905,7 +905,13 @@ it("recovers an uncertain deletion after the row and dialog disappear", async ()
   await act(async () =>
     h.publication(0).result.reject(new Error("Connection lost")),
   );
-  fireEvent.click(await screen.findByText("Close", { exact: true }));
+  fireEvent.click(
+    within(
+      (await screen.findByRole("alertdialog")).querySelector(
+        ".buzz-dialog-actions",
+      ) as HTMLElement,
+    ).getByRole("button", { name: "Close" }),
+  );
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(screen.queryByRole("button", { name: "Message actions" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Retry message update" }));
@@ -932,7 +938,13 @@ it.each(["failed", "unknown"] as const)(
             : new Error("Connection lost"),
         ),
     );
-    fireEvent.click(await screen.findByText("Close", { exact: true }));
+    fireEvent.click(
+      within(
+        (await screen.findByRole("alertdialog")).querySelector(
+          ".buzz-dialog-actions",
+        ) as HTMLElement,
+      ).getByRole("button", { name: "Close" }),
+    );
     const retry = await screen.findByRole("button", {
       name: "Retry message update",
     });
@@ -965,7 +977,13 @@ it("retries an owned-agent deletion without its row and disables retry when owne
   await act(async () =>
     h.publication(0).result.reject(new Error("Connection lost")),
   );
-  fireEvent.click(await screen.findByText("Close", { exact: true }));
+  fireEvent.click(
+    within(
+      (await screen.findByRole("alertdialog")).querySelector(
+        ".buzz-dialog-actions",
+      ) as HTMLElement,
+    ).getByRole("button", { name: "Close" }),
+  );
   expect(h.owner.session.channels.window("room").rows).toHaveLength(0);
   const retry = await screen.findByRole("button", {
     name: "Retry message update",

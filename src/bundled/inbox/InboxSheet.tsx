@@ -1,4 +1,12 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   ConversationExtensions,
   PageTabOptions,
@@ -26,6 +34,9 @@ import { inboxRouteTarget, routeOf, detailOf, composingOf } from "./route";
 import type { OpenTarget } from "../../features/navigation/targets";
 import type { PageNavigation } from "../../features/navigation/service";
 import styles from "./Inbox.module.css";
+
+const FeedbackMount = createContext<HTMLElement | null>(null);
+export const useActivityFeedbackMount = () => useContext(FeedbackMount);
 
 const activitySheetRoute = {
   target: (
@@ -76,6 +87,9 @@ export function InboxSheet({
   });
   const [opening, setOpening] = useState<Opening>();
   const [shown, setShown] = useState(false);
+  const [feedbackMount, setFeedbackMount] = useState<HTMLDivElement | null>(
+    null,
+  );
   const covered = shown || drafting || !!draftContent;
   // Keep one portal destination so expanding never recreates the editor or
   // mounts history in the collapsed card before the dialog is ready.
@@ -197,7 +211,7 @@ export function InboxSheet({
         connection.status !== "ready" ||
         connection.session !== session ||
         !channel ||
-        channel.readOnly ||
+        (channel.readOnly && channel.viewerRole !== "guest") ||
         channel.archived ||
         channel.cached ||
         channel.huddle ||
@@ -255,7 +269,7 @@ export function InboxSheet({
       !channel ||
       channel.archived ||
       channel.cached ||
-      channel.readOnly ||
+      (channel.readOnly && channel.viewerRole !== "guest") ||
       channel.huddle ||
       channel.metadataPending ||
       (channel.channelType === "solo" &&
@@ -320,7 +334,7 @@ export function InboxSheet({
   const available =
     channel &&
     !channel.archived &&
-    !channel.readOnly &&
+    (!channel.readOnly || channel.viewerRole === "guest") &&
     !channel.cached &&
     !channel.huddle &&
     !channel.metadataPending &&
@@ -414,173 +428,176 @@ export function InboxSheet({
           ...(opening.options?.markRead === false && { markRead: false }),
         });
   return (
-    <div ref={setContainer} className={styles.sheetHost}>
-      <div
-        className={styles.sheetFeed}
-        data-activity-covered={covered || undefined}
-      >
-        <ConversationPresentation value={presented && !covered}>
-          {children(open, close, isOpen)}
-        </ConversationPresentation>
-      </div>
-      <div
-        ref={setComposer}
-        className={styles.newMessage}
-        data-covered={covered || undefined}
-      >
-        <div className={styles.composerEdge}>
-          <ScrollEdgeMaterial edge="bottom" />
+    <FeedbackMount value={shown ? feedbackMount : null}>
+      <div ref={setContainer} className={styles.sheetHost}>
+        <div
+          className={styles.sheetFeed}
+          data-activity-covered={covered || undefined}
+        >
+          <ConversationPresentation value={presented && !covered}>
+            {children(open, close, isOpen)}
+          </ConversationPresentation>
         </div>
-        <ConversationPresentation value={presented && !shown}>
-          <NewMessage
-            layout="composer"
-            expanded={drafting && !!draftContent}
-            contentContainer={draftMount}
-            onAddressed={expandDraft}
-            allowChannels
-            session={session}
-            scope={scope}
-            channels={list.channels}
-            host={detailHost}
-            extensions={extensions}
-            onStarted={showConversation}
-            onOpenThread={(channelId, messageId, threadId) => {
-              open({ channelId, messageId, threadId });
-            }}
-            onOpenChat={showConversation}
-            renderSolo={(agent, focusRequest, onDraftChange) => (
-              <SoloDraft
-                key={agent}
-                embedded
-                draftPrefix="direct-message"
-                onDraftChange={onDraftChange}
-                agent={agent}
-                focusRequest={focusRequest}
-                session={session}
-                scope={scope}
-                extensions={extensions}
-                onStarted={showConversation}
-                onFailed={(_id, message, retry) =>
-                  notify(
-                    message,
-                    "error",
-                    retry
-                      ? {
-                          label: "Retry restoring message",
-                          onClick: () => {
-                            void retry();
-                          },
-                          timeout: Infinity,
-                        }
-                      : undefined,
-                  )
-                }
-              />
-            )}
-          />
-        </ConversationPresentation>
-      </div>
-      <Dialog
-        visit
-        open={drafting}
-        onOpenChange={(next) => {
-          if (!next) dismiss();
-        }}
-        title="New message"
-        closeLabel="Close new message"
-        backdrop="subtle"
-        placement="bottom"
-        anchor={composer}
-        size="wide"
-        height="stable"
-        bodyLayout="flex"
-        initialFocus={false}
-        finalFocus={false}
-      >
-        <div ref={setDraftContent} className={styles.draftContent} />
-      </Dialog>
-      {available && channel && target && tab && (
-        <ConversationPresentation value={shown}>
-          <ConversationHost
-            host={detailHost}
-            session={session}
-            scope={scope}
-            channelId={channel.id}
-            channelName={channel.name}
-            threadId={target.threadId}
-          >
-            {(interactions) => (
-              <Dialog
-                visit
-                open={shown}
-                onOpenChange={(next) => {
-                  if (!next) dismiss();
-                }}
-                title={channel.name}
-                closePlacement="start"
-                headerActions={
-                  <InboxSheetActions
-                    key={tab.id}
-                    active={shown}
-                    panels={host.panels}
-                    context={{
-                      scope,
-                      channelId: channel.id,
-                      channelName: channel.name,
-                      viewer: session.viewer ?? "",
-                      relayUrl: navigationScope.communityOrigin
-                        .replace(/^https:/, "wss:")
-                        .replace(/^http:/, "ws:"),
-                      ...(target.threadId && { threadId: target.threadId }),
-                    }}
-                    interactions={interactions}
-                    onOpen={() => navigateConversation(target)}
-                  />
-                }
-                identity={
-                  <ChannelMembersButton
-                    key={channel.id}
-                    session={session}
-                    channelId={channel.id}
-                    conversationName={channel.name}
-                    navigator={detailHost.navigation}
-                  />
-                }
-                backdrop="subtle"
-                placement="bottom"
-                anchor={composer}
-                size="wide"
-                height="stable"
-                bodyLayout="flex"
-                initialFocus="dialog"
-                finalFocus={() =>
-                  trigger.current?.isConnected ? trigger.current : false
-                }
-              >
-                <ConversationTab
-                  key={tab.id}
-                  tab={tab}
-                  active={shown}
-                  visit={false}
-                  channel={channel}
+        <div
+          ref={setComposer}
+          className={styles.newMessage}
+          data-covered={covered || undefined}
+        >
+          <div className={styles.composerEdge}>
+            <ScrollEdgeMaterial edge="bottom" />
+          </div>
+          <ConversationPresentation value={presented && !shown}>
+            <NewMessage
+              layout="composer"
+              expanded={drafting && !!draftContent}
+              contentContainer={draftMount}
+              onAddressed={expandDraft}
+              allowChannels
+              session={session}
+              scope={scope}
+              channels={list.channels}
+              host={detailHost}
+              extensions={extensions}
+              onStarted={showConversation}
+              onOpenThread={(channelId, messageId, threadId) => {
+                open({ channelId, messageId, threadId });
+              }}
+              onOpenChat={showConversation}
+              renderSolo={(agent, focusRequest, onDraftChange) => (
+                <SoloDraft
+                  key={agent}
+                  embedded
+                  draftPrefix="direct-message"
+                  onDraftChange={onDraftChange}
+                  agent={agent}
+                  focusRequest={focusRequest}
                   session={session}
                   scope={scope}
                   extensions={extensions}
-                  openLink={interactions.onOpenLink}
-                  canOpenLink={interactions.canOpenLink}
-                  openThread={(messageId, rootId, intent) => {
-                    open(
-                      { channelId: channel.id, threadId: rootId, messageId },
-                      undefined,
-                      intent === "reply",
-                    );
-                  }}
+                  onStarted={showConversation}
+                  onFailed={(_id, message, retry) =>
+                    notify(
+                      message,
+                      "error",
+                      retry
+                        ? {
+                            label: "Retry restoring message",
+                            onClick: () => {
+                              void retry();
+                            },
+                            timeout: Infinity,
+                          }
+                        : undefined,
+                    )
+                  }
                 />
-              </Dialog>
-            )}
-          </ConversationHost>
-        </ConversationPresentation>
-      )}
-    </div>
+              )}
+            />
+          </ConversationPresentation>
+        </div>
+        <Dialog
+          visit
+          open={drafting}
+          onOpenChange={(next) => {
+            if (!next) dismiss();
+          }}
+          title="New message"
+          closeLabel="Close new message"
+          backdrop="subtle"
+          placement="bottom"
+          anchor={composer}
+          size="wide"
+          height="stable"
+          bodyLayout="flex"
+          initialFocus={false}
+          finalFocus={false}
+        >
+          <div ref={setDraftContent} className={styles.draftContent} />
+        </Dialog>
+        {available && channel && target && tab && (
+          <ConversationPresentation value={shown}>
+            <ConversationHost
+              host={detailHost}
+              session={session}
+              scope={scope}
+              channelId={channel.id}
+              channelName={channel.name}
+              threadId={target.threadId}
+            >
+              {(interactions) => (
+                <Dialog
+                  visit
+                  open={shown}
+                  onOpenChange={(next) => {
+                    if (!next) dismiss();
+                  }}
+                  title={channel.name}
+                  closePlacement="start"
+                  headerActions={
+                    <InboxSheetActions
+                      key={tab.id}
+                      active={shown}
+                      panels={host.panels}
+                      context={{
+                        scope,
+                        channelId: channel.id,
+                        channelName: channel.name,
+                        viewer: session.viewer ?? "",
+                        relayUrl: navigationScope.communityOrigin
+                          .replace(/^https:/, "wss:")
+                          .replace(/^http:/, "ws:"),
+                        ...(target.threadId && { threadId: target.threadId }),
+                      }}
+                      interactions={interactions}
+                      onOpen={() => navigateConversation(target)}
+                    />
+                  }
+                  identity={
+                    <ChannelMembersButton
+                      key={channel.id}
+                      session={session}
+                      channelId={channel.id}
+                      conversationName={channel.name}
+                      navigator={detailHost.navigation}
+                    />
+                  }
+                  backdrop="subtle"
+                  placement="bottom"
+                  anchor={composer}
+                  size="wide"
+                  height="stable"
+                  bodyLayout="flex"
+                  initialFocus="dialog"
+                  finalFocus={() =>
+                    trigger.current?.isConnected ? trigger.current : false
+                  }
+                >
+                  <div ref={setFeedbackMount} />
+                  <ConversationTab
+                    key={tab.id}
+                    tab={tab}
+                    active={shown}
+                    visit={false}
+                    channel={channel}
+                    session={session}
+                    scope={scope}
+                    extensions={extensions}
+                    openLink={interactions.onOpenLink}
+                    canOpenLink={interactions.canOpenLink}
+                    openThread={(messageId, rootId, intent) => {
+                      open(
+                        { channelId: channel.id, threadId: rootId, messageId },
+                        undefined,
+                        intent === "reply",
+                      );
+                    }}
+                  />
+                </Dialog>
+              )}
+            </ConversationHost>
+          </ConversationPresentation>
+        )}
+      </div>
+    </FeedbackMount>
   );
 }

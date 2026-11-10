@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom";
+import { useActivityFeedbackMount } from "./InboxSheet";
 import {
   type ReactNode,
   memo,
@@ -430,6 +432,7 @@ const InboxList = memo(function InboxList({
     };
   }, []);
 
+  const feedbackMount = useActivityFeedbackMount();
   const [pending, setPending] = useState(false);
   const [refreshAfterRoster, setRefreshAfterRoster] = useState(false);
   const [error, setError] = useState<string>();
@@ -1066,8 +1069,12 @@ const InboxList = memo(function InboxList({
     if (!retryFocus.current) return;
     retryFocus.current = false;
     if (failure || pending || document.activeElement !== document.body) return;
-    focusToolbar();
-  }, [failure, pending, focusToolbar]);
+    const editor = feedbackMount
+      ?.closest('[role="dialog"]')
+      ?.querySelector<HTMLElement>('[role="textbox"]');
+    if (editor) editor.focus();
+    else focusToolbar();
+  }, [failure, pending, focusToolbar, feedbackMount]);
   const filtered =
     activity !== "all" || senderFilter !== "everyone" || unreadOnly;
   // Nothing unread anywhere: say so, rather than suggest a filter hid it.
@@ -1177,16 +1184,17 @@ const InboxList = memo(function InboxList({
       unread: (item) => mutate(item, true),
     };
   });
+  const notice = failure ? (
+    <div className={styles.notice} role="alert">
+      <p className="text-body">{failure}</p>
+      <Button ref={retryButton} size="sm" loading={pending} onClick={retry}>
+        Retry activity
+      </Button>
+    </div>
+  ) : null;
   return (
     <div data-buzz-ui="" className={`${feedStyles.page} ${styles.page}`}>
-      {failure && (
-        <div className={styles.notice} role="alert">
-          <p className="text-body">{failure}</p>
-          <Button ref={retryButton} size="sm" loading={pending} onClick={retry}>
-            Retry activity
-          </Button>
-        </div>
-      )}
+      {notice && (feedbackMount ? createPortal(notice, feedbackMount) : notice)}
       <div ref={workspace} className={styles.workspace}>
         <div className={styles.listPane}>
           <div className={styles.listHeading}>

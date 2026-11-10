@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { afterEach, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { RegisteredPanel } from "../../features/panels/service";
 import type { ReactNode } from "react";
@@ -678,7 +685,10 @@ it("restores Bestie threads with Back and Forward and retires every explicitly c
   expect(await screen.findByLabelText("Thread")).toBeVisible();
 
   await userEvent.click(
-    screen.getByRole("button", { name: "Close Are you there? tab" }),
+    within(screen.getByRole("dialog", { name: "Are you there?" })).getByRole(
+      "button",
+      { name: "Close" },
+    ),
   );
   rerender();
   expect(navigator.snapshot().entry.target).toEqual(bestie);
@@ -856,10 +866,8 @@ it("rechecks eligibility before retrying a failed DM open", async () => {
   expect(f.open).toHaveBeenCalledTimes(attempts);
 });
 
-it("keeps the DM and draft mounted beside a thread and retains the reply draft while collapsing its pane", async () => {
-  const f = await fixture({ existing: true, withReply: true });
-  f.choose(pollen);
-  f.mount();
+it("keeps the DM draft mounted behind a thread sheet and restores the reply draft after dismissal", async () => {
+  const f = await threadHistoryFixture();
   const user = userEvent.setup();
   const composer = await screen.findByRole("textbox", {
     name: "Message Pollen",
@@ -868,25 +876,41 @@ it("keeps the DM and draft mounted beside a thread and retains the reply draft w
   await user.click(
     await screen.findByRole("button", { name: "View thread: 1 reply" }),
   );
+  f.rerender();
+  const sheet = await screen.findByRole("dialog", { name: "Are you there?" });
   expect(await screen.findByLabelText("Thread")).toBeVisible();
+  expect(composer).toBeInTheDocument();
+  expect(composer).toHaveTextContent("Main draft");
+  const reply = within(sheet).getByRole("textbox", { name: "Reply to thread" });
+  await user.type(reply, "Reply draft");
+  expect(reply).toHaveTextContent("Reply draft");
+  expect(reply).toHaveFocus();
+  await user.click(within(sheet).getByRole("button", { name: "Close" }));
+  f.rerender();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(screen.getByRole("textbox", { name: "Message Pollen" })).toBe(
     composer,
   );
   expect(composer).toHaveTextContent("Main draft");
-  const reply = screen.getByRole("textbox", { name: "Reply to thread" });
-  await user.type(reply, "Reply draft");
-  await user.click(screen.getByRole("button", { name: "Toggle tab pane" }));
-  expect(composer).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Toggle tab pane" }));
-  expect(await screen.findByRole("textbox", { name: "Reply to thread" })).toBe(
-    reply,
-  );
-  expect(reply).toHaveTextContent("Reply draft");
+  const root = await waitFor(() => {
+    const message = document.querySelector<HTMLElement>(
+      `[data-message-id="${f.rootId}"]`,
+    );
+    if (!message)
+      throw new Error("Bestie root message is unavailable after Close");
+    return message;
+  });
   await user.click(
-    screen.getByRole("button", { name: "Close Are you there? tab" }),
+    await within(root).findByRole("button", { name: /^View thread/ }),
   );
+  f.rerender();
+  expect(
+    await screen.findByRole("textbox", { name: "Reply to thread" }),
+  ).toHaveTextContent("Reply draft");
+  await user.keyboard("{Escape}");
+  f.rerender();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(composer).toHaveTextContent("Main draft");
-  expect(screen.queryByLabelText("Thread")).not.toBeInTheDocument();
 });
 
 it.each(["side", "bottom", "tab"] as const)(
@@ -922,14 +946,12 @@ it.each(["side", "bottom", "tab"] as const)(
       } satisfies RegisteredPanel,
     ]);
     f.mount();
-    await user.click(
-      await screen.findByRole("button", { name: `Call ${pollenDM}` }),
-    );
+    await user.click(await headerAction(`Call ${pollenDM}`));
     expect(
       await screen.findByRole("button", { name: "Close call content" }),
     ).toBeVisible();
     expect(
-      screen.getByRole("textbox", { name: "Message Pollen" }),
+      screen.getByRole("textbox", { name: "Message Pollen", hidden: true }),
     ).toBeInTheDocument();
     await act(async () => f.setPanels([]));
     expect(
@@ -946,17 +968,15 @@ it("offers the shared DM actions and channel details in Bestie", async () => {
   f.choose(pollen);
   const user = userEvent.setup();
   f.mount();
-  await user.click(
-    await screen.findByRole("button", { name: "Channel actions" }),
-  );
+  await user.click(await headerAction("Channel actions"));
   await user.click(
     await screen.findByRole("menuitem", { name: "View channel details" }),
   );
   expect(
-    await screen.findByRole("tab", { name: "Channel settings" }),
+    await screen.findByRole("dialog", { name: "Channel settings" }),
   ).toBeVisible();
   expect(
-    screen.getByRole("textbox", { name: "Message Pollen" }),
+    screen.getByRole("textbox", { name: "Message Pollen", hidden: true }),
   ).toBeInTheDocument();
 });
 
@@ -982,14 +1002,22 @@ it("opens eligible plugin menu items in the Bestie workspace", async () => {
     } satisfies RegisteredPanel,
   ]);
   f.mount();
-  await user.click(
-    await screen.findByRole("button", { name: "Channel actions" }),
-  );
+  await user.click(await headerAction("Channel actions"));
   await user.click(
     await screen.findByRole("menuitem", { name: "View canvas" }),
   );
   expect(await screen.findByText(`Canvas for ${pollenDM}`)).toBeVisible();
   expect(
-    screen.getByRole("textbox", { name: "Message Pollen" }),
+    screen.getByRole("textbox", { name: "Message Pollen", hidden: true }),
   ).toBeInTheDocument();
 });
+
+/** Header tools retain their controls inside the shared overflow. */
+async function headerAction(name: string) {
+  const action = screen.queryByRole("button", { name });
+  if (action) return action;
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Conversation actions" }),
+  );
+  return screen.findByRole("button", { name });
+}

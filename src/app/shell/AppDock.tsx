@@ -36,6 +36,7 @@ export function AppDock({
       onKeyDown={(event) => {
         if (
           event.key === "Escape" &&
+          !event.shiftKey &&
           !event.defaultPrevented &&
           !(
             event.target instanceof Element &&
@@ -43,8 +44,10 @@ export function AppDock({
               '[role="menu"], [role="dialog"], [data-context-menu-present], [aria-haspopup="menu"][aria-expanded="true"]',
             )
           )
-        )
+        ) {
+          event.preventDefault();
           onDismiss?.();
+        }
       }}
       data-search-external={!search || undefined}
     >

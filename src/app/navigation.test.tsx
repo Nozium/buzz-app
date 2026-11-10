@@ -698,9 +698,7 @@ it("opens removed Messages settings links at Appearance without adding a navigat
   services = createServices();
   render(<App services={services} />);
   await screen.findByRole("heading", { name: "Conversations" });
-  expect(
-    screen.getByRole("combobox", { name: "Open threads in" }),
-  ).toBeVisible();
+  expect(screen.getByRole("combobox", { name: "Message width" })).toBeVisible();
   expect(
     screen.queryByRole("switch", { name: "Remember mentioned agents" }),
   ).not.toBeInTheDocument();

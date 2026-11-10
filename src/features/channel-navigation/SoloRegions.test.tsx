@@ -551,7 +551,8 @@ it("replaces personal filing with a reveal chip and rejects a move selected just
   expect(
     screen.queryByRole("button", { name: "Workspace: Personal" }),
   ).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Chat actions" }));
+  fireEvent.click(screen.getByRole("button", { name: "Conversation actions" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Chat actions" }));
   expect(
     await screen.findByRole("menuitem", { name: "Chat settings" }),
   ).toBeInTheDocument();

@@ -17,7 +17,7 @@ import { App } from "./App";
 import { createServices, type AppServices } from "./services";
 import { matchesEvent } from "../features/relay/projection";
 import type { ReadFilter, RelayEvent } from "../features/relay/events";
-import { metadata, roster } from "../features/relay/testing";
+import { message, metadata, roster } from "../features/relay/testing";
 import type { ComposerInputElement } from "../features/messages/composer-dom";
 import { composerDOMFixture } from "../features/messages/composer-testing";
 import * as communityApi from "../features/communities/api";
@@ -169,7 +169,16 @@ async function setup(
     }),
   );
   const events: RelayEvent[] = [profile, recipient];
-  if (muteWrite) events.push(...channelEvents);
+  if (muteWrite)
+    events.push(
+      ...channelEvents,
+      message(
+        { secret: new Uint8Array(32).fill(7), pubkey: recipient.pubkey },
+        channelId,
+        "Planning update",
+        1_700_000_001,
+      ),
+    );
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, options?: RequestInit) => {
@@ -376,7 +385,7 @@ it("recovers a failed sidebar registration after disabling and re-enabling its p
   }
 });
 
-it("shares its resizable width between a page sidebar and Messages, including the fallback", async () => {
+it("retains contributed-sidebar width across leaving, remounting and its fallback", async () => {
   await setup();
   const appServices = services;
   if (!appServices) throw new Error("Expected app services after setup");
@@ -406,8 +415,16 @@ it("shares its resizable width between a page sidebar and Messages, including th
       pageId: "channels",
     });
   });
+  expect(await screen.findByRole("region", { name: "Messages" })).toBeVisible();
   expect(
-    await screen.findByRole("complementary", { name: "Sidebar" }),
+    screen.queryByRole("separator", { name: "Resize sidebar" }),
+  ).toBeNull();
+
+  await openSidebarPage("main", "second");
+  expect(
+    await within(
+      screen.getByRole("complementary", { name: "Beacon sidebar" }),
+    ).findByText("main:second"),
   ).toBeVisible();
   expect(sidebarColumn()).toHaveStyle({ width: "520px" });
   fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), {
@@ -417,14 +434,6 @@ it("shares its resizable width between a page sidebar and Messages, including th
   expect(readView(scope, "channel-sidebar", null)).toMatchObject({
     width: 220,
   });
-
-  await openSidebarPage("main", "second");
-  expect(
-    await within(
-      screen.getByRole("complementary", { name: "Beacon sidebar" }),
-    ).findByText("main:second"),
-  ).toBeVisible();
-  expect(sidebarColumn()).toHaveStyle({ width: "220px" });
 
   await openSidebarPage("main", "broken-sidebar");
   expect(
@@ -460,12 +469,12 @@ it.each([
       );
     const user = await setup(false, write);
     try {
-      const sidebar = await screen.findByRole("complementary", {
-        name: "Sidebar",
-      });
-      const row = await within(sidebar).findByRole("button", {
-        name: "Planning",
-      });
+      const rail = await screen.findByRole("navigation", { name: "Apps" });
+      const row = await within(rail).findByRole("button", { name: "Planning" });
+      expect(row.closest("[data-rail-row]")).toHaveAttribute(
+        "data-rail-row",
+        `channel:${channelId}`,
+      );
       fireEvent.keyDown(row, { key: "ContextMenu" });
       await user.click(await screen.findByRole("menuitem", { name: "Mute" }));
       await waitFor(() =>
@@ -487,9 +496,10 @@ it.each([
       const contributed = await screen.findByRole("complementary", {
         name: "Beacon sidebar",
       });
-      expect(row).not.toBeInTheDocument();
+      // Universal rail controls stay mounted while the contributed page opens.
+      expect(row).toBeInTheDocument();
       if (from === "the contributed page") {
-        // jsdom lacks the native focus fallback after the focused row unmounts.
+        // A deliberate move to the contributed editor owns focus during recovery.
         await user.click(
           within(contributed).getByRole("textbox", { name: "Sidebar draft" }),
         );
@@ -509,12 +519,18 @@ it.each([
             pageId: "channels",
           });
         });
-        const sidebar = await screen.findByRole("complementary", {
-          name: "Sidebar",
+        const returned = await within(rail).findByRole("button", {
+          name: "Planning",
         });
-        return within(sidebar).findByRole("button", {
-          name: muted ? /^Planning\s*Muted$/ : "Planning",
-        });
+        expect(returned).toBe(row);
+        if (muted) {
+          fireEvent.keyDown(returned, { key: "ContextMenu" });
+          expect(
+            await screen.findByRole("menuitem", { name: "Unmute" }),
+          ).toBeVisible();
+          await user.keyboard("{Escape}");
+        }
+        return returned;
       };
       const returnedRow =
         from === "Messages" ? await returnToMessages() : undefined;
@@ -747,7 +763,7 @@ it("keeps the same unsent conversation and companion panel through Settings sect
   const user = await setup();
   if (!services) throw new Error("Missing app services");
   const current = services;
-  await user.click(await screen.findByRole("button", { name: "New message" }));
+  await user.click(await screen.findByRole("button", { name: "New" }));
   const composing = await screen.findByRole("region", { name: "New message" });
   await user.click(
     await screen.findByRole("option", { name: "Draft recipient" }),
@@ -791,7 +807,8 @@ it("keeps the same unsent conversation and companion panel through Settings sect
   expect(frame).not.toBeNull();
   const workspace = frame?.parentElement;
   expect(workspace).toContainElement(composing);
-  expect(workspace).toContainElement(panel);
+  // The companion is portalled by the shared sheet host and retains its DOM.
+  expect(panel).toBeInTheDocument();
   // The community switcher stays in the top bar, beside the Settings frame.
   expect(communities).toBeInTheDocument();
   expect(frame).not.toContainElement(communities);
@@ -820,7 +837,7 @@ it("keeps the same unsent conversation and companion panel through Settings sect
 
 it("returns keyboard-opened Settings to the same focused draft", async () => {
   const user = await setup();
-  await user.click(await screen.findByRole("button", { name: "New message" }));
+  await user.click(await screen.findByRole("button", { name: "New" }));
   const composing = await screen.findByRole("region", { name: "New message" });
   await user.click(
     await screen.findByRole("option", { name: "Draft recipient" }),

@@ -58,6 +58,8 @@ import type { SidebarSections } from "../../features/channel-navigation/sidebar-
 import { PageNavigation } from "./PageNavigation";
 import { useRailPins, type RailEntry } from "./rail-pins";
 import { useBestieConversation } from "./bestie-context";
+import { useChannelNavigation } from "../../features/channel-navigation/ChannelNavigationState";
+import { MenuItem } from "../../shared/design-system/ui/Menu";
 import styles from "./RailNavigation.module.css";
 import { preferredRailAgents, recentReceivedMessages } from "./rail-activity";
 
@@ -93,6 +95,32 @@ export function RailNavigation({
     sidebarSections?.snapshot ?? noSections,
   );
   const bestieChannel = useBestieConversation(session);
+  const channelNavigation = useChannelNavigation();
+  const closeMuteMenu = useRef<(() => void) | undefined>(undefined);
+  const muteRecovery =
+    channelNavigation?.session === session
+      ? channelNavigation.muteRecovery
+      : undefined;
+  useEffect(() => {
+    if (!muteRecovery || pageSection) return;
+    const recovery = {
+      closeMenu: () => closeMuteMenu.current?.(),
+      focus: (channelId: string) =>
+        document
+          .querySelector<HTMLElement>(
+            `#shell-rail [data-rail-channel="${CSS.escape(channelId)}"]`,
+          )
+          ?.focus(),
+    };
+    muteRecovery.current = recovery;
+    return () => {
+      if (muteRecovery.current === recovery) muteRecovery.current = undefined;
+    };
+  }, [muteRecovery, pageSection]);
+  const preferences = useSyncExternalStore(
+    session.sidebarPreferences.subscribe,
+    session.sidebarPreferences.snapshot,
+  );
   const resolveName = useIdentityNames(session.names);
   const { layout: railLayout, reset: resetPlacement } =
     useRailLayout(partition);
@@ -432,6 +460,7 @@ export function RailNavigation({
       <RailConversationItem
         key={entry.id}
         {...props}
+        data-rail-channel={channel.id}
         session={session}
         channel={channel}
         avatar={artwork(entry, avatarOnly)}
@@ -568,6 +597,37 @@ export function RailNavigation({
             />
           ) : (
             row(byId.get(entry.id) ?? entry)
+          );
+        }}
+        renderRowActions={(entry, close, focus) => {
+          if (
+            channelNavigation?.session !== session ||
+            !session.sidebarPreferences.muteWritable ||
+            !preferences.data
+          )
+            return null;
+          const destination = entry.target;
+          const channel =
+            destination.kind === "conversation"
+              ? channels.find((channel) => channel.id === destination.channelId)
+              : undefined;
+          if (!channel) return null;
+          const intent = channelNavigation.mute.intents.get(channel.id);
+          const muted = intent?.pending
+            ? intent.muted
+            : preferences.data.muted.includes(channel.id);
+          return (
+            <MenuItem
+              disabled={intent?.pending}
+              onClick={() => {
+                closeMuteMenu.current = close;
+                channelNavigation.mute.change(channel.id, channel.name, !muted);
+                close();
+                focus();
+              }}
+            >
+              {muted ? "Unmute" : "Mute"}
+            </MenuItem>
           );
         }}
         sections={[

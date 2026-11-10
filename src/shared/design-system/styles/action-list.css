@@ -1,6 +1,9 @@
 .buzz-icon-action-label {
   display: none;
 }
+.buzz-icon-action-label::before {
+  content: attr(data-label);
+}
 .buzz-action-list {
   display: flex;
   flex-direction: column;

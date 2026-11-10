@@ -67,6 +67,9 @@ type Arrangement = {
   create(entry: RailEntry): void;
   remove(id: string): void;
   renderEntry(entry: RailEntry, section?: string): ReactNode;
+  renderRowActions?:
+    | ((entry: RailEntry, close: () => void, focus: () => void) => ReactNode)
+    | undefined;
   isPinned(entry: RailEntry): boolean;
   onTogglePin(entry: RailEntry, pinned: boolean): void;
 };
@@ -85,6 +88,7 @@ export function RailArrangement({
   partition,
   sections,
   renderEntry,
+  renderRowActions,
   isPinned,
   onTogglePin,
   pageSection,
@@ -94,6 +98,9 @@ export function RailArrangement({
   partition: string;
   sections: Group[];
   renderEntry(entry: RailEntry, section?: string): ReactNode;
+  renderRowActions?:
+    | ((entry: RailEntry, close: () => void, focus: () => void) => ReactNode)
+    | undefined;
   isPinned(entry: RailEntry): boolean;
   onTogglePin(entry: RailEntry, pinned: boolean): void;
   pageSection?: string | undefined;
@@ -159,6 +166,7 @@ export function RailArrangement({
       saved(remove(id));
     },
     renderEntry,
+    renderRowActions,
     isPinned,
     onTogglePin,
   };
@@ -557,6 +565,12 @@ function MovableRow({
         {children}
       </ContextMenuTrigger>
       <MenuPopup anchor={menuAnchor}>
+        {arrangement?.renderRowActions?.(
+          entry,
+          () => setMenuOpen(false),
+          () =>
+            drag.node.current?.querySelector<HTMLElement>("button")?.focus(),
+        )}
         <MenuItem onClick={() => arrangement?.onTogglePin(entry, !pinned)}>
           {pinned ? "Unpin" : "Pin"}
         </MenuItem>

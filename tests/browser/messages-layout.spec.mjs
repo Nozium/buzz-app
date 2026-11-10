@@ -743,7 +743,9 @@ test.describe("Sidebar row limits", () => {
     await page.keyboard.press("Escape");
     await pinButtons.first().focus();
     await page.keyboard.press("Tab");
-    await expect(page.getByRole("tooltip")).toHaveText("Beta");
+    await expect(
+      page.getByRole("tooltip", { name: "Beta", exact: true }),
+    ).toBeVisible();
     await page.keyboard.press("Escape");
     await page.setViewportSize({ width: 480, height: 900 });
     await page

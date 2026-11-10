@@ -7,6 +7,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RelaySession } from "../relay/session";
@@ -251,6 +252,10 @@ it("offers only Close when the saved project defaults were changed elsewhere", a
     screen.queryByRole("button", { name: /^(Create|Retry)$/ }),
   ).not.toBeInTheDocument();
   expect(save).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByText("Close", { selector: "button span" }));
+  fireEvent.click(
+    within(
+      screen.getByRole("dialog").querySelector("footer") as HTMLElement,
+    ).getByRole("button", { name: "Close" }),
+  );
   expect(close).toHaveBeenCalledOnce();
 });

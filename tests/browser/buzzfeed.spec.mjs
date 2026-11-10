@@ -87,7 +87,10 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
   await expect(
     page.getByRole("complementary", { name: "Discover" }),
   ).toHaveCount(0);
-  await appDock.getByRole("button", { name: "Search Buzz" }).click();
+  await page
+    .getByRole("banner")
+    .getByRole("button", { name: "Search Buzz" })
+    .click();
   await expect(
     page.getByRole("dialog", { name: "Search Buzz", exact: true }),
   ).toBeVisible();

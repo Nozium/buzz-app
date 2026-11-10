@@ -1,4 +1,17 @@
-# Smart Sections
+# Smart sections
+
+Create live sidebar collections from a description, using available sources and an agent's help.
+
+## Getting started
+
+1. Open **Smart sections** from the Plugins card.
+2. Choose **New smart section** and describe what you want to follow.
+3. Preview the matching rows, then add the section to your sidebar.
+4. Open a section to edit, refresh, pause, or remove it.
+
+---
+
+## Details
 
 User-owned, device-local live collections rendered through the existing version-1
 sidebar section registry. Natural language is interpreted by tool-free inference into

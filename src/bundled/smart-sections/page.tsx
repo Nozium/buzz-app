@@ -54,9 +54,17 @@ export function SmartSectionsPage({
   panels: Panels;
   generator: SectionGenerator;
 }) {
-  const states = useSyncExternalStore(service.subscribe, service.snapshot);
-  const connection = useSyncExternalStore(relay.subscribe, relay.snapshot);
-  useSyncExternalStore(panels.subscribe, panels.snapshot);
+  const states = useSyncExternalStore(
+    service.subscribe,
+    service.snapshot,
+    service.snapshot,
+  );
+  const connection = useSyncExternalStore(
+    relay.subscribe,
+    relay.snapshot,
+    relay.snapshot,
+  );
+  useSyncExternalStore(panels.subscribe, panels.snapshot, panels.snapshot);
   const scope = scopeOf(connection),
     partition = connection.scope;
   const params =

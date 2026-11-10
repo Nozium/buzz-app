@@ -73,7 +73,7 @@ it.each([false, true])(
   async (dm) => {
     const h = fixture({ sheet: true, withWriter: true, withDm: dm });
     render(h.view);
-    if (dm) await userEvent.click(screen.getByRole("button", { name: "DMs" }));
+    if (dm) await chooseFilter("DMs");
     await waitFor(() => expect(rows()).toHaveLength(dm ? 1 : 2));
     const opener = within(rows()[0] as HTMLElement).getByRole("button", {
       name: /^Open /,
@@ -195,10 +195,9 @@ it("a covered feed skips pending row paints and disables them when exposed durin
   try {
     fireEvent.click(within(first).getByRole("button", { name: /^Open / }));
     await waitFor(() => expect(h.saveStarted()).toBe(true));
-    expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
-      "aria-busy",
-      "true",
-    );
+    expect(
+      screen.getByRole("list", { name: "Activity", hidden: true }),
+    ).toHaveAttribute("aria-busy", "true");
     expect(sibling).not.toBeDisabled();
     // No StrictMode in this host: selecting the first row renders one identity.
     expect(
@@ -281,13 +280,13 @@ it("includes ordinary channel activity in All and isolates it in Channels", asyn
   render(h.view);
   const feed = within(await screen.findByRole("list", { name: "Activity" }));
   expect(
-    await screen.findByRole("heading", { level: 2, name: "All activity" }),
+    await screen.findByRole("heading", { level: 2, name: "Activity" }),
   ).toBeVisible();
   expect(await feed.findByText("An ordinary channel post")).toBeVisible();
   expect(await feed.findByText("A direct reply")).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "Channels" }));
+  await userEvent.click(screen.getByRole("tab", { name: "Channels" }));
   expect(
-    screen.getByRole("heading", { level: 2, name: "Channels" }),
+    screen.getByRole("heading", { level: 2, name: "Activity" }),
   ).toBeVisible();
   expect(await feed.findByText("An ordinary channel post")).toBeVisible();
   expect(feed.queryByText("A direct reply")).not.toBeInTheDocument();
@@ -320,11 +319,12 @@ it("Activity retires an open sheet when channel membership is revoked", async ()
 });
 
 it.each([false, true])(
-  "retires a conversation moved to the main pane when its room becomes a Huddle (focus elsewhere: %s)",
+  "retires a conversation sheet when its room becomes a Huddle (focus elsewhere: %s)",
   async (elsewhere) => {
     const h = fixture({ withWriter: true });
     render(h.view);
-    const list = () => within(screen.getByRole("list", { name: "Activity" }));
+    const list = () =>
+      within(screen.getByRole("list", { name: "Activity", hidden: true }));
     await waitFor(() =>
       expect(list().getAllByRole("button", { name: /^Open / })).toHaveLength(2),
     );
@@ -332,16 +332,7 @@ it.each([false, true])(
     if (!first) throw new Error("Missing fixture row");
     fireEvent.click(first);
     await findReader();
-    const [label] = sideTabs();
-    if (!label) throw new Error("Missing side tab");
-    act(() => {
-      fireEvent.keyDown(screen.getByRole("tab", { name: label }), {
-        key: "ArrowLeft",
-        altKey: true,
-        shiftKey: true,
-      });
-    });
-    expect(tabs("Activity tabs")).toHaveLength(2);
+    expect(await screen.findByRole("dialog")).toBeVisible();
     // Another visible control, such as the app's sidebar, keeps its focus.
     const other = document.body.appendChild(document.createElement("button"));
     if (elsewhere) other.focus();
@@ -367,7 +358,7 @@ it.each([false, true])(
         }),
       ]),
     );
-    await waitFor(() => expect(tabs("Activity tabs")).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(queryReader()).not.toBeInTheDocument();
     if (elsewhere) expect(other).toHaveFocus();
     else expect(fromTrigger()).toHaveFocus();
@@ -385,7 +376,8 @@ it.each([
   async (cleared, dialog) => {
     const h = fixture({ withWriter: true });
     render(h.view);
-    const list = () => within(screen.getByRole("list", { name: "Activity" }));
+    const list = () =>
+      within(screen.getByRole("list", { name: "Activity", hidden: true }));
     await waitFor(() =>
       expect(list().getAllByRole("button", { name: /^Open / })).toHaveLength(2),
     );
@@ -511,8 +503,8 @@ it("keeps a saved offset off a list the user refilters", async () => {
   expect(scroller()?.scrollTop).toBe(40);
 });
 
-it("neither measures nor places the list until a tab moved to the main pane uncovers it", async () => {
-  const h = fixture();
+it("the public page-tab host keeps a covered Activity list unmeasured until sheet dismissal", async () => {
+  const h = fixture({ sheet: false });
   const view = render(h.view);
   await waitFor(() => expect(rows()).toHaveLength(2));
   const list = scroller();
@@ -522,17 +514,7 @@ it("neither measures nor places the list until a tab moved to the main pane unco
   if (!first) throw new Error("Missing fixture row");
   fireEvent.click(within(first).getByRole("button", { name: /^Open / }));
   await findReader();
-  const [label] = sideTabs();
-  if (!label) throw new Error("Missing side tab");
-  act(() => {
-    fireEvent.keyDown(screen.getByRole("tab", { name: label }), {
-      key: "ArrowLeft",
-      altKey: true,
-      shiftKey: true,
-    });
-  });
-  expect(tabs("Activity tabs")).toHaveLength(2);
-  expect(list.closest("[inert]")).not.toBeNull();
+  expect(await screen.findByRole("dialog")).toBeVisible();
   // The covered list keeps its selected row, which an update would measure.
   expect(list.querySelector("li[data-selected]")).not.toBeNull();
   const measure = vi.spyOn(Element.prototype, "getBoundingClientRect");
@@ -558,8 +540,7 @@ it("neither measures nor places the list until a tab moved to the main pane unco
   } finally {
     measure.mockRestore();
   }
-  // Returning to Activity under the moved tab leaves the list where it is
-  // until that tab is no longer selected.
+  // Remounting retains the sheet and the list offset until dismissal.
   view.unmount();
   render(h.view);
   const returned = await screen.findByRole("list", {
@@ -569,15 +550,22 @@ it("neither measures nor places the list until a tab moved to the main pane unco
   await waitFor(() => expect(returned).toHaveTextContent("Fresh mention"));
   const covered = returned.parentElement;
   if (!covered) throw new Error("Missing Activity scroller");
-  expect(covered.closest("[inert]")).not.toBeNull();
-  expect(covered.scrollTop).toBe(0);
-  fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
-  expect(covered.closest("[inert]")).toBeNull();
+  expect(
+    covered.closest('[aria-hidden="true"], [inert], [data-base-ui-inert]'),
+  ).not.toBeNull();
+  expect(covered.scrollTop).toBe(160);
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(
+    covered.closest('[aria-hidden="true"], [inert], [data-base-ui-inert]'),
+  ).toBeNull();
   expect(covered.scrollTop).toBe(160);
 });
 
 it.each([
-  ["DMs", "Activity type"],
+  ["DMs", "Activity views"],
   ["Agents", "Sender"],
   ["Unread only", "Attention"],
 ] as const)(
@@ -604,10 +592,7 @@ it.each([
     const filters = fromTrigger();
     expect(filters).toHaveFocus();
     expect(filters).toHaveAccessibleName("From anyone");
-    expect(screen.getByRole("switch", { name: "Unread" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
+    expect(await unreadToggle()).toHaveAttribute("aria-checked", "false");
   },
 );
 
@@ -623,7 +608,7 @@ it("All caught up offers Show all once Unread leaves nothing, then shows the rea
   const status = empty.closest<HTMLElement>('[role="status"]');
   if (!status) throw new Error("Missing empty state");
   expect(status).toHaveTextContent(
-    "New replies, mentions and DMs show up here.",
+    "New channel posts, replies, mentions and DMs show up here.",
   );
   expect(status).not.toHaveTextContent(/archiv/i);
   expect(
@@ -633,12 +618,12 @@ it("All caught up offers Show all once Unread leaves nothing, then shows the rea
   ).toEqual(["Show all"]);
   fireEvent.click(within(status).getByRole("button", { name: "Show all" }));
   await waitFor(() => expect(rows()).toHaveLength(2));
-  expect(unreadToggle()).toHaveAttribute("aria-checked", "false");
+  expect(await unreadToggle()).toHaveAttribute("aria-checked", "false");
   expect(fromTrigger()).toHaveFocus();
 });
 
 it.each(["button", "menu"] as const)(
-  "unselected-row Mark as read via %s reads that row in place and leaves the reader and its draft alone",
+  "Mark as read via %s after sheet dismissal reads that row in place and preserves the other conversation draft",
   async (action) => {
     const h = fixture({ withWriter: true });
     render(h.view);
@@ -654,11 +639,11 @@ it.each(["button", "menu"] as const)(
     const editor = (await screen.findByRole("textbox")) as ComposerInputElement;
     act(() => editor.insertText("Keep the open draft"));
     await waitFor(() =>
-      expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
-        "aria-busy",
-        "false",
-      ),
+      expect(
+        screen.getByRole("list", { name: "Activity", hidden: true }),
+      ).toHaveAttribute("aria-busy", "false"),
     );
+    await dismissReader();
     if (action === "menu") {
       fireEvent.contextMenu(
         within(mention).getByRole("button", { name: /^Open / }),
@@ -684,9 +669,11 @@ it.each(["button", "menu"] as const)(
       within(mention).queryByRole("button", { name: /^Mark as read / }),
     ).toBeNull();
     expect(screen.queryByText("Marked as read")).not.toBeInTheDocument();
+    fireEvent.click(within(thread).getByRole("button", { name: /^Open / }));
+    expect(await screen.findByRole("textbox")).toHaveTextContent(
+      "Keep the open draft",
+    );
     expect(thread).toHaveAttribute("data-selected");
-    expect(screen.getByRole("textbox")).toBe(editor);
-    expect(editor).toHaveTextContent("Keep the open draft");
   },
 );
 
@@ -726,7 +713,7 @@ it("defaults saved filters field by field and loads a retired Archived view as t
   expect(
     screen.getByRole("tab", { name: "All", selected: true }),
   ).toBeInTheDocument();
-  expect(unreadToggle()).toHaveAttribute("aria-checked", "false");
+  expect(await unreadToggle()).toHaveAttribute("aria-checked", "false");
   fireEvent.click(fromTrigger());
   fireEvent.click(await screen.findByRole("menuitemradio", { name: "Anyone" }));
   await waitFor(() => expect(rows()).toHaveLength(2));
@@ -749,9 +736,9 @@ it.each([
     render(h.view);
     await waitFor(() => expect(fromTrigger()).toHaveAccessibleName(label));
     fireEvent.click(fromTrigger());
-    const menu = await screen.findByRole("menu", { name: "From" });
+    const menu = await screen.findByRole("menu", { name: "Activity filters" });
     expect(
-      within(menu)
+      within(within(menu).getByRole("group", { name: "From" }))
         .getAllByRole("menuitemradio")
         .map((item) => [item.textContent, item.getAttribute("aria-checked")]),
     ).toEqual(
@@ -797,10 +784,7 @@ it("reconciles saved preferences from another window", async () => {
   });
   expect(activityType()).toBe("All");
   expect(fromTrigger()).toHaveAccessibleName("From agents");
-  expect(screen.getByRole("switch", { name: "Unread" })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
+  expect(await unreadToggle()).toHaveAttribute("aria-checked", "true");
 });
 
 /** The sidebar hover card over the same session as the page. */
@@ -814,6 +798,7 @@ const previewAt = (h: ReturnType<typeof fixture>, close = vi.fn()) => (
 const previewRows = () =>
   within(screen.getByRole("list", { name: "Recent activity" })).queryAllByRole(
     "listitem",
+    { hidden: true },
   );
 async function markRead(h: ReturnType<typeof fixture>, channelId: string) {
   const items = h.session.unread
@@ -1484,7 +1469,7 @@ function fixture(
   const open = vi.fn<Navigation["open"]>(async () => ({ status: "opened" }));
   const host = {
     relay,
-    navigation: { open },
+    navigation: { open, dismiss: vi.fn<Navigation["dismiss"]>() },
     panels: {
       subscribe: () => () => {},
       snapshot: () => emptyPanels,
@@ -1656,7 +1641,7 @@ function fixture(
       <StrictMode>
         <InboxPage
           tabs={(props) =>
-            options.sheet ? (
+            options.sheet !== false ? (
               <InboxSheet
                 {...props}
                 host={host}
@@ -1749,12 +1734,12 @@ function fixture(
 /** Relay-hosted, so `media()` decides which variant the row loads. */
 const alicePicture = `https://relay.test/media/${"a".repeat(64)}.png`;
 const rows = () =>
-  within(screen.getByRole("list", { name: "Activity" })).queryAllByRole(
-    "listitem",
-  );
+  within(
+    screen.getByRole("list", { name: "Activity", hidden: true }),
+  ).queryAllByRole("listitem", { hidden: true });
 /** The element that scrolls the Activity list. */
 const scroller = () =>
-  screen.getByRole("list", { name: "Activity" }).parentElement;
+  screen.getByRole("list", { name: "Activity", hidden: true }).parentElement;
 const scrollTo = (top: number) => {
   const list = scroller();
   if (!list) throw new Error("Missing Activity scroller");
@@ -1768,25 +1753,24 @@ const queryReader = () =>
 const findReader = () =>
   screen.findByRole("region", { name: /^Conversation in / });
 const tabs = (name: string) =>
-  within(screen.getByRole("tablist", { name }))
-    .getAllByRole("tab")
+  within(screen.getByRole("tablist", { name, hidden: true }))
+    .getAllByRole("tab", { hidden: true })
     .map((tab) => tab.textContent);
 /** The side pane's tab list, beside the main pane's and the type filter's. */
 const sideTabList = () =>
   screen
-    .queryAllByRole("tablist")
+    .queryAllByRole("tablist", { hidden: true })
     .find(
       (item) =>
-        !["Activity tabs", "Activity type"].includes(
+        !["Activity tabs", "Activity views"].includes(
           item.getAttribute("aria-label") ?? "",
         ),
     );
 /** The selected Activity type tab's label. */
 const activityType = () =>
-  within(screen.getByRole("tablist", { name: "Activity type" })).queryByRole(
-    "tab",
-    { selected: true },
-  )?.textContent;
+  within(
+    screen.getByRole("tablist", { name: "Activity views", hidden: true }),
+  ).queryByRole("tab", { selected: true, hidden: true })?.textContent;
 /** The side pane's tabs, beside the main pane's "Activity tabs". */
 const sideTabs = () => {
   const list = sideTabList();
@@ -1794,7 +1778,9 @@ const sideTabs = () => {
     ? within(list)
         .getAllByRole("tab")
         .map((tab) => tab.textContent)
-    : [];
+    : screen
+        .queryAllByRole("dialog")
+        .map((dialog) => within(dialog).getByRole("heading").textContent);
 };
 /** A visit's presentation: every open, even of the same address, is a new object. */
 function visit(params?: InboxRoute): PageNavigation {
@@ -1826,9 +1812,31 @@ const savedFilters = (h: ReturnType<typeof fixture>) =>
       `buzz-view.v1:${JSON.stringify([h.owner.session.scope, "inbox:filters"])}`,
     ) ?? "null",
   );
+function dismissReaderSync() {
+  const conversation = queryReader();
+  const sheet = conversation?.closest<HTMLElement>('[role="dialog"]');
+  if (sheet)
+    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+}
+async function dismissReader() {
+  dismissReaderSync();
+  await waitFor(() => expect(queryReader()).not.toBeInTheDocument());
+}
 /** The From menu's trigger, which names the current choice. */
-const fromTrigger = () => screen.getByRole("button", { name: /^From / });
-const unreadToggle = () => screen.getByRole("switch", { name: "Unread" });
+const fromTrigger = () =>
+  screen.getByRole("button", { name: /^From /, hidden: true });
+async function unreadToggle() {
+  fireEvent.click(fromTrigger());
+  const menu = await screen.findByRole("menu", { name: "Activity filters" });
+  const choice = within(menu).getByRole("menuitemradio", {
+    name: "Unread only",
+  });
+  fireEvent.keyDown(choice, { key: "Escape" });
+  await waitFor(() =>
+    expect(screen.queryByRole("menu", { name: "Activity filters" })).toBeNull(),
+  );
+  return choice;
+}
 
 it.each([
   [{ activity: "all", attention: "unread" }, "All", "true"],
@@ -1850,7 +1858,7 @@ it.each([
     render(viewAt(h, visit(params)));
     await waitFor(() => expect(activityType()).toBe(label));
     expect(fromTrigger()).toHaveAccessibleName("From agents");
-    expect(unreadToggle()).toHaveAttribute("aria-checked", unread);
+    expect(await unreadToggle()).toHaveAttribute("aria-checked", unread);
     expect(savedFilters(h)).toEqual({
       sender: "agents",
       attention: unread === "true" ? "unread" : "all",
@@ -1867,7 +1875,7 @@ it("keeps the saved attention when a shortcut names only an activity", async () 
   );
   render(viewAt(h, visit({ activity: "threads" })));
   await waitFor(() => expect(activityType()).toBe("Threads"));
-  expect(unreadToggle()).toHaveAttribute("aria-checked", "true");
+  expect(await unreadToggle()).toHaveAttribute("aria-checked", "true");
   expect(savedFilters(h)).toMatchObject({ attention: "unread" });
 });
 
@@ -1919,7 +1927,7 @@ it("a route open applies its sender, keeping the other saved filters", async () 
     expect(fromTrigger()).toHaveAccessibleName("From agents"),
   );
   expect(activityType()).toBe("Threads");
-  expect(unreadToggle()).toBeChecked();
+  expect(await unreadToggle()).toHaveAttribute("aria-checked", "true");
   expect(savedFilters(h)).toMatchObject({
     activity: "threads",
     sender: "agents",
@@ -1948,7 +1956,9 @@ it.each([
     );
     await waitFor(() => expect(fromTrigger()).toHaveAccessibleName(from));
     expect(activityType()).toBe("All");
-    expect(screen.getByRole("list", { name: "Activity" })).toBeVisible();
+    expect(
+      screen.getByRole("list", { name: "Activity", hidden: true }),
+    ).toBeVisible();
   },
 );
 
@@ -1967,51 +1977,47 @@ it("a plain open leaves saved filters alone", async () => {
   await waitFor(() =>
     expect(fromTrigger()).toHaveAccessibleName("From people"),
   );
-  expect(unreadToggle()).toHaveAttribute("aria-checked", "true");
+  expect(await unreadToggle()).toHaveAttribute("aria-checked", "true");
   view.rerender(viewAt(h, visit()));
   expect(savedFilters(h)).toEqual(saved);
   expect(fromTrigger()).toHaveAccessibleName("From people");
   expect(activityType()).toBe("Mentions");
 });
 
-async function chooseFilter(label: string, control = "Activity type") {
-  if (control === "Attention") {
-    const toggle = screen.getByRole("switch", { name: "Unread" });
-    if (
-      toggle.getAttribute("aria-checked") !== String(label === "Unread only")
-    ) {
-      fireEvent.click(toggle);
-    }
-    expect(toggle).toHaveAttribute(
-      "aria-checked",
-      String(label === "Unread only"),
-    );
-    return;
-  }
+async function chooseFilter(label: string, control = "Activity views") {
+  await dismissReader();
   const user = userEvent.setup();
-  if (control === "Activity type") {
+  if (control === "Activity views") {
     await user.click(
-      within(screen.getByRole("tablist", { name: "Activity type" })).getByRole(
-        "tab",
-        { name: label === "All activity" ? "All" : label },
-      ),
+      within(
+        screen.getByRole("tablist", { name: "Activity views", hidden: true }),
+      ).getByRole("tab", { name: label === "All activity" ? "All" : label }),
     );
     return;
   }
   await user.click(fromTrigger());
-  const menu = await screen.findByRole("menu", { name: "From" });
+  const menu = await screen.findByRole("menu", { name: "Activity filters" });
   await user.click(
     within(menu).getByRole("menuitemradio", {
       name:
-        label === "Humans" ? "People" : label === "Everyone" ? "Anyone" : label,
+        control === "Attention"
+          ? label === "Unread only"
+            ? "Unread only"
+            : "All activity"
+          : label === "Humans"
+            ? "People"
+            : label === "Everyone"
+              ? "Anyone"
+              : label,
     }),
   );
   await waitFor(() =>
     expect(
-      screen.queryByRole("menu", { name: "From" }),
+      screen.queryByRole("menu", { name: "Activity filters" }),
     ).not.toBeInTheDocument(),
   );
 }
+
 it.each([false, true])(
   "Mentions excludes ordinary thread progress (selected=%s)",
   async (selectProgress) => {
@@ -2047,7 +2053,10 @@ it.each([false, true])(
       await findReader();
       await waitFor(() =>
         expect(
-          within(progressRow).getByRole("button", { name: /^Open / }),
+          within(progressRow).getByRole("button", {
+            name: /^Open /,
+            hidden: true,
+          }),
         ).toBeEnabled(),
       );
     }
@@ -2143,6 +2152,7 @@ it("lets a joined Guest read an Inbox item and change its personal unread state"
 async function openRowMenu(
   method: "context" | "keyboard" | "contextKey" = "context",
 ) {
+  await dismissReader();
   const row = rows()[0];
   if (!row) throw new Error("Missing inbox row");
   if (method === "context")
@@ -2202,15 +2212,14 @@ it.each(["Please review", "A thread update"])(
         within(row).queryByRole("img", { name: "Unread" }),
       ).not.toBeInTheDocument(),
     );
-    fireEvent.contextMenu(within(row).getByRole("button", { name: /^Open / }));
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Mark unread" }),
-    );
-    await waitFor(() =>
-      expect(
-        within(row).getByRole("img", { name: "Unread" }),
-      ).toBeInTheDocument(),
-    );
+    const item = h.owner.session.unread
+      .inbox()
+      .items.find((item) => item.id === row.dataset.inboxRow);
+    if (!item) throw new Error("Missing selected unread evidence");
+    await act(async () => h.owner.session.unread.markUnreadLocal(item.target));
+    expect(
+      within(row).getByRole("img", { name: "Unread", hidden: true }),
+    ).toBeInTheDocument();
     const journal = h.journal();
     act(() => h.archiveRoom(true, 100));
     await waitFor(() => expect(rows()).toHaveLength(0));
@@ -2247,13 +2256,14 @@ it("reads a reopened row again after its tab closes", async () => {
   open();
   await findReader();
   await waitFor(() => expect(unread()).not.toBeInTheDocument());
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   fireEvent.contextMenu(within(row()).getByRole("button", { name: /^Open / }));
   fireEvent.click(await screen.findByRole("menuitem", { name: "Mark unread" }));
   await waitFor(() => expect(unread()).toBeInTheDocument());
-  const side = sideTabList();
-  if (!side) throw new Error("Missing side tabs");
-  fireEvent.click(within(side).getByRole("button", { name: /^Close / }));
-  await waitFor(() => expect(queryReader()).not.toBeInTheDocument());
+  expect(queryReader()).not.toBeInTheDocument();
   expect(row()).not.toHaveAttribute("data-selected");
   open();
   await findReader();
@@ -2390,24 +2400,27 @@ it("filters real session evidence, opens an exact message and marks it read, and
   await waitFor(() =>
     expect(screen.getByRole("img", { name: "Unread" })).toBeInTheDocument(),
   );
-  await userEvent
-    .setup()
-    .click(screen.getByRole("button", { name: "Open Alice in #Design" }));
-  expect(screen.getByRole("img", { name: "Unread" })).toBeInTheDocument();
-  // Re-clicking reveals the message again, which takes focus.
-  await waitFor(() =>
-    expect(
-      reader().querySelector(`[data-message-id="${h.mention.id}"]`),
-    ).toHaveFocus(),
-  );
-  expect(
-    screen.queryByText(/Marked unread on this device/),
-  ).not.toBeInTheDocument();
+  // The manual unread intent survives filtering until a fresh explicit open.
   await chooseFilter("Unread only", "Attention");
   expect(rows()).toHaveLength(1);
   await chooseFilter("Threads");
   expect(rows()).toHaveLength(1);
   expect(screen.getByText("A thread update")).toBeInTheDocument();
+  await chooseFilter("Mentions");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Open Alice in #Design" }),
+  );
+  await waitFor(() =>
+    expect(
+      reader().querySelector(`[data-message-id="${h.mention.id}"]`),
+    ).toHaveFocus(),
+  );
+  await waitFor(() =>
+    expect(h.journal()?.localUnread[`msg:${h.mention.id}`]).toBeUndefined(),
+  );
+  expect(
+    screen.queryByText(/Marked unread on this device/),
+  ).not.toBeInTheDocument();
 });
 
 it("puts the actual channel or DM source below the sender without category tags", async () => {
@@ -2511,7 +2524,12 @@ it("renders all loaded rows without pagination while preserving unread filtering
   expect(
     screen.queryByRole("button", { name: "Show more" }),
   ).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("switch", { name: "Unread" }));
+  await chooseFilter(
+    (await unreadToggle()).getAttribute("aria-checked") === "true"
+      ? "All"
+      : "Unread only",
+    "Attention",
+  );
   expect(rows()).toHaveLength(51);
   expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
 });
@@ -2695,16 +2713,18 @@ it("with Unread off, Mark as read offers no Undo and keeps focus on its row", as
   ).not.toBeInTheDocument();
 });
 
-it("under Unread only, marking a neighbor read keeps the open conversation and its draft mounted", async () => {
+it("under Unread only, reading a neighbor in another view keeps the open conversation and its draft mounted", async () => {
   const h = fixture({ withWriter: true });
   render(h.view);
   await waitFor(() => expect(rows()).toHaveLength(2));
-  fireEvent.click(screen.getByRole("switch", { name: "Unread" }));
-  await waitFor(() =>
-    expect(screen.getByRole("switch", { name: "Unread" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    ),
+  await chooseFilter(
+    (await unreadToggle()).getAttribute("aria-checked") === "true"
+      ? "All"
+      : "Unread only",
+    "Attention",
+  );
+  await waitFor(async () =>
+    expect(await unreadToggle()).toHaveAttribute("aria-checked", "true"),
   );
   const thread = rows().find((row) =>
     row.textContent?.includes("A thread update"),
@@ -2724,14 +2744,16 @@ it("under Unread only, marking a neighbor read keeps the open conversation and i
     ).toHaveFocus(),
   );
   await waitFor(() =>
-    expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
-      "aria-busy",
-      "false",
-    ),
+    expect(
+      screen.getByRole("list", { name: "Activity", hidden: true }),
+    ).toHaveAttribute("aria-busy", "false"),
   );
   const opened = sideTabs();
-  fireEvent.click(
-    within(mention).getByRole("button", { name: /^Mark as read / }),
+  await act(async () =>
+    h.owner.session.unread.markThrough(
+      { kind: "message", channelId: "room", messageId: h.mention.id },
+      h.mention.id,
+    ),
   );
   await waitFor(() =>
     expect(h.journal()?.state.frontiers[`msg:${h.mention.id}`]).toBe(21),
@@ -2810,7 +2832,9 @@ it("opens local unread actions with the ContextMenu key without changing selecti
     ).not.toBeInTheDocument(),
   );
   fireEvent.click(
-    screen.getByRole("button", { name: "Close Thread · Design tab" }),
+    within(screen.getByRole("dialog", { name: "Design" })).getByRole("button", {
+      name: "Close",
+    }),
   );
   expect(queryReader()).not.toBeInTheDocument();
   const action = await openRowMenu("contextKey");
@@ -2961,6 +2985,7 @@ it("two-step read access loss during its first save stops before the second step
     expect(
       screen.getByRole("list", {
         name: "Activity",
+        hidden: true,
       }),
     ).toHaveAttribute("aria-busy", "false"),
   );
@@ -2974,7 +2999,7 @@ it("two-step read access loss during its first save stops before the second step
 it.each(["retry", "other", "blur"] as const)(
   "held read Retry completion preserves focus ownership (%s)",
   async (focusOwner) => {
-    const h = fixture();
+    const h = fixture({ withWriter: true });
     const user = userEvent.setup();
     render(h.view);
     await screen.findByText("Please review this");
@@ -2992,7 +3017,9 @@ it.each(["retry", "other", "blur"] as const)(
       ).toHaveFocus(),
     );
     const retry = screen.getByRole("button", { name: "Retry activity" });
-    const other = screen.getByRole("switch", { name: "Unread" });
+    const other = screen.getByRole("button", {
+      name: "Manage members of Design",
+    });
     const release = h.holdSave();
     try {
       retry.focus();
@@ -3014,14 +3041,15 @@ it.each(["retry", "other", "blur"] as const)(
     );
     expect(h.journal()?.state.frontiers[`msg:${h.mention.id}`]).toBe(21);
     // Focus the retired Retry owned moves to a stable Inbox control.
-    if (focusOwner === "retry") expect(fromTrigger()).toHaveFocus();
+    if (focusOwner === "retry")
+      expect(screen.getByRole("textbox")).toHaveFocus();
     else expect(focusOwner === "other" ? other : document.body).toHaveFocus();
     expect(reader()).toBe(detail);
   },
 );
 
 it("a second rejected Retry retains its focused control until a successful recovery", async () => {
-  const h = fixture();
+  const h = fixture({ withWriter: true });
   const user = userEvent.setup();
   render(h.view);
   await screen.findByText("Please review this");
@@ -3052,6 +3080,7 @@ it("a second rejected Retry retains its focused control until a successful recov
     expect(
       screen.getByRole("list", {
         name: "Activity",
+        hidden: true,
       }),
     ).toHaveAttribute("aria-busy", "false"),
   );
@@ -3061,7 +3090,7 @@ it("a second rejected Retry retains its focused control until a successful recov
   await waitFor(() =>
     expect(screen.queryByText("disk full")).not.toBeInTheDocument(),
   );
-  expect(fromTrigger()).toHaveFocus();
+  expect(screen.getByRole("textbox")).toHaveFocus();
   expect(reader()).toBe(detail);
 });
 
@@ -3083,7 +3112,7 @@ it.each([true, false])(
     h.failAux(false);
     const release = h.holdAux();
     const retry = screen.getByRole("button", { name: "Retry activity" });
-    const other = screen.getByRole("switch", { name: "Unread" });
+    const other = screen.getByRole("tab", { name: "All" });
     try {
       retry.focus();
       await user.keyboard("{Enter}");
@@ -3114,8 +3143,7 @@ it("keeps a From menu choice focused through incoming row updates", async () => 
   act(() => trigger.focus());
   await user.keyboard("{Enter}");
   const people = await screen.findByRole("menuitemradio", { name: "People" });
-  await user.keyboard("{End}");
-  await user.keyboard("{ArrowUp}");
+  people.focus();
   await waitFor(() => expect(people).toHaveFocus());
   const incoming = message(h.alice, "room", "Another review request", 50, [
     ["p", h.viewer.pubkey],
@@ -3158,18 +3186,15 @@ it("Mark as read keeps the type, From and Unread choices", async () => {
   );
   await waitFor(() => expect(rows()).toHaveLength(1));
 
-  const expectKept = (unread = "true") => {
+  const expectKept = async (unread = "true") => {
     expect(activityType()).toBe("Mentions");
     expect(fromTrigger()).toHaveAccessibleName("From agents");
-    expect(screen.getByRole("switch", { name: "Unread" })).toHaveAttribute(
-      "aria-checked",
-      unread,
-    );
+    expect(await unreadToggle()).toHaveAttribute("aria-checked", unread);
   };
-  expectKept();
+  await expectKept();
   await chooseFilter("All messages", "Attention");
   await waitFor(() => expect(rows()).toHaveLength(2));
-  expectKept("false");
+  await expectKept("false");
 });
 
 it("names the page Activity in its region, page tab and list", async () => {
@@ -3177,39 +3202,40 @@ it("names the page Activity in its region, page tab and list", async () => {
   render(h.view);
   await waitFor(() => expect(rows()).toHaveLength(2));
   expect(screen.getByRole("region", { name: "Activity" })).toBeInTheDocument();
-  expect(tabs("Activity tabs")).toEqual(["Activity"]);
-  expect(screen.getByRole("list", { name: "Activity" })).toBeInTheDocument();
+  expect(screen.queryByRole("tablist", { name: "Activity tabs" })).toBeNull();
+  expect(
+    screen.getByRole("list", { name: "Activity", hidden: true }),
+  ).toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Inbox" })).toBeNull();
   expect(screen.queryByText(/\binbox\b/i)).toBeNull();
 });
 
 it.each([
-  ["Anyone", "From anyone", "ghost"],
-  ["People", "From people", "subtle"],
-  ["Agents", "From agents", "subtle"],
+  ["Anyone", "From anyone"],
+  ["People", "From people"],
+  ["Agents", "From agents"],
 ])(
-  "From says %s in its name and tooltip, filled only while it narrows",
-  async (choice, name, variant) => {
+  "Activity filters name the %s sender choice in their accessible name and tooltip",
+  async (choice, name) => {
     const h = fixture();
     render(h.view);
     await waitFor(() => expect(rows()).toHaveLength(2));
     if (choice !== "Anyone")
       await chooseFilter(choice === "People" ? "Humans" : choice, "Sender");
     const trigger = fromTrigger();
-    // The visible label stays "From"; its name and tooltip say the choice.
+    // The icon-only filter names the current sender choice.
     expect(trigger).toHaveAccessibleName(name);
-    expect(trigger).toHaveTextContent(/^From$/);
-    expect(trigger).toHaveAttribute("data-variant", variant);
+
     act(() => trigger.blur());
     fireEvent.keyDown(window, { key: "Tab" });
     act(() => trigger.focus());
     expect(await screen.findByRole("tooltip")).toHaveTextContent(name);
     const user = userEvent.setup();
     await user.click(trigger);
-    const menu = await screen.findByRole("menu", { name: "From" });
+    const menu = await screen.findByRole("menu", { name: "Activity filters" });
     // Choices are plain words.
     expect(
-      within(menu)
+      within(within(menu).getByRole("group", { name: "From" }))
         .getAllByRole("menuitemradio")
         .map((item) => item.textContent),
     ).toEqual(["Anyone", "People", "Agents"]);
@@ -3221,16 +3247,21 @@ it.each([
   },
 );
 
-it("orders the toolbar as tabs, From, then Unread", async () => {
+it("keeps sender and unread choices in the collection filter menu", async () => {
   const h = fixture();
   render(h.view);
   await waitFor(() => expect(rows()).toHaveLength(2));
-  const tablist = screen.getByRole("tablist", { name: "Activity type" });
-  const unread = screen.getByRole("switch", { name: "Unread" });
-  const follows = (a: Node, b: Node) =>
-    !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-  expect(follows(tablist, fromTrigger())).toBe(true);
-  expect(follows(fromTrigger(), unread)).toBe(true);
+  expect(screen.queryByRole("switch", { name: "Unread" })).toBeNull();
+  await userEvent.click(fromTrigger());
+  const menu = await screen.findByRole("menu", { name: "Activity filters" });
+  expect(within(menu).getByRole("group", { name: "From" })).toBeVisible();
+  expect(within(menu).getByRole("group", { name: "Show" })).toBeVisible();
+  expect(
+    within(menu).getByRole("menuitemradio", { name: "All activity" }),
+  ).toHaveAttribute("aria-checked", "true");
+  expect(
+    within(menu).getByRole("menuitemradio", { name: "Unread only" }),
+  ).toHaveAttribute("aria-checked", "false");
 });
 
 it("combines the existing filter choices without placeholder actions", async () => {
@@ -3241,20 +3272,24 @@ it("combines the existing filter choices without placeholder actions", async () 
   expect(trigger).toHaveAccessibleName("From anyone");
   expect(screen.queryByRole("combobox")).toBeNull();
   // Inbox's own tab holds the list; its only other tabs are the type filter.
-  expect(tabs("Activity tabs")).toEqual(["Activity"]);
-  expect(tabs("Activity type")).toEqual([
+  expect(screen.queryByRole("tablist", { name: "Activity tabs" })).toBeNull();
+  expect(tabs("Activity views")).toEqual([
     "All",
     "Threads",
+    "Direct",
+    "Working",
+    "Waiting",
+    "Channels",
     "Mentions",
     "DMs",
     "Reactions",
   ]);
   expect(activityType()).toBe("All");
   expect(
-    within(screen.getByRole("tabpanel", { name: "Activity" }))
+    within(screen.getByRole("region", { name: "Activity" }))
       .queryAllByRole("tablist")
       .map((list) => list.getAttribute("aria-label")),
-  ).toEqual(["Activity type"]);
+  ).toEqual(["Activity views"]);
   expect(
     screen.queryByRole("button", { name: /Mark shown as read|Mark unread/ }),
   ).toBeNull();
@@ -3270,17 +3305,14 @@ it("combines the existing filter choices without placeholder actions", async () 
     ),
   ).toBeNull();
   expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
-  expect(screen.getByRole("switch", { name: "Unread" })).toHaveAttribute(
-    "aria-checked",
-    "false",
-  );
+  expect(await unreadToggle()).toHaveAttribute("aria-checked", "false");
   const user = userEvent.setup();
   trigger.focus();
   await user.keyboard("{Enter}");
-  const menu = await screen.findByRole("menu", { name: "From" });
+  const menu = await screen.findByRole("menu", { name: "Activity filters" });
   // From is a single choice; types are tabs, not menu items.
   expect(
-    within(menu)
+    within(within(menu).getByRole("group", { name: "From" }))
       .getAllByRole("menuitemradio")
       .map((item) => [item.textContent, item.getAttribute("aria-checked")]),
   ).toEqual([
@@ -3349,30 +3381,26 @@ it("does not accept a second row selection while its explicit read is pending", 
       screen.getByRole("button", { name: "Open Alice in DM · Alice" }),
     );
     await waitFor(() => expect(h.saveStarted()).toBe(true));
+    await dismissReader();
     const other = rows().find((row) =>
       row.textContent?.includes("Please review this"),
     );
     if (!other) throw Error("missing second row");
     const button = within(other).getByRole("button", { name: /^Open / });
     expect(button).toBeDisabled();
-    expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
-      "aria-busy",
-      "true",
-    );
-    fireEvent.click(button);
-    expect(sideTabs()).toEqual(["Alice"]);
     expect(
-      screen.getByRole("region", { name: "Conversation in Alice" }),
-    ).toBeInTheDocument();
+      screen.getByRole("list", { name: "Activity", hidden: true }),
+    ).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(button);
+    expect(queryReader()).not.toBeInTheDocument();
     expect(h.journal()?.state.frontiers[`msg:${h.mention.id}`]).toBeUndefined();
   } finally {
     await act(async () => release());
   }
   await waitFor(() =>
-    expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
-      "aria-busy",
-      "false",
-    ),
+    expect(
+      screen.getByRole("list", { name: "Activity", hidden: true }),
+    ).toHaveAttribute("aria-busy", "false"),
   );
   const other = rows().find((row) =>
     row.textContent?.includes("Please review this"),
@@ -3532,6 +3560,7 @@ it("routine delayed publication does not cancel Retry for a failed mark-unread s
   });
   expect(h.journal()?.state.frontiers[`msg:${h.mention.id}`]).toBe(21);
   const revision = h.owner.session.unread.revision();
+  dismissReaderSync();
   fireEvent.contextMenu(
     within(rows()[0] as HTMLElement).getByRole("button", { name: /^Open / }),
     {
@@ -3666,7 +3695,10 @@ it("a Solo chat row includes ordinary agent responses under All, not DMs, keepin
   );
   expect(h.journal()?.revision).toBe(before + 1);
   expect(
-    within(rows()[1] as HTMLElement).getByRole("img", { name: "Unread" }),
+    within(rows()[1] as HTMLElement).getByRole("img", {
+      name: "Unread",
+      hidden: true,
+    }),
   ).toBeInTheDocument();
   // The sidebar keeps Solo chats apart from direct messages; so does Inbox.
   await chooseFilter("DMs");
@@ -3709,17 +3741,12 @@ it("Inbox keeps an open Solo chat timeline when a late reply regroups its mentio
   expect(
     screen.queryByRole("textbox", { name: "Reply to thread" }),
   ).not.toBeInTheDocument();
-  const [row] = rows();
-  if (!row) throw Error("Missing regrouped row");
-  // Reselecting the regrouped row keeps its Solo chat timeline.
-  fireEvent.click(within(row).getByRole("button", { name: /^Open / }));
-  await act(async () => {});
+  // Live regrouping preserves the captured timeline rather than replacing it
+  // with the thread a fresh open of this row would now choose.
   expect(
     screen.getByRole("textbox", { name: "Message this conversation" }),
-  ).toHaveValue("Draft in progress");
-  expect(
-    screen.queryByRole("textbox", { name: "Reply to thread" }),
-  ).not.toBeInTheDocument();
+  ).toBe(editor);
+  expect(editor).toHaveValue("Draft in progress");
 });
 
 it.each(["preview", "name", "history"])(
@@ -3941,10 +3968,12 @@ it("keeps the captured reply selected when its older root is verified", async ()
     item.textContent?.includes("Orphan addressed reply"),
   );
   if (!regrouped) throw Error("Missing regrouped row");
-  const reopen = within(regrouped).getByRole("button", { name: /^Open / });
+  const reopen = within(regrouped).getByRole("button", {
+    name: /^Open /,
+    hidden: true,
+  });
   expect(reopen).toHaveAttribute("aria-current", "page");
-  // Reselecting the regrouped row keeps the captured visit in its one tab.
-  fireEvent.click(reopen);
+  // Regrouping retains the already captured visit while its modal is open.
   expect(reopen).toHaveAttribute("aria-current", "page");
   expect(sideTabs()).toHaveLength(1);
   expect(h.open).not.toHaveBeenCalled();
@@ -4034,18 +4063,20 @@ it("shows only the exact unfinished row's placeholder through held edits and ret
     if (!unfinished) throw Error("Missing pending preview row");
     expect(unfinished).not.toHaveTextContent("OLD BODY");
     expect(
-      within(unfinished).getByRole("button", { name: /^Open / }),
+      within(unfinished).getByRole("button", { name: /^Open /, hidden: true }),
     ).toHaveAccessibleDescription("Preview updating…");
     const unaffected = rows().find((row) =>
       row.textContent?.includes("A thread update"),
     );
     expect(unaffected).toBeDefined();
     expect(unaffected).not.toHaveTextContent("Preview updating…");
+    await dismissReader();
     fireEvent.click(within(unfinished).getByRole("button", { name: /^Open / }));
     expect(
       screen.getByRole("button", {
         name: /^Open /,
         current: "page",
+        hidden: true,
       }),
     ).toHaveAccessibleDescription("Preview updating…");
     expect(unfinished).not.toHaveTextContent("OLD BODY");
@@ -4058,6 +4089,7 @@ it("shows only the exact unfinished row's placeholder through held edits and ret
       screen.getByRole("button", {
         name: /^Open /,
         current: "page",
+        hidden: true,
       }),
     ).toHaveAccessibleDescription("Preview unavailable. Retry activity."),
   );
@@ -4073,6 +4105,7 @@ it("shows only the exact unfinished row's placeholder through held edits and ret
     screen.getByRole("button", {
       name: /^Open /,
       current: "page",
+      hidden: true,
     }),
   ).toHaveAccessibleDescription("CURRENT BODY");
   expect(rows().some((row) => row.textContent?.includes("CURRENT BODY"))).toBe(
@@ -4113,7 +4146,9 @@ it("freezes the top-level origin coordinate when read-state switches representat
   if (!selectedRow) throw Error("Missing regrouped selected row");
   expect(selectedRow).toHaveAttribute("data-selected");
   const steps = h.readSteps.length;
-  fireEvent.click(within(selectedRow).getByRole("button", { name: /^Open / }));
+  expect(
+    within(selectedRow).getByRole("button", { name: /^Open /, hidden: true }),
+  ).toHaveAttribute("aria-current", "page");
   expect(selectedRow).toHaveAttribute("data-selected");
   expect(sideTabs()).toHaveLength(1);
   expect(h.readSteps).toHaveLength(steps);
@@ -4195,6 +4230,7 @@ it("keeps the exact selected group visibly incomplete when a held reply regroups
     const selected = screen.getByRole("button", {
       name: /^Open /,
       current: "page",
+      hidden: true,
     });
     expect(selected).toHaveAccessibleDescription("Preview updating…");
     expect(selected.closest("li")).not.toHaveTextContent("ORIGINAL REPLY");
@@ -4295,7 +4331,7 @@ it("preserves a failed captured read across verified root regrouping", async () 
   expect(h.readSteps.map((step) => step.id)).toEqual([orphan.id, orphan.id]);
 });
 
-it("DM read Retry retains the original cutoff and survives re-click of the selected row", async () => {
+it("DM read Retry retains the original cutoff while later activity arrives", async () => {
   const clickedAt = Math.floor(Date.now() / 1000);
   const now = vi.spyOn(Date, "now").mockReturnValue(clickedAt * 1000);
   const h = fixture({ withDm: true });
@@ -4316,7 +4352,6 @@ it("DM read Retry retains the original cutoff and survives re-click of the selec
     h.failSave();
     fireEvent.click(row);
     expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
-    fireEvent.click(row);
     now.mockReturnValue((clickedAt + 120) * 1000);
     const later = message(
       h.alice,
@@ -4363,19 +4398,17 @@ it("Retry with a ready roster waits for both evidence reads before retrying sync
       ),
     );
     expect(h.retrySync).not.toHaveBeenCalled();
-    expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
-      "aria-busy",
-      "true",
-    );
+    expect(
+      screen.getByRole("list", { name: "Activity", hidden: true }),
+    ).toHaveAttribute("aria-busy", "true");
   } finally {
     await act(async () => release());
   }
   await waitFor(() => expect(h.retrySync).toHaveBeenCalledOnce());
   await waitFor(() =>
-    expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
-      "aria-busy",
-      "false",
-    ),
+    expect(
+      screen.getByRole("list", { name: "Activity", hidden: true }),
+    ).toHaveAttribute("aria-busy", "false"),
   );
 });
 
@@ -4392,9 +4425,11 @@ it("opens a thread row in a side tab beside Inbox, at its exact message", async 
     name: "Conversation in Design",
   });
   // The list stays Inbox's own tab; the conversation opens beside it.
-  expect(tabs("Activity tabs")).toEqual(["Activity"]);
-  expect(sideTabs()).toEqual(["Thread · Design"]);
-  expect(screen.getByRole("list", { name: "Activity" })).toBeInTheDocument();
+  expect(screen.queryByRole("tablist", { name: "Activity tabs" })).toBeNull();
+  expect(sideTabs()).toEqual(["Design"]);
+  expect(
+    screen.getByRole("list", { name: "Activity", hidden: true }),
+  ).toBeInTheDocument();
   expect(
     within(tab).getByRole("region", { name: "Thread messages" }),
   ).toBeInTheDocument();
@@ -4423,11 +4458,11 @@ it("replaces the tab the previous row opened", async () => {
     ).toBeInTheDocument(),
   );
   await waitFor(() =>
-    expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
-      "aria-busy",
-      "false",
-    ),
+    expect(
+      screen.getByRole("list", { name: "Activity", hidden: true }),
+    ).toHaveAttribute("aria-busy", "false"),
   );
+  await dismissReader();
   fireEvent.click(row("Please review"));
   await waitFor(() =>
     expect(
@@ -4438,7 +4473,9 @@ it("replaces the tab the previous row opened", async () => {
   expect(
     reader().querySelector(`[data-message-id="${h.reply.id}"]`),
   ).not.toBeInTheDocument();
-  expect(row("Please review").closest("li")).toHaveAttribute("data-selected");
+  expect(
+    rows().find((item) => item.textContent?.includes("Please review")),
+  ).toHaveAttribute("data-selected");
 });
 
 it("opens a DM row's whole conversation in a tab", async () => {
@@ -4481,10 +4518,12 @@ function seedDm(
       h.owner.session.unread
         .inbox()
         .items.find((item) => item.channelId === "dm-room"),
-    open: () =>
+    open: () => {
+      dismissReaderSync();
       fireEvent.click(
         screen.getByRole("button", { name: "Open Alice in DM · Alice" }),
-      ),
+      );
+    },
   };
 }
 /** jsdom has no layout or window focus. Lays out thread history alone, each
@@ -4561,11 +4600,7 @@ function threadLayout() {
 }
 /** The open DM tab's shape: its whole timeline, or one of its threads. */
 async function dmTabShows(shape: "whole" | "thread") {
-  await waitFor(() =>
-    expect(sideTabs()).toEqual([
-      shape === "whole" ? "Alice" : "Thread · Alice",
-    ]),
-  );
+  await waitFor(() => expect(sideTabs()).toEqual(["Alice"]));
   const tab = await screen.findByRole("region", {
     name: "Conversation in Alice",
   });
@@ -4629,7 +4664,7 @@ it("opens a DM whole when an older unread thread reply precedes newer top-level 
   expect(h.open).not.toHaveBeenCalled();
 });
 
-it("opens a DM whole when an older unread top-level message precedes a newer thread reply, and re-clicking keeps it whole once read", async () => {
+it("opens a DM whole for mixed unread activity, then reopens its newest reply thread after dismissal", async () => {
   const h = fixture();
   const root = message(h.viewer, "dm-room", "Our DM topic", 23);
   const top = message(h.alice, "dm-room", "A top-level message", 24);
@@ -4654,7 +4689,7 @@ it("opens a DM whole when an older unread top-level message precedes a newer thr
   );
   dm.open();
   await act(async () => {});
-  await dmTabShows("whole");
+  await dmTabShows("thread");
 });
 
 it("re-clicking a DM row opened as a thread opens the whole DM once a top-level message arrives", async () => {
@@ -4715,7 +4750,17 @@ it.each([false, true])(
     act(() => h.emit([later, top]));
     await waitFor(() => expect(dm.row()?.messageIds).toContain(top.id));
     // Returning to Activity restores the thread tab, which still reads.
-    if (returned) render(h.view);
+    if (returned)
+      render(
+        viewAt(
+          h,
+          visit({
+            channelId: "dm-room",
+            messageId: reply.id,
+            threadId: root.id,
+          }),
+        ),
+      );
     const tab = await dmTabShows("thread");
     // The thread shows its new reply, but never `top`.
     await waitFor(() =>
@@ -4741,7 +4786,7 @@ it.each([false, true])(
     );
     if (!row) throw new Error("Missing DM row");
     expect(
-      within(row).getByRole("img", { name: "Unread" }),
+      within(row).getByRole("img", { name: "Unread", hidden: true }),
     ).toBeInTheDocument();
     // Re-clicking opens the whole DM, which shows it.
     dm.open();
@@ -4789,10 +4834,9 @@ it.each([false, true])(
     render(h.view);
     await waitFor(() => expect(rows()).toHaveLength(2));
     await waitFor(() =>
-      expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
-        "aria-busy",
-        "false",
-      ),
+      expect(
+        screen.getByRole("list", { name: "Activity", hidden: true }),
+      ).toHaveAttribute("aria-busy", "false"),
     );
     await act(async () => {
       await h.owner.session.unread.enterChannel("room");
@@ -4813,10 +4857,9 @@ it.each([false, true])(
       ).toBeInTheDocument(),
     );
     await waitFor(() =>
-      expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
-        "aria-busy",
-        "false",
-      ),
+      expect(
+        screen.getByRole("list", { name: "Activity", hidden: true }),
+      ).toHaveAttribute("aria-busy", "false"),
     );
     expect(h.journal()?.localUnread["message-force:room"]).toBe(force);
     if (!leftChannel)
@@ -5041,17 +5084,21 @@ it("a failed send keeps its draft and its row", async () => {
   expect(editor).toHaveValue("Retain failed response");
 });
 
-it("moves through the Activity type tabs with arrows, Home and End, then tabs out to From", async () => {
+it("moves through Activity views with arrows, Home and End and tabs between the filter and list", async () => {
   const h = fixture();
   render(h.view);
   await waitFor(() => expect(rows()).toHaveLength(2));
   const user = userEvent.setup();
-  const list = screen.getByRole("tablist", { name: "Activity type" });
+  const list = screen.getByRole("tablist", {
+    name: "Activity views",
+    hidden: true,
+  });
   const tab = () => within(list).getAllByRole("tab");
   const focusable = () => tab().filter((item) => item.tabIndex === 0);
   expect(focusable()).toHaveLength(1);
   expect(focusable()[0]).toHaveAttribute("aria-selected", "true");
-  const [all, , , , last] = tab();
+  const all = tab()[0],
+    last = tab().at(-1);
   if (!all || !last) throw new Error("Missing Activity type tabs");
   act(() => all.focus());
   await user.keyboard("{ArrowRight}");
@@ -5064,6 +5111,11 @@ it("moves through the Activity type tabs with arrows, Home and End, then tabs ou
   expect(all).toHaveFocus();
   expect(focusable()).toEqual([all]);
   await user.tab();
+  expect(
+    within(rows()[0] as HTMLElement).getByRole("button", { name: /^Open / }),
+  ).toHaveFocus();
+  act(() => all.focus());
+  await user.tab({ shift: true });
   expect(fromTrigger()).toHaveFocus();
 });
 
@@ -5078,21 +5130,13 @@ it.each([
     const h = fixture({ withWriter: true });
     render(h.view);
     await waitFor(() => expect(rows()).toHaveLength(2));
-    const thread = rows().find((row) =>
-      row.textContent?.includes("A thread update"),
-    );
     const mention = rows().find((row) =>
       row.textContent?.includes("Please review"),
     );
-    if (!thread || !mention) throw new Error("Missing fixture rows");
-    fireEvent.click(within(thread).getByRole("button", { name: /^Open / }));
+    if (!mention) throw new Error("Missing fixture rows");
+    // The floating Activity composer stays available while a row read saves.
     const editor = await screen.findByRole("textbox");
-    await waitFor(() =>
-      expect(
-        reader().querySelector(`[data-message-id="${h.reply.id}"]`),
-      ).toHaveFocus(),
-    );
-    const list = screen.getByRole("list", { name: "Activity" });
+    const list = screen.getByRole("list", { name: "Activity", hidden: true });
     await waitFor(() => expect(list).toHaveAttribute("aria-busy", "false"));
     if (outcome === "fails") h.failSave();
     const release = h.holdSave();
@@ -5156,7 +5200,7 @@ it("shows reactions without unread actions and turns Unread off when selecting R
     screen.queryByRole("button", { name: /reacted with/ }),
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("tab", { name: "Reactions" }));
-  expect(screen.getByRole("switch", { name: "Unread" })).not.toBeChecked();
+  expect(await unreadToggle()).toHaveAttribute("aria-checked", "false");
   fireEvent.click(
     await screen.findByRole("button", { name: /Alice reacted with/ }),
   );

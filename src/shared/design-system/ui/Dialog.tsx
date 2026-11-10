@@ -349,6 +349,15 @@ export function Dialog({
       onOpenChange={(next, details) => {
         if (
           !next &&
+          details.reason === "escape-key" &&
+          "shiftKey" in details.event &&
+          details.event.shiftKey
+        ) {
+          details.cancel();
+          return;
+        }
+        if (
+          !next &&
           (preventClose ||
             (details.reason === "outside-press" && windowDrag.wasWindowDrag()))
         ) {

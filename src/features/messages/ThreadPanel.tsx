@@ -944,8 +944,16 @@ function ThreadMessages({
   }, [revealSelected, revealRequest]);
   const revealSignal =
     inlineReveal ?? (positionedVisit ? undefined : navigation?.signal);
+  const canFocusTarget = useCallback(() => {
+    // Exact-target composers do not autofocus. Editing begun while its row is
+    // loading supersedes the reveal's eventual focus, not its position or cue.
+    return !scroller.current?.ownerDocument.activeElement?.closest(
+      '[role="textbox"], [role="combobox"], input, textarea, select, [contenteditable="true"]',
+    );
+  }, []);
   const revealed = useMessageReveal({
     scroller,
+    canFocus: canFocusTarget,
     focus:
       revealFocus !== false &&
       !(

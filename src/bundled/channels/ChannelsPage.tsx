@@ -1402,7 +1402,7 @@ function ChannelWorkspace({
         focused !== document.body &&
         focused.isConnected &&
         !focused.closest(
-          '[inert], [hidden], [aria-hidden="true"], [role="menu"]',
+          '[inert], [hidden], [aria-hidden="true"], [role="menu"], [role="dialog"][data-closed]',
         );
       if (!preserved) {
         const target =
@@ -1410,7 +1410,9 @@ function ChannelWorkspace({
             ?.closest("[data-main-workspace]")
             ?.querySelector<HTMLElement>(
               '[role="tab"][data-tab-value="conversation"], [data-workspace-identity] button',
-            ) ?? (solo ? historyContainer.current : settingsTrigger.current);
+            ) ??
+          settingsTrigger.current ??
+          historyContainer.current;
         target?.focus({ preventScroll: true });
       }
     }

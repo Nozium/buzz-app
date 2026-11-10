@@ -372,7 +372,11 @@ it("confirms, cancels, recovers and retries a card's deletion", async () => {
     first.result.reject(new PublishRejected("Deletion refused")),
   );
   fireEvent.click(
-    within(await screen.findByRole("alertdialog")).getByText("Close"),
+    within(
+      (await screen.findByRole("alertdialog")).querySelector(
+        ".buzz-dialog-actions",
+      ) as HTMLElement,
+    ).getByRole("button", { name: "Close" }),
   );
   // Recovery belongs to the card's channel, not every card on the page.
   expect(

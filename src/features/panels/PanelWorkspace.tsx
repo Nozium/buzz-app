@@ -252,12 +252,30 @@ export function PanelWorkspace({
       event.target instanceof Element ? event.target : document.activeElement;
     const owns = (event: Event) => {
       const element = root.current;
+      const from = source(event);
+      const dialog = from?.closest('[role="dialog"]');
+      const modalSheet = element?.closest(
+        '[role="dialog"][aria-modal="true"]:has([data-panel-sheet-body])',
+      );
+      // Native menu requests can arrive before the opening sheet's autofocus.
+      // Its modal scope owns them while the old conversation still holds focus.
+      if (
+        visible() &&
+        modalSheet &&
+        !(event.target instanceof Element) &&
+        !document.querySelector(
+          'dialog[open]:not(:has([data-panel-sheet-body])), [aria-modal="true"]:not(:has([data-panel-sheet-body]))',
+        )
+      )
+        return true;
       return (
         visible() &&
-        (source(event)?.closest(
-          "[data-panel-workspace], [data-main-workspace]",
-        ) ?? (main || event.target instanceof Element ? null : element)) ===
-          element
+        (from?.closest("[data-panel-workspace], [data-main-workspace]") ??
+          (dialog?.contains(element)
+            ? element
+            : main || event.target instanceof Element
+              ? null
+              : element)) === element
       );
     };
     const close = (event: Event) => {
@@ -306,11 +324,18 @@ export function PanelWorkspace({
     };
     const showNext = step(1);
     const showPrevious = step(-1);
+    const closeAll = (event: Event) => {
+      if (event.defaultPrevented || !tabMenu?.closeAll || !owns(event)) return;
+      event.preventDefault();
+      flushSync(() => tabMenu.closeAll());
+    };
     window.addEventListener("buzz:close-active-tab", close);
+    window.addEventListener("buzz:close-all-tabs", closeAll);
     window.addEventListener("buzz:next-tab", showNext);
     window.addEventListener("buzz:previous-tab", showPrevious);
     return () => {
       window.removeEventListener("buzz:close-active-tab", close);
+      window.removeEventListener("buzz:close-all-tabs", closeAll);
       window.removeEventListener("buzz:next-tab", showNext);
       window.removeEventListener("buzz:previous-tab", showPrevious);
     };
@@ -340,11 +365,12 @@ export function PanelWorkspace({
         ) ??
         root.current?.querySelector<HTMLElement>(
           "[data-workspace-identity] button",
-        );
+        ) ??
+        (sheet && previous.current !== undefined ? root.current : undefined);
       awaitContent.current?.();
       awaitContent.current = undefined;
       const panel =
-        focusContent.current && previous.current !== selected
+        (focusContent.current && previous.current !== selected) || sheet
           ? document.getElementById(panelId(selected))
           : undefined;
       const content = panel?.querySelector<HTMLElement>(contentTarget);
@@ -576,6 +602,10 @@ export function PanelWorkspace({
                         if (!closed && !details.length) return false;
                         // Focus follows the chosen detail's removal to its owner.
                         if (local) closingTab.current = local.id;
+                        // With one item left the tab strip disappears; its
+                        // surviving content becomes the focus destination.
+                        focusTab.current = true;
+                        focusContent.current = true;
                         for (const tab of details)
                           tab.close({ keepOwner: true });
                         return true;

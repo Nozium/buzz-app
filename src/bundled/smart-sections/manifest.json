@@ -3,5 +3,5 @@
   "id": "buzz.smart-sections",
   "name": "Smart sections",
   "description": "Describe a live sidebar collection, preview its rows, and add it with AI.",
-  "discovery": { "category": "productivity", "tags": ["Agents"] }
+  "discovery": { "category": "productivity", "tags": ["tasks", "people"] }
 }

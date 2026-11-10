@@ -52,6 +52,7 @@ export function PanelSheet({
   close?: (() => void) | undefined;
 }) {
   const source = useRef<HTMLSpanElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [railAnchor, setRailAnchor] = useState<HTMLElement | null>(null);
   const [headers, setHeaders] = useState<readonly SheetHeader[]>([]);
@@ -116,8 +117,18 @@ export function PanelSheet({
         size="wide"
         height="stable"
         bodyLayout="flex"
-        initialFocus="dialog"
+        initialFocus={composer ? "dialog" : false}
+        finalFocus={false}
+        // Non-modal rails leave the page's own Escape shortcuts in charge.
+        onEscape={() =>
+          !composer &&
+          !body.current
+            ?.closest('[role="dialog"]')
+            ?.contains(document.activeElement)
+        }
         onOpenChange={(next) => {
+          // A guard may keep this sheet open. Preserve its invoking control so
+          // the confirmation can return there; the owner restores committed closes.
           if (!next) (header?.close ?? close)?.();
         }}
         onOpenChangeComplete={(next) => {
@@ -125,6 +136,7 @@ export function PanelSheet({
         }}
       >
         <div
+          ref={body}
           className={styles.sheetBody}
           data-panel-sheet-body=""
           tabIndex={-1}

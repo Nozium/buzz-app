@@ -1119,9 +1119,7 @@ it.each([
     const f = fixture();
     f.mount();
     const user = userEvent.setup();
-    await user.click(
-      await screen.findByRole("button", { name: "Chat actions" }),
-    );
+    await user.click(await headerAction("Chat actions"));
     await user.click(await screen.findByRole("menuitem", { name: label }));
     // Archive is undoable from its result toast, so only Delete confirms.
     if (title) {
@@ -1180,7 +1178,7 @@ it.each([
     const f = fixture({ others: [other] });
     f.mountWithSidebar();
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: trigger }));
+    await user.click(await headerAction(trigger));
     await user.click(await screen.findByRole("menuitem", { name: label }));
     // Archive is undoable from its result toast, so only Delete confirms.
     if (title) {
@@ -1205,7 +1203,7 @@ it("offers the header's chat actions from the sidebar row, plus inline Rename", 
   f.mountWithSidebar();
   const user = userEvent.setup();
   const items = async (trigger: string) => {
-    await user.click(await screen.findByRole("button", { name: trigger }));
+    await user.click(await headerAction(trigger));
     const menu = await screen.findByRole("menu", { name: trigger });
     await within(menu).findByRole("menuitem", { name: "Delete chat" });
     const names = within(menu)
@@ -1234,7 +1232,7 @@ it("runs the header's own chat actions and returns focus to Chat actions", async
   Object.assign(f.session.soloPreferences, { writable: true, assign });
   f.mount();
   const user = userEvent.setup();
-  const trigger = await screen.findByRole("button", { name: "Chat actions" });
+  const trigger = await headerAction("Chat actions");
   await user.click(trigger);
   (await screen.findByRole("menuitem", { name: "Move to" })).focus();
   await user.keyboard("{ArrowRight}");
@@ -1247,7 +1245,9 @@ it("runs the header's own chat actions and returns focus to Chat actions", async
   );
   const dialog = await screen.findByRole("dialog", { name: "Edit chat" });
   await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Edit chat" })).toBeNull(),
+  );
   await waitFor(() => expect(trigger).toHaveFocus());
 });
 
@@ -1293,7 +1293,7 @@ it("reports a failed header move beside the header and retries it", async () => 
   act(() => publish(failed));
   expect(screen.queryByText("Chat wasn’t moved")).toBeNull();
   act(() => publish(base));
-  await user.click(await screen.findByRole("button", { name: "Chat actions" }));
+  await user.click(await headerAction("Chat actions"));
   (await screen.findByRole("menuitem", { name: "Move to" })).focus();
   await user.keyboard("{ArrowRight}");
   await user.click(await screen.findByRole("menuitem", { name: "Work" }));
@@ -1311,13 +1311,15 @@ it("returns focus to Chat actions when its confirmation is cancelled", async () 
   const f = fixture();
   f.mount();
   const user = userEvent.setup();
-  const trigger = await screen.findByRole("button", { name: "Chat actions" });
+  const trigger = await headerAction("Chat actions");
   await user.click(trigger);
   await user.click(
     await screen.findByRole("menuitem", { name: "Delete chat" }),
   );
   await user.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    screen.queryByRole("dialog", { name: "Delete chat: Planning" }),
+  ).toBeNull();
   expect(trigger).toHaveFocus();
   expect(f.run).not.toHaveBeenCalled();
   expect(f.open).not.toHaveBeenCalled();
@@ -1326,7 +1328,7 @@ it("returns focus to Chat actions when its confirmation is cancelled", async () 
 it("keeps Chat settings in the chat actions menu, not as a separate heading button", async () => {
   const f = fixture();
   f.mount();
-  await screen.findByRole("button", { name: "Chat actions" });
+  await headerAction("Chat actions");
   expect(screen.queryByRole("button", { name: "Chat settings" })).toBeNull();
 });
 
@@ -1339,7 +1341,7 @@ it("names the owner on the access controls of someone else's shared chat", async
   const header = await screen.findByRole("button", {
     name: "Share access to Planning, Teammate’s chat",
   });
-  expect(header).toHaveTextContent("Planning");
+  expect(screen.getByRole("heading", { name: "Planning" })).toBeVisible();
   expect(header).toHaveAttribute("title", "Teammate’s chat");
   const mark = screen.getByRole("button", { name: "Teammate’s chat" });
   expect(mark).toHaveTextContent("T");
@@ -1374,7 +1376,7 @@ it.each([
 
 it("marks an archived chat once and keeps only its lifecycle actions", async () => {
   fixture({ archived: true }).mount();
-  await screen.findByRole("button", { name: "Chat actions" });
+  await headerAction("Chat actions");
   expect(screen.getAllByText("Archived")).toHaveLength(1);
   expect(
     screen.queryByRole("button", { name: "Share access to Planning" }),
@@ -1414,7 +1416,7 @@ it("lets a joined Solo viewer cancel Leave and restores focus to Chat actions", 
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(screen.queryByRole("button", { name: "Join" })).toBeNull();
   const user = userEvent.setup();
-  const actions = screen.getByRole("button", { name: "Chat actions" });
+  const actions = await headerAction("Chat actions");
   await user.click(actions);
   const leave = await screen.findByRole("menuitem", { name: "Leave chat" });
   expect(screen.queryByRole("menuitem", { name: "Archive chat" })).toBeNull();
@@ -1564,3 +1566,13 @@ it("leaves Escape to a text field outside the composer", async () => {
   expect(f.read.current?.available()).toBe(false);
   field.remove();
 });
+
+/** Header tools retain their controls inside the shared overflow. */
+async function headerAction(name: string) {
+  const action = screen.queryByRole("button", { name });
+  if (action) return action;
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Conversation actions" }),
+  );
+  return screen.findByRole("button", { name });
+}

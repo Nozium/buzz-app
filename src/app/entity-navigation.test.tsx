@@ -502,7 +502,7 @@ function bindCommunityLinks(
   return { current, ping: () => ping() };
 }
 
-function offlineMessagesFixture() {
+function offlineConversationFixture() {
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -523,13 +523,31 @@ function offlineMessagesFixture() {
   let offline = true;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, options?: RequestInit) => {
       if (url.endsWith("/identity")) return Response.json({ viewer });
       if (url.endsWith("/session"))
         return offline
           ? Response.json({ error: "offline" }, { status: 503 })
           : Response.json({ viewer, relayAuthor: viewer, relayUrl: origin });
-      if (url.endsWith("/query")) return Response.json([]);
+      if (url.endsWith("/query")) {
+        const filters = JSON.parse(String(options?.body)) as ReadFilter[];
+        const author = { secret: key, pubkey: viewer };
+        if (filters.some((filter) => filter.kinds?.includes(9)))
+          return Response.json([
+            bounds(author, "alpha", "head", {
+              has_more: false,
+              next_cursor: null,
+            }),
+          ]);
+        return Response.json(
+          [
+            metadata(author, "alpha", "Alpha"),
+            roster(author, "alpha", [viewer]),
+          ].filter((event) =>
+            filters.some((filter) => matchesEvent(event, filter)),
+          ),
+        );
+      }
       return Response.json({});
     }),
   );
@@ -539,9 +557,8 @@ function offlineMessagesFixture() {
     `/#buzz=${encodeURIComponent(
       JSON.stringify({
         version: 1,
-        kind: "page",
-        pluginId: "buzz.channels",
-        pageId: "channels",
+        kind: "conversation",
+        channelId: "alpha",
         scope: { viewer, communityOrigin: origin },
       }),
     )}`,
@@ -555,8 +572,8 @@ function offlineMessagesFixture() {
     },
   };
 }
-it("waits through a connection that retries by itself, then opens Messages without Retry", async () => {
-  const { current, online } = offlineMessagesFixture();
+it("waits through a connection that retries by itself, then opens the conversation without Retry", async () => {
+  const { current, online } = offlineConversationFixture();
   await waitFor(() =>
     expect(current.relay.snapshot()).toMatchObject({
       status: "error",
@@ -576,7 +593,7 @@ it("waits through a connection that retries by itself, then opens Messages witho
 it("reopens a visit that timed out while connecting once the connection is live", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {
-    const { current, online } = offlineMessagesFixture();
+    const { current, online } = offlineConversationFixture();
     await waitFor(() => expect(current.relay.snapshot().status).toBe("error"));
     // The visit deadline ends the wait with an honest, recoverable card.
     await act(() => vi.advanceTimersByTimeAsync(15_000));
@@ -587,8 +604,10 @@ it("reopens a visit that timed out while connecting once the connection is live"
     expect(
       await screen.findByRole("heading", { name: "Can’t connect" }),
     ).toBeVisible();
-    // Messages is what failed, so the way out leads elsewhere.
-    expect(screen.queryByRole("button", { name: "Go to Messages" })).toBeNull();
+    // The collection is still available when one conversation could not connect.
+    expect(
+      screen.getByRole("button", { name: "Go to Messages" }),
+    ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open Settings" })).toBeNull();
     expect(
       screen.getByRole("button", { name: "Try again" }).dataset.variant,
@@ -606,7 +625,7 @@ it("reopens a visit that timed out while connecting once the connection is live"
 it("does not reopen a failed visit after the user has left it", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {
-    const { current, online } = offlineMessagesFixture();
+    const { current, online } = offlineConversationFixture();
     await waitFor(() => expect(current.relay.snapshot().status).toBe("error"));
     await act(() => vi.advanceTimersByTimeAsync(15_000));
     await screen.findByRole("heading", { name: "Can’t connect" });
@@ -865,7 +884,7 @@ it("keeps a link read while a code-less link switches communities", async () => 
   );
 });
 
-it("lists active primary pages in the app dock", async () => {
+it("lists active primary pages in the universal rail", async () => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -900,22 +919,20 @@ it("lists active primary pages in the app dock", async () => {
   services = createServices();
   const current = services;
   render(<App services={current} />);
-  const activity = await screen.findByRole("tab", { name: "Activity" });
-  await waitFor(() =>
-    expect(activity).toHaveAttribute("aria-selected", "true"),
-  );
+  const activity = await screen.findByRole("button", { name: "Activity" });
+  await waitFor(() => expect(activity).toHaveAttribute("aria-current", "page"));
   expect(current.navigation.snapshot().entry.target).toMatchObject({
     kind: "page",
     pluginId: "buzz.inbox",
     pageId: "inbox",
   });
-  await userEvent.click(screen.getByRole("tab", { name: "Messages" }));
-  expect(screen.getByRole("tab", { name: "Bestie" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Messages" }));
+  expect(screen.getByRole("button", { name: "Bestie" })).toBeInTheDocument();
 
   expect(
-    screen.queryByRole("tab", { name: "Repository" }),
+    screen.queryByRole("button", { name: "Repository" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Agents" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Agents" })).toBeInTheDocument();
 
   // The fixture page is active and searchable but never a sidebar row.
   expect(current.pages.snapshot().map((page) => page.key)).toContain(
@@ -953,10 +970,12 @@ it("lists active primary pages in the app dock", async () => {
   );
 
   await act(() => current.plugins.change("disable", "buzz.agents"));
-  expect(screen.getByRole("tab", { name: "Activity" })).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Bestie" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Activity" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Bestie" })).toBeInTheDocument();
 
-  expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Agents" }),
+  ).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Search Buzz" }));
   const search = await screen.findByRole("dialog", { name: "Search Buzz" });
   expect(
@@ -974,17 +993,17 @@ it("lists active primary pages in the app dock", async () => {
   ).not.toBeInTheDocument();
   await userEvent.keyboard("{Escape}");
 
-  // Disabling optional pages removes their dock entries without hiding Messages.
+  // Disabling optional pages removes their rail entries without hiding Messages.
   for (const id of ["buzz.inbox", "buzz.bestie", "buzz.repos"])
     await act(() => current.plugins.change("disable", id));
   expect(
-    screen.queryByRole("tab", { name: "Activity" }),
+    screen.queryByRole("button", { name: "Activity" }),
   ).not.toBeInTheDocument();
-  expect(screen.queryByRole("tab", { name: "Bestie" })).not.toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Messages" })).toBeInTheDocument();
   expect(
-    screen.getByRole("complementary", { name: "Sidebar" }),
-  ).toBeInTheDocument();
+    screen.queryByRole("button", { name: "Bestie" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Messages" })).toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: "Apps" })).toBeInTheDocument();
 });
 
 function legacyPageFixture(
@@ -1034,7 +1053,7 @@ it.each(
   "normalizes old $name links in the same visit and caller, retaining $scope scope",
   async ({ name, scope }) => {
     const current = legacyPageFixture();
-    await screen.findByRole("tab", { name: "Activity" });
+    await screen.findByRole("button", { name: "Activity" });
     const pageId = name.toLowerCase();
 
     act(() => {
@@ -1110,7 +1129,7 @@ it("opens a community-scoped page from another community, but not after leaving 
     ],
     other,
   );
-  await screen.findByRole("tab", { name: "Activity" });
+  await screen.findByRole("button", { name: "Activity" });
   let result!: ReturnType<typeof member.navigation.open>;
   act(() => {
     result = member.navigation.open(target);
@@ -1126,7 +1145,7 @@ it("opens a community-scoped page from another community, but not after leaving 
     [{ id: other, name: "Other community" }],
     other,
   );
-  await screen.findByRole("tab", { name: "Activity" });
+  await screen.findByRole("button", { name: "Activity" });
   act(() => {
     result = left.navigation.open(target);
   });
@@ -1212,7 +1231,7 @@ it("cold Settings Close uses required Messages when Inbox is disabled", async ()
 
 it("Close returns to the immediately preceding failed destination, not an older retained workspace", async () => {
   const current = legacyPageFixture();
-  await screen.findByRole("tab", { name: "Activity" });
+  await screen.findByRole("button", { name: "Activity" });
   await act(async () => {
     void current.navigation.open({
       version: 1,
@@ -1274,7 +1293,9 @@ async function activityTurnedOff() {
 /** Turns Activity off while it's open, then goes to Messages and Back. */
 async function backOntoTurnedOffActivity() {
   const current = legacyPageFixture();
-  await userEvent.click(await screen.findByRole("tab", { name: "Activity" }));
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Activity" }),
+  );
   await waitFor(() =>
     expect(current.navigation.snapshot()).toMatchObject({
       status: "opened",
@@ -1397,7 +1418,7 @@ it("keeps the unavailable card for a turned-off external plugin while external p
         }
       : result;
   const current = legacyPageFixture();
-  await screen.findByRole("tab", { name: "Activity" });
+  await screen.findByRole("button", { name: "Activity" });
   expect(current.plugins.snapshot().configuration).toMatchObject({
     status: "ready",
     externalPluginsPaused: true,
