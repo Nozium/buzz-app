@@ -261,47 +261,20 @@ pub fn prepare_upload(upload: FolderUpload) -> Result<PreparedImport> {
 
 /// Resolve the installed source natively; callers cannot supply an arbitrary path.
 pub fn prepare_saved_folder(manager: &Manager, id: &str) -> Result<PreparedImport> {
-    let plugin = manager
-        .catalog()?
-        .plugins
-        .into_iter()
-        .find(|plugin| plugin.manifest.id == id)
-        .ok_or("Plugin is not installed")?;
-    let Some(InstallSource::Folder(source)) = plugin.update_source else {
-        return Err("Plugin has no saved folder source".into());
-    };
-    let mut prepared = prepare_folder(&source.root)?;
-    if !prepared
-        .preview
-        .candidates
-        .iter()
-        .any(|candidate| candidate.path == source.path && candidate.manifest.id == id)
-    {
-        let prefix = if source.path == "." {
-            "Selected folder"
-        } else {
-            &source.path
-        };
-        return Err(prepared
-            .preview
-            .warnings
-            .iter()
-            .find(|warning| warning.starts_with(&format!("{prefix}:")))
-            .cloned()
-            .unwrap_or_else(|| {
-                "The saved folder no longer contains this plugin at its installed path.".into()
-            }));
-    }
-    prepared
-        .preview
-        .candidates
-        .retain(|candidate| candidate.path == source.path && candidate.manifest.id == id);
-    prepared.artifacts.retain(|path, _| path == &source.path);
+    let (source, release) = read_saved_folder(manager, id)?;
+    let mut prepared =
+        PreparedImport::new(source.root.display().to_string(), None, Some(source.root))?;
+    prepared.add(source.path, Ok(release))?;
     Ok(prepared)
 }
 
 /// No preview is retained, installed, or published to the native import slot.
 pub fn check_saved_folder(manager: &Manager, id: &str) -> Result<String> {
+    let (_, release) = read_saved_folder(manager, id)?;
+    Ok(hash(&release.bytes))
+}
+
+fn read_saved_folder(manager: &Manager, id: &str) -> Result<(ReloadSource, Release)> {
     let plugin = manager
         .catalog()?
         .plugins
@@ -329,7 +302,7 @@ pub fn check_saved_folder(manager: &Manager, id: &str) -> Result<String> {
             Ok(release)
         })
         .map_err(|reason| format!("{prefix}: {reason}"))?;
-    Ok(hash(&release.bytes))
+    Ok((folder.clone(), release))
 }
 
 pub fn prepare_folder(directory: &Path) -> Result<PreparedImport> {
@@ -2267,6 +2240,54 @@ mod tests {
     }
 
     #[test]
+    fn saved_folder_update_preview_ignores_siblings_and_installs_captured_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let source = plugin(root.path(), "dist", "example.checked");
+        let home = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
+        let initial = prepare_folder(root.path()).unwrap();
+        initial
+            .install(&manager, &initial.preview.token, "dist")
+            .unwrap();
+        for index in 0..MAX_PLUGINS {
+            plugin(
+                root.path(),
+                &format!("sibling-{index}"),
+                &format!("example.sibling{index}"),
+            );
+        }
+        fs::write(
+            source.join("plugin.js"),
+            "export function activate() { /* changed */ }",
+        )
+        .unwrap();
+        let revision = check_saved_folder(&manager, "example.checked").unwrap();
+        let preview = prepare_saved_folder(&manager, "example.checked").unwrap();
+        assert_eq!(preview.preview.candidates.len(), 1);
+        assert_eq!(preview.preview.candidates[0].path, "dist");
+        assert_eq!(preview.preview.candidates[0].revision, revision);
+        fs::write(
+            source.join("plugin.js"),
+            "export function activate() { /* later */ }",
+        )
+        .unwrap();
+        let installed = preview
+            .install(&manager, &preview.preview.token, "dist")
+            .unwrap();
+        let plugin = installed
+            .plugins
+            .iter()
+            .find(|p| p.manifest.id == "example.checked")
+            .unwrap();
+        assert_eq!(plugin.revision, revision);
+        let Some(InstallSource::Folder(saved)) = &plugin.update_source else {
+            panic!("saved folder missing")
+        };
+        assert_eq!(saved.path, "dist");
+        assert_eq!(saved.root, root.path().canonicalize().unwrap());
+    }
+
+    #[test]
     fn saved_folder_checks_confine_replaced_paths_and_validate_package_identity() {
         let root = tempfile::tempdir().unwrap();
         let source = plugin(root.path(), "dist", "example.checked");
@@ -2283,16 +2304,19 @@ mod tests {
             fs::remove_dir_all(&source).unwrap();
             std::os::unix::fs::symlink(&escaped, &source).unwrap();
             assert!(check_saved_folder(&manager, "example.checked").is_err());
+            assert!(prepare_saved_folder(&manager, "example.checked").is_err());
             fs::remove_file(&source).unwrap();
         }
         plugin(root.path(), "dist", "example.changed");
         assert!(check_saved_folder(&manager, "example.checked").is_err());
+        assert!(prepare_saved_folder(&manager, "example.checked").is_err());
         // A signature is verified even during discovery, before owner review.
         plugin(root.path(), "dist", "example.checked");
         let key = nostr::key::SecretKey::generate().to_secret_hex();
         crate::sign_release(&source, &key).unwrap();
         fs::write(source.join("plugin.signature.json"), "{}").unwrap();
         assert!(check_saved_folder(&manager, "example.checked").is_err());
+        assert!(prepare_saved_folder(&manager, "example.checked").is_err());
     }
 
     #[test]
