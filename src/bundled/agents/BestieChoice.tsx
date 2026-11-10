@@ -40,6 +40,7 @@ export function useBestieChoice(
   session: RelaySession,
   scope: string,
   placeOf?: (pubkey: string) => AgentPlace | undefined,
+  onMade?: (pubkey: string) => void,
 ) {
   // Bestie names only the explicit account-saved choice.
   const saved = useSavedAgent(session, scope);
@@ -92,6 +93,7 @@ export function useBestieChoice(
       .then(() => {
         for (const listener of made) listener(pubkey);
         if (choice !== latest.current) return;
+        if (!gone.current) onMade?.(pubkey);
         setReplacement(undefined);
         setRemote(undefined);
       })
@@ -254,15 +256,10 @@ export function RemoteBestieConfirm({
       {...(error && { children: <p role="alert">{error}</p> })}
       actions={
         <>
-          <Button
-            ref={cancel}
-            variant="prominent"
-            disabled={pending}
-            onClick={onClose}
-          >
+          <Button ref={cancel} disabled={pending} onClick={onClose}>
             Cancel
           </Button>
-          <Button loading={pending} onClick={onConfirm}>
+          <Button variant="prominent" loading={pending} onClick={onConfirm}>
             Use as bestie
           </Button>
         </>
@@ -298,15 +295,11 @@ function RemoveBestie({
       {...(error && { children: <p role="alert">{error}</p> })}
       actions={
         <>
-          <Button
-            ref={keep}
-            variant="prominent"
-            disabled={pending}
-            onClick={onClose}
-          >
+          <Button ref={keep} disabled={pending} onClick={onClose}>
             Cancel
           </Button>
           <Button
+            variant="prominent"
             loading={pending}
             onClick={() => {
               setPending(true);
