@@ -120,7 +120,7 @@ import {
 import { relayPartition, transportPartition } from "./partition";
 import { browserThreadFollows } from "./thread-follows";
 import { createMessages } from "./messages";
-import { retryRead } from "./read-retry";
+import { isRetryableRead, retryRead } from "./read-retry";
 import { messageAuthor } from "./fold";
 import { createThreadView } from "./threads";
 import { ByteLru } from "./budget";
@@ -151,6 +151,9 @@ export type EventViewSnapshot = Readonly<{
   status: "idle" | "loading" | "ready" | "error";
   events: readonly VisibleEvent[];
   error?: string | undefined;
+  /** The failure is a connectivity failure (`isRetryableRead`). `error` is
+   * only a string, so the kind travels beside it. */
+  transient?: boolean | undefined;
 }>;
 
 /** The live recovery tick re-reads the full channel list at most this often.
@@ -3196,7 +3199,11 @@ export function createRelaySession(
             update({ status: "ready" });
           } catch (error) {
             if (!disposed && !owned.signal.aborted)
-              update({ status: "error", error: String(error) });
+              update({
+                status: "error",
+                error: String(error),
+                transient: isRetryableRead(error),
+              });
           } finally {
             if (controller === owned) controller = undefined;
           }
