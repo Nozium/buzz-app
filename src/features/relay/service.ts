@@ -82,6 +82,9 @@ export function provideRelay(
   let controller: AbortController | undefined;
   let connecting = false;
   let clearing: Promise<void> | undefined;
+  /** This community's origin, once a connection named it; a reconnect's
+   * snapshot does not until it is ready again. */
+  let origin: string | undefined;
   /** What the next connection attempt asks first: a person's Try again. */
   let asking: (() => Promise<void>) | undefined;
   let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -101,6 +104,7 @@ export function provideRelay(
    * Later publishes of the same failure (cache handoff) keep it. */
   let transientFailure = false;
   const publish = ({ retrying: _retrying, ...next }: RelaySnapshot) => {
+    if (next.origin) origin = next.origin;
     if (next.status !== "error") transientFailure = false;
     snapshot = Object.freeze(
       transientFailure && !disposed
@@ -264,10 +268,16 @@ export function provideRelay(
     },
     retry() {
       // A person's Try again asks the sign-in server within this attempt.
-      // While one runs, a press joins it.
       const ask = asking;
       asking = undefined;
-      if (disposed || !connect || connecting || clearing) return;
+      if (disposed || !connect) return;
+      if (connecting || clearing) {
+        // A press joins the attempt under way (or the one after a clear)
+        // but still asks now, so that attempt or the next one doesn't
+        // repeat a cached refusal. Asking twice only forgets twice.
+        void ask?.().catch(() => {});
+        return;
+      }
       const retained = snapshot.cached;
       if (!retained) reset();
       connecting = true;
@@ -417,7 +427,7 @@ export function provideRelay(
     },
     tryAgain() {
       if (disposed) return;
-      const relay = snapshot.origin ?? resume?.scope;
+      const relay = snapshot.origin ?? origin ?? resume?.scope;
       const ask = relay && askAgain ? () => askAgain(relay) : undefined;
       if (snapshot.status === "ready" && !snapshot.cached) {
         // Nothing reconnects: retry each failed read and the live socket.

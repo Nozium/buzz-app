@@ -182,15 +182,12 @@ it("makes Try again ask the issuer again for a refused connection before reconne
   data.tryAgain();
   // The attempt starts at once, so a route retried next sees it under way.
   expect(data.snapshot().status).toBe("connecting");
-  // A second press while it runs joins it.
+  // A second press while it runs joins it, but still asks, so an attempt
+  // already past its own ask can't repeat a cached refusal.
   data.tryAgain();
   await flush();
-  expect(order).toEqual([
-    "connect",
-    "connect",
-    `ask again ${data.snapshot().origin}`,
-    "connect",
-  ]);
+  const ask = `ask again ${data.snapshot().origin}`;
+  expect(order).toEqual(["connect", "connect", ask, ask, "connect"]);
   expect(data.snapshot().origin).toMatch(/relay\.example/);
   expect(data.snapshot().status).toBe("ready");
 });
