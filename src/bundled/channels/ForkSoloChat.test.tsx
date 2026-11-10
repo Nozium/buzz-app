@@ -15,6 +15,7 @@ import type { Navigation } from "../../features/navigation/controller";
 import type { PageNavigation } from "../../features/navigation/service";
 import { createRelaySession } from "../../features/relay/session";
 import { eventDto } from "../../features/relay/events";
+import type { Outbox, OutgoingEvent } from "../../features/relay/outbox";
 import { keypair, message } from "../../features/relay/testing";
 import { readView, writeView } from "../../shared/view-state";
 import { SoloForkDialog, canForkSolo } from "./ForkSoloChat";
@@ -47,6 +48,7 @@ function deferred<T>() {
 function setup() {
   const owner = createRelaySession(null);
   disposals.push(owner.dispose);
+  const relay = keypair();
   const cutoff = eventDto(message(keypair(), sourceId, "Parent context", 10));
   const draft = { channelId: sourceId, messageId: cutoff.id, destination };
   const controller = new AbortController();
@@ -78,11 +80,23 @@ function setup() {
   const readRemote = vi
     .fn(owner.session.readRemote)
     .mockResolvedValue([cutoff]);
+  const resolve = vi.fn(async () => {});
+  let destinationClaim = false;
   const session = {
     ...owner.session,
+    relayAuthor: relay.pubkey,
     viewer,
     scope,
-    channels: { ...owner.session.channels, get: () => source },
+    channels: {
+      ...owner.session.channels,
+      resolve,
+      get: (id: string) =>
+        id === sourceId
+          ? source
+          : destinationClaim
+            ? { id: destination, name: "Fork", forkClaim: true as const }
+            : undefined,
+    },
     agentChoices: {
       ...owner.session.agentChoices,
       snapshot: () => choices,
@@ -133,6 +147,12 @@ function setup() {
     source,
     show,
     draft,
+    relay,
+    resolve,
+    navigation,
+    confirmDestination: () => {
+      destinationClaim = true;
+    },
   };
 }
 
@@ -169,9 +189,12 @@ it("hands off without awaiting ancestry, fences double submission and restores o
       submitted: true,
     });
     mounted.unmount();
+    h.confirmDestination();
     h.show();
     expect(screen.queryByRole("button", { name: "Create fork" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Open fork" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check submission / open fork" }),
+    );
     await waitFor(() => expect(h.open).toHaveBeenCalledTimes(2));
     expect(h.start).toHaveBeenCalledOnce();
   } finally {
@@ -193,7 +216,10 @@ it("keeps the enqueued destination when navigation fails, without a second ances
   );
   expect(screen.queryByText("Missing signed ancestry")).toBeNull();
   expect(h.dismiss).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Open fork" }));
+  h.confirmDestination();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Check submission / open fork" }),
+  );
   await waitFor(() => expect(h.open).toHaveBeenCalledTimes(2));
   expect(h.start).toHaveBeenCalledOnce();
 });
@@ -272,4 +298,68 @@ it("rechecks ownership, lifetime and Claude selection at submission", async () =
   h.show();
   expect(screen.getByRole("button", { name: "Create fork" })).toBeDisabled();
   expect(h.start).not.toHaveBeenCalled();
+});
+
+it("reports a stranded pre-enqueue fence loudly and retries evidence, never signs a replacement", async () => {
+  const h = setup();
+  writeView(scope, key, { title: "Fork", agent, submitted: true });
+  h.readRemote.mockResolvedValue([]);
+  const mounted = h.show();
+  const check = () =>
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check submission / open fork" }),
+    );
+  check();
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Submission unresolved",
+  );
+  expect(h.open).not.toHaveBeenCalled();
+  expect(h.start).not.toHaveBeenCalled();
+  h.confirmDestination();
+  check();
+  await waitFor(() => expect(h.open).toHaveBeenCalledOnce());
+  expect(h.start).not.toHaveBeenCalled();
+  mounted.unmount();
+});
+
+it("uses a retained create without reading ancestry in the form or enqueueing again", async () => {
+  const h = setup();
+  writeView(scope, key, { title: "Fork", agent, submitted: true });
+  const recovery = vi.fn(
+    async () => ({ event: { id: "d".repeat(64) } }) as OutgoingEvent,
+  );
+  render(
+    <SoloForkDialog
+      session={{ ...h.session, outbox: { ...({} as Outbox), recovery } }}
+      navigation={h.navigation}
+      visit={h.visit}
+      draft={h.draft}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Check submission / open fork" }),
+  );
+  await waitFor(() => expect(h.open).toHaveBeenCalledOnce());
+  expect(recovery).toHaveBeenCalledWith(`solo-fork:${destination}`);
+  expect(h.resolve).not.toHaveBeenCalled();
+  expect(h.start).not.toHaveBeenCalled();
+  expect(h.readRemote).not.toHaveBeenCalled();
+});
+
+it("revokes a submission check when its visit is left", async () => {
+  const h = setup();
+  writeView(scope, key, { title: "Fork", agent, submitted: true });
+  const gate = deferred<void>();
+  h.resolve.mockReturnValue(gate.promise);
+  h.show();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Check submission / open fork" }),
+  );
+  await waitFor(() => expect(h.resolve).toHaveBeenCalledOnce());
+  h.controller.abort();
+  h.confirmDestination();
+  await act(async () => gate.resolve());
+  expect(h.open).not.toHaveBeenCalled();
+  expect(h.start).not.toHaveBeenCalled();
+  expect(h.dismiss).not.toHaveBeenCalled();
 });

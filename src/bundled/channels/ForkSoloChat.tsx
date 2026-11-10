@@ -198,6 +198,41 @@ export function SoloForkDialog({
         "The destination couldn’t open. Open the same fork again; do not create another chat.",
       );
   }
+  // An interrupted fence is intent, not proof that a create was (or was not)
+  // published. Check existing owners; absence never authorizes a replacement.
+  async function checkSubmission() {
+    if (fence.current || !current()) return;
+    fence.current = true;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const saved = await session.outbox?.recovery(
+        `solo-fork:${draft.destination}`,
+      );
+      if (!current()) return;
+      if (!saved) {
+        await session.channels.resolve?.([draft.destination], {
+          signal: visit.signal,
+          consistency: "strong",
+        });
+        if (!current()) return;
+        const destination = session.channels.get?.(draft.destination);
+        if (!destination?.forkClaim)
+          throw new Error(
+            "Submission unresolved: no retained create or destination claim was found. Retry submission check when connected. Nothing will be re-enqueued or signed from this form.",
+          );
+        // A claim permits navigation, not delivery. Only the destination lock
+        // checks signed ancestry and reports its errors; no second modal lock.
+      }
+      if (current()) await openDestination();
+    } catch (reason) {
+      if (current())
+        setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      fence.current = false;
+      if (current()) setBusy(false);
+    }
+  }
   async function submit() {
     if (fence.current || form.submitted || !current()) return;
     fence.current = true;
@@ -206,7 +241,8 @@ export function SoloForkDialog({
     try {
       if (readView<Partial<Form>>(session.scope, key, {}).submitted) {
         setForm({ ...form, submitted: true });
-        await openDestination();
+        fence.current = false;
+        await checkSubmission();
         return;
       }
       if (!form.title.trim() || [...form.title].length > 120)
@@ -321,9 +357,9 @@ export function SoloForkDialog({
               (!form.submitted &&
                 (!form.agent || !canForkSolo(session, draft.channelId)))
             }
-            onClick={() => void (form.submitted ? openDestination() : submit())}
+            onClick={() => void (form.submitted ? checkSubmission() : submit())}
           >
-            {form.submitted ? "Open fork" : "Create fork"}
+            {form.submitted ? "Check submission / open fork" : "Create fork"}
           </Button>
         </>
       }
@@ -380,8 +416,9 @@ export function SoloForkDialog({
         )}
         {form.submitted && (
           <p>
-            The original destination is retained. Open it for context
-            confirmation and Retry.
+            Submission was requested for the original destination. Check for its
+            retained create or destination claim before opening it; this form
+            never repeats Create.
           </p>
         )}
         {error && <p role="alert">{error}</p>}
