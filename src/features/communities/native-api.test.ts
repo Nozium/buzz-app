@@ -249,6 +249,37 @@ it("surfaces known claim refusals and rejects unconfirmed policy acceptance", as
   expect(requests).toHaveLength(before);
 });
 
+it("retries a temporarily unavailable invite claim with the same code and receipt", async () => {
+  vi.useFakeTimers();
+  try {
+    respond = () =>
+      requests.length === 1
+        ? {
+            status: 503,
+            body: { error: "invite claim unavailable, retry shortly" },
+          }
+        : { body: { status: "joined" } };
+    const result = communityRequest(community, "claim", {
+      code: "v2.invite",
+      policy_receipt: "proof",
+    }).catch((reason: unknown) => reason);
+    await vi.runAllTimersAsync();
+    expect(await result).toEqual({ status: "joined" });
+    expect(requests).toEqual([
+      {
+        path: "/api/invites/claim",
+        body: { code: "v2.invite", policy_receipt: "proof" },
+      },
+      {
+        path: "/api/invites/claim",
+        body: { code: "v2.invite", policy_receipt: "proof" },
+      },
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("restores a signed community profile and preserves extra fields when publishing", async () => {
   const event = signed(key, {
     kind: 0,

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { communityDestination } from "./destination";
+import { retryInviteClaim } from "./claim-retry";
 import { avatarPictureError } from "../profiles/avatar-upload";
 import {
   connectNativeTransport,
@@ -98,13 +99,10 @@ export async function nativeCommunityRequest(
             policy_version: input.policy_version,
             age_confirmed: input.age_confirmed === true,
           };
+    const request = () =>
+      nativeRelayRequest(community, `/api/invites/${route}`, value, signal);
     const result = await readResponse(
-      await nativeRelayRequest(
-        community,
-        `/api/invites/${route}`,
-        value,
-        signal,
-      ),
+      await (route === "claim" ? retryInviteClaim(request, signal) : request()),
     );
     if (
       route === "accept-policy" &&
