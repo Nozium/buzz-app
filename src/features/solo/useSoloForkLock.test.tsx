@@ -59,13 +59,16 @@ function setup() {
     ];
   });
   const starting = vi.fn((_id: string): Promise<void> | undefined => undefined);
+  const resumeFork = vi.fn(
+    async (_id: string, _retry?: boolean, _active?: () => boolean) => {},
+  );
   const session = {
     ...owner.session,
     relayAuthor: relay.pubkey,
     read,
-    channelWrites: { ...owner.session.channelWrites, starting },
+    channelWrites: { ...owner.session.channelWrites, starting, resumeFork },
   };
-  return { session, read, starting, meta, relay, cutoff };
+  return { session, read, starting, resumeFork, meta, relay, cutoff };
 }
 
 it("waits for local creation and verified fork metadata before enabling", async () => {
@@ -278,4 +281,30 @@ it("fork tag present, no admission proof stays locked; absent signed ancestry ca
   await waitFor(() => expect(mounted.result.current.pending).toBe(false));
   expect(mounted.result.current.disabled).toBe(true);
   expect(mounted.result.current.reason).toContain("signed ancestry");
+});
+
+it("routes durable recovery failure and explicit same-operation retry through the existing lock", async () => {
+  const h = setup();
+  h.resumeFork.mockRejectedValueOnce(
+    new Error("Saved fork metadata is missing"),
+  );
+  const mounted = renderHook(() => useSoloForkLock(h.session, channel));
+  await waitFor(() =>
+    expect(mounted.result.current.reason).toBe(
+      "Saved fork metadata is missing",
+    ),
+  );
+  expect(mounted.result.current.disabled).toBe(true);
+  expect(h.read).not.toHaveBeenCalled();
+  expect(h.resumeFork).toHaveBeenLastCalledWith(
+    id,
+    false,
+    expect.any(Function),
+  );
+  act(() => mounted.result.current.retry());
+  expect(mounted.result.current.disabled).toBe(true);
+  await waitFor(() => expect(mounted.result.current.disabled).toBe(false));
+  expect(h.resumeFork).toHaveBeenLastCalledWith(id, true, expect.any(Function));
+  mounted.unmount();
+  expect(h.resumeFork.mock.calls[1]?.[2]?.()).toBe(false);
 });

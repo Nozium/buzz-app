@@ -35,6 +35,12 @@ export function useSoloForkLock(
       // A local create must settle before strong signed metadata can be read.
       await session.channelWrites.starting(id);
       signal.throwIfAborted();
+      await session.channelWrites.resumeFork(
+        id,
+        request.attempt > 0,
+        () => !signal.aborted,
+      );
+      signal.throwIfAborted();
       const seed = await readSoloSeed(
         {
           read: (filters, caller) =>
