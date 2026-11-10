@@ -254,7 +254,7 @@ describe.skipIf(!BIN)("goose-acp", () => {
       })) as { session: { title?: string } };
       expect(info.session.title).toBe(title);
       const settled = await session.send("Say hello to me in Buzz.");
-      expect(settled).toEqual({ ok: true });
+      expect(settled).toEqual({ ok: true, answered: true });
       expect(calls.some((call) => call.method === "tools/list")).toBe(true);
       // goose reached the tools over HTTP with the token, and no request was
       // refused.
@@ -322,8 +322,10 @@ describe.skipIf(!BIN)("goose-acp", () => {
         )
         .toBe(true);
       const second = session.send("Also put the word banana in that reply.");
+      // The steered message took over the turn, so its answer is the one
+      // that says a Buzz answer tool ran.
       await expect(first).resolves.toEqual({ ok: true });
-      await expect(second).resolves.toEqual({ ok: true });
+      await expect(second).resolves.toEqual({ ok: true, answered: true });
       expect(
         requests.filter(
           (item) => item.method === "_goose/unstable/session/steer",
@@ -376,7 +378,7 @@ describe.skipIf(!BIN)("goose-acp", () => {
       // The session takes the next message as usual.
       await expect(
         session.send("Reply in Buzz with the word again."),
-      ).resolves.toEqual({ ok: true });
+      ).resolves.toEqual({ ok: true, answered: true });
       expect(sends().at(-1)?.arguments?.text?.toLowerCase()).toContain("again");
     } finally {
       await goose.kill();
@@ -473,7 +475,10 @@ describe.skipIf(!BIN)("goose-acp", () => {
             ),
           ),
         ),
-      ).resolves.toEqual([{ ok: true }, { ok: true }]);
+      ).resolves.toEqual([
+        { ok: true, answered: true },
+        { ok: true, answered: true },
+      ]);
       const [ada, bo] = agents;
       // Each ran in its own workspace, and answered through its own tools.
       expect(ada?.sent.join("\n")).toContain(basename(ada?.cwd ?? "-"));
