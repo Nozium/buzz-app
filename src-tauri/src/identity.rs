@@ -16,6 +16,8 @@ use zeroize::Zeroizing;
 
 type Result<T> = std::result::Result<T, String>;
 const INVALID: &str = "Enter a valid nsec private key";
+// The renderer matches this text (`MALFORMED_IDENTITY` in
+// src/features/identity/service.ts) to offer removing the key.
 const MALFORMED: &str = "Saved identity is malformed; nothing was changed. Keep your key backup and contact support before changing secure storage.";
 
 // Batch-local conversation keys avoid repeating ECDH for every self-encrypted slot.
@@ -182,7 +184,7 @@ fn read_saved(
     match read() {
         Ok(value) => Ok(Some(value)),
         Err(credentials::Error::Absent) => Ok(None),
-        Err(credentials::Error::Denied) => Err("Secure storage access was denied. Allow access and retry; no identity was created.".into()),
+        Err(credentials::Error::Denied) => Err("Secure storage access was denied. Allow access and retry; nothing was changed.".into()),
         Err(credentials::Error::Busy) => Err("Another Buzz app is accessing secure storage. Retry shortly.".into()),
         Err(credentials::Error::Corrupt) => Err(MALFORMED.into()),
         Err(_) => Err("Your identity could not be accessed in secure storage. Unlock your credential store and retry without changing keys.".into()),
