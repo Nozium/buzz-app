@@ -750,6 +750,10 @@ revokes all of them, and a pairing unused for 30 days expires.
   for that community and identity. Collapsed section headings highlight when
   their channels have unread messages or thread replies. Muted channels do not
   highlight the heading.
+- Saved sidebar groups, stars, mutes, sorting and filters from another device or
+  a paired CLI update the open sidebar automatically while connected, in hosts
+  that support saved sidebar preferences. A CLI section-only move keeps a
+  starred channel in Starred until you unstar it.
 - **Side panels stay with their conversation**: a tab or panel you open beside a
   conversation, such as a thread, **Canvas**, a huddle, or Todos, stays open for
   that conversation when you go to another conversation or page and come back,
