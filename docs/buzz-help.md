@@ -1142,6 +1142,15 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   whether supported GitHub links and the linked-PR shortcut open in a side
   panel or your browser. It starts on and is saved on this device across all
   communities. Turning it off keeps pull request indicators and agent tools enabled.
+- A Solo can link one pull request using its chat menu or an agent’s
+  `github_link_pr` tool. An agent can also announce its newly created PR with
+  `send`’s `pull_request` URL and exact branch. On the owner’s desktop, GitHub
+  verifies authorship and branch before linking it; plain links do not link it.
+  An existing link or manual unlink is never replaced automatically.
+  Linked Solos show lifecycle, checks, review, unresolved review threads and
+  GitHub merge readiness. Hover or focus the status icons for details. Failed,
+  stale or unavailable reads cannot show ready. GitHub readiness does not
+  replace your workflow’s approvals or grant permission to merge.
 - The **GitHub** plugin’s pull request panel offers **Queue for merge** when
   the target branch requires a merge queue. After confirmation, it queues the
   displayed commit and shows **Queued for merge**; GitHub controls when it merges.

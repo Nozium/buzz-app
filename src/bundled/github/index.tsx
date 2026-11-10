@@ -1,3 +1,5 @@
+import type { SidebarRowContribution } from "../../features/channel-navigation/sidebar-rows-service";
+import { watchSoloConnections } from "./solo-announcements";
 import { ResolvePull } from "./ResolvePull";
 import type { PullChecklist as Checklist } from "./pull";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -50,6 +52,7 @@ import { stateIcons } from "./pull-state-view";
 import { PullLink } from "./PullLink";
 import {
   SoloPullIcon,
+  SoloPullRow,
   SoloPullLink,
   SoloPullMenu,
   SoloPullLauncher,
@@ -83,6 +86,9 @@ export const apply: PluginModule["apply"] = (ctx) => {
     }
     return found;
   };
+  ctx.effect(() =>
+    watchSoloConnections(ctx.relay, ctx.agents, states, pullsFor),
+  );
   ctx.panels.register({
     id: "object",
     title: "GitHub",
@@ -158,6 +164,18 @@ export const apply: PluginModule["apply"] = (ctx) => {
       fallback={fallback}
     />
   ));
+  ctx.reflect.get("sidebarRows")?.register({
+    version: 1,
+    id: "solo-pull-status",
+    render: (row, Default) =>
+      row.kind === "solo" && Default ? (
+        <SoloPullRow relay={ctx.relay} pullsFor={pullsFor} channelId={row.id}>
+          {Default}
+        </SoloPullRow>
+      ) : (
+        Default
+      ),
+  } satisfies SidebarRowContribution);
   ctx.agents.addTool({
     name: "github_link_pr",
     description:

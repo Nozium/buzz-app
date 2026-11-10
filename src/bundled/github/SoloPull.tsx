@@ -1,6 +1,22 @@
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { Tooltip } from "../../shared/design-system/ui/Tooltip";
+import { soloSignals } from "./solo-status";
+import {
+  useCallback,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { MenuItem, MenuIcon } from "../../shared/design-system/ui/Menu";
-import { LinkBreakIcon } from "../../shared/design-system/icons";
+import {
+  LinkBreakIcon,
+  ChecksIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  WarningCircleIcon,
+  ChatCircleIcon,
+  GitBranchIcon,
+  GitMergeIcon,
+} from "../../shared/design-system/icons";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { Button } from "../../shared/design-system/ui/Button";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
@@ -30,6 +46,85 @@ export function SoloPullIcon({
       <Icon size={16} aria-hidden="true" />
       <span className="sr-only">{describePull(pull)}: </span>
     </span>
+  );
+}
+
+/** Preserve the opaque native row, including its menu, focus and drag target. */
+export function SoloPullRow({
+  relay,
+  pullsFor,
+  channelId,
+  children,
+}: {
+  relay: RelayData;
+  pullsFor(session: RelaySession): SoloPulls;
+  channelId: string;
+  children: ReactNode;
+}) {
+  const connection = useRelayConnection(relay);
+  return (
+    <SessionPullRow pulls={pullsFor(connection.session)} channelId={channelId}>
+      {children}
+    </SessionPullRow>
+  );
+}
+
+export function SessionPullRow({
+  pulls,
+  channelId,
+  children,
+}: {
+  pulls: SoloPulls;
+  channelId: string;
+  children: ReactNode;
+}) {
+  const pull = useSoloPull(pulls, channelId);
+  const signals = pull ? soloSignals(pull) : [];
+  const label = signals.map(({ label }) => label).join("; ");
+  return (
+    <div className={styles.soloPullRow}>
+      <div className={styles.soloNativeRow}>{children}</div>
+      {!!signals.length && (
+        <Tooltip
+          content={`${label}. GitHub status does not replace your workflow’s merge approvals.`}
+        >
+          <span
+            className={styles.soloSignals}
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need the status details in the tooltip.
+            tabIndex={0}
+            role="img"
+            aria-label={label}
+          >
+            {signals.map((signal) => {
+              const Icon =
+                signal.kind === "checks"
+                  ? ChecksIcon
+                  : signal.kind === "review"
+                    ? signal.tone === "success"
+                      ? CheckCircleIcon
+                      : signal.tone === "failure"
+                        ? WarningCircleIcon
+                        : ClockIcon
+                    : signal.kind === "discussion"
+                      ? ChatCircleIcon
+                      : signal.kind === "conflicts"
+                        ? GitBranchIcon
+                        : GitMergeIcon;
+              return (
+                <span
+                  key={signal.kind}
+                  data-signal={signal.kind}
+                  data-tone={signal.tone}
+                  aria-hidden="true"
+                >
+                  <Icon size={12} aria-hidden="true" />
+                </span>
+              );
+            })}
+          </span>
+        </Tooltip>
+      )}
+    </div>
   );
 }
 

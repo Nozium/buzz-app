@@ -3,17 +3,25 @@
 // from the app's shared pull request states while shown.
 import {
   ARTIFACT_KIND,
+  deliver,
+  readHead,
+  settle,
   uuidv5,
 } from "../../features/agents/agent-config-artifacts";
 import type { EventData } from "../../features/relay/events";
 import type { RelaySession } from "../../features/relay/session";
-import type { PullState, PullStates } from "./pull-states";
+import {
+  LINK_POLLING,
+  PULL_REFRESH_MS,
+  type PullState,
+  type PullStates,
+} from "./pull-states";
 import { parseGitHubReference } from "./references";
 
 export const SOLO_PULL_TYPE = "buzz.solo.pr";
 /** How soon shown chats whose links could not be read try again. */
 export const SOLO_REFRESH_MS = 60_000;
-/** Links change rarely and only by hand, so shown chats read them again when
+/** Links change rarely, so shown chats read them again when
  * the window comes back, at most this often. */
 const LINKS_AGAIN_MS = 5 * 60_000;
 /** Chats per link read. Each has one link artifact, so a read of 500, the
@@ -27,6 +35,7 @@ export type SoloPull = Readonly<{
   state?: PullState | undefined;
   /** It could not be read. */
   failed?: boolean | undefined;
+  stale?: boolean | undefined;
 }>;
 
 const tag = (event: EventData, name: string) =>
@@ -96,30 +105,65 @@ async function readLinks(
 
 /** Links `url` to the Solo chat `channel`, or unlinks it with `null`, as the
  * signed-in person. */
+// UI and agent connections to one community share device-local write ordering.
+const writes = new Map<string, Promise<unknown>>();
+
 export async function writeLink(
   session: RelaySession,
   channel: string,
   url: string | null,
   signal = AbortSignal.timeout(20_000),
+  onlyIfAbsent = false,
+  allowed = () => true,
+): Promise<boolean> {
+  const key = `${session.scope}\0${session.viewer}\0${channel}`;
+  const pending = writes.get(key) ?? Promise.resolve();
+  const next = pending
+    .catch(() => {})
+    .then(() => saveLink(session, channel, url, signal, onlyIfAbsent, allowed));
+  writes.set(key, next);
+  try {
+    const saved = await next;
+    return saved && (!onlyIfAbsent || writes.get(key) === next);
+  } finally {
+    if (writes.get(key) === next) writes.delete(key);
+  }
+}
+
+async function saveLink(
+  session: RelaySession,
+  channel: string,
+  url: string | null,
+  signal: AbortSignal,
+  onlyIfAbsent: boolean,
+  allowed: () => boolean,
 ) {
+  signal.throwIfAborted();
   const read = session.snapshotRead;
   const writer = session.configArtifactWriter;
   if (!read || !writer)
     throw new Error("This community connection can't save pull request links.");
   const d = await linkId(channel);
-  const [head] = await read(
-    [
-      {
-        kinds: [ARTIFACT_KIND],
-        "#h": [channel],
-        "#d": [d],
-        artifact: "current",
-        limit: 1,
-      },
-    ],
-    { signal },
-  );
-  if (head ? linkOf(head) === url : url === null) return;
+  const head = onlyIfAbsent
+    ? await readHead(read, channel, d, signal)
+    : (
+        await read(
+          [
+            {
+              kinds: [ARTIFACT_KIND],
+              "#h": [channel],
+              "#d": [d],
+              artifact: "current",
+              consistency: "strong",
+              limit: 1,
+            },
+          ],
+          { signal },
+        )
+      )[0];
+  if (!allowed() || (onlyIfAbsent && head)) return false;
+  if (head && linkOf(head) === url) return true;
+  signal.throwIfAborted();
   const event = await writer.sign(
     {
       kind: ARTIFACT_KIND,
@@ -137,7 +181,15 @@ export async function writeLink(
     },
     signal,
   );
+  signal.throwIfAborted();
+  if (!allowed()) return false;
+  if (onlyIfAbsent) {
+    const delivery = await deliver(writer, event, signal);
+    if (delivery.status !== "accepted") return false;
+    return (await settle(read, event, signal)).status === "current";
+  }
   await writer.publish(event, signal);
+  return true;
 }
 
 export type SoloPulls = Readonly<{
@@ -159,31 +211,91 @@ export function createSoloPulls(
 ): SoloPulls {
   const listeners = new Map<string, Set<() => void>>();
   const links = new Map<string, string | null>();
+  const revisions = new Map<string, number>();
   /** Shown chats whose link is still to be read. */
   const unread = new Set<string>();
   /** Each shown chat's subscription to its linked pull request's state. */
   const watching = new Map<string, () => void>();
   let linksReadAt = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let expiry: ReturnType<typeof setTimeout> | undefined;
   let controller: AbortController | undefined;
   let scheduled = false;
   /** What `get` answered since the last change, so it answers the same. */
   const views = new Map<string, SoloPull | undefined>();
   const notify = (channel: string) => {
-    views.delete(channel);
+    const before = views.get(channel);
+    if (view(channel) === before) return;
     for (const listener of listeners.get(channel) ?? []) listener();
   };
+  // Expiry changes presentation only: it never starts a relay or GitHub read.
+  const expire = () => {
+    clearTimeout(expiry);
+    expiry = undefined;
+    const now = Date.now();
+    const next = Math.min(
+      ...[...listeners.keys()].flatMap((channel) => {
+        const url = links.get(channel);
+        const read = url ? states.readAt(url) : undefined;
+        const at = read && read.readAt + 2 * PULL_REFRESH_MS + 1;
+        return at && at > now ? [at] : [];
+      }),
+    );
+    if (Number.isFinite(next))
+      expiry = setTimeout(() => {
+        for (const channel of listeners.keys()) notify(channel);
+        expire();
+      }, next - now);
+  };
+  function view(channel: string): SoloPull | undefined {
+    const url = links.get(channel);
+    if (!url) {
+      views.delete(channel);
+      return undefined;
+    }
+    const state = states.get(url);
+    const read = states.readAt(url);
+    const failed = state === "failed" || !!read?.error;
+    const stale = !!read && Date.now() - read.readAt > 2 * PULL_REFRESH_MS;
+    const shown = state === "failed" ? undefined : state;
+    const previous = views.get(channel);
+    if (
+      previous?.url === url &&
+      previous.state === shown &&
+      !!previous.failed === failed &&
+      !!previous.stale === stale
+    )
+      return previous;
+    const next = {
+      url,
+      state: shown,
+      ...(failed && { failed }),
+      ...(stale && { stale }),
+    };
+    views.set(channel, next);
+    return next;
+  }
   /** Watches the pull request `channel` links now, while the chat is shown.
    * The store may have moved on while the chat was not: `get` reads afresh. */
   const follow = (channel: string) => {
     watching.get(channel)?.();
     watching.delete(channel);
-    views.delete(channel);
     const url = links.get(channel);
     if (url && listeners.has(channel))
       watching.set(
         channel,
-        states.watch(url, () => notify(channel)),
+        states.watch(
+          url,
+          () => {
+            notify(channel);
+            expire();
+          },
+          "details",
+          {
+            polling: LINK_POLLING,
+            interactive: false,
+          },
+        ),
       );
   };
   /** Tries again in a while, while a shown chat's link is still unread. */
@@ -210,10 +322,14 @@ export function createSoloPulls(
     try {
       const channels = [...unread].filter((channel) => listeners.has(channel));
       if (!channels.length) return;
+      const before = new Map(
+        channels.map((channel) => [channel, revisions.get(channel)]),
+      );
       const read = await readLinks(session, channels, signal);
       // A refresh that was stopped or replaced changes nothing.
       if (current.signal.aborted) return;
       for (const [channel, url] of read) {
+        if (before.get(channel) !== revisions.get(channel)) continue;
         links.set(channel, url);
         unread.delete(channel);
         follow(channel);
@@ -239,6 +355,8 @@ export function createSoloPulls(
   }
   /** Back in the window after a while: shown chats read their links again. */
   const returned = () => {
+    for (const channel of listeners.keys()) notify(channel);
+    expire();
     if (
       document.visibilityState !== "visible" ||
       Date.now() - linksReadAt < LINKS_AGAIN_MS
@@ -265,6 +383,7 @@ export function createSoloPulls(
         }
       }
       set.add(listener);
+      expire();
       return () => {
         set.delete(listener);
         if (set.size) return;
@@ -275,30 +394,20 @@ export function createSoloPulls(
         document.removeEventListener("visibilitychange", returned);
         clearTimeout(timer);
         timer = undefined;
+        clearTimeout(expiry);
+        expiry = undefined;
         controller?.abort();
         controller = undefined;
       };
     },
-    get(channel) {
-      if (!views.has(channel)) {
-        const url = links.get(channel);
-        const state = url ? states.get(url) : undefined;
-        views.set(
-          channel,
-          !url
-            ? undefined
-            : state === "failed"
-              ? { url, failed: true }
-              : { url, state },
-        );
-      }
-      return views.get(channel);
-    },
+    get: view,
     linked(channel, url) {
+      revisions.set(channel, (revisions.get(channel) ?? 0) + 1);
       links.set(channel, url);
       unread.delete(channel);
       follow(channel);
       notify(channel);
+      expire();
     },
   };
 }

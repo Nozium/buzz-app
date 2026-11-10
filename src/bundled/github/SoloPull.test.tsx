@@ -1,3 +1,4 @@
+import React from "react";
 import { MenuRoot, MenuPopup } from "../../shared/design-system/ui/Menu";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
@@ -173,6 +174,8 @@ it("gives agents a github_link_pr tool for the Solo chat they work in", async ()
   let tool: AddedTool | undefined;
   const inject = vi.fn();
   apply({
+    reflect: { get: () => undefined },
+    effect: () => {},
     host: {},
     panels: { register: () => {} },
     conversation: {
@@ -395,4 +398,46 @@ it("only mounts the PR shortcut for a Solo in the current community", () => {
   expect(
     screen.getByRole("button", { name: "Open linked pull request" }),
   ).toBeVisible();
+});
+
+it("adds independently labelled status without remounting or replacing the native row", async () => {
+  const { SessionPullRow } = await import("./SoloPull");
+  const { approvedPull } = await import("./solo-pull.fixtures");
+  const pulls = fakePulls();
+  let mounts = 0;
+  const Native = () => {
+    React.useEffect(() => {
+      mounts++;
+    }, []);
+    return <button type="button">Native chat</button>;
+  };
+  const view = render(
+    <SessionPullRow pulls={pulls} channelId={chat}>
+      <Native />
+    </SessionPullRow>,
+  );
+  const button = screen.getByRole("button", { name: "Native chat" });
+  button.focus();
+  expect(screen.queryByRole("img")).toBeNull();
+  const linked = fakePulls({ [chat]: approvedPull() });
+  view.rerender(
+    <SessionPullRow pulls={linked} channelId={chat}>
+      <Native />
+    </SessionPullRow>,
+  );
+  expect(button).toHaveFocus();
+  expect(mounts).toBe(1);
+  expect(screen.getByRole("img", { name: /Review approved/ })).toBeVisible();
+  expect(
+    screen.getByRole("img", { name: /Ready to merge on GitHub/ }),
+  ).toBeVisible();
+  await userEvent.tab();
+  expect(screen.getByRole("img", { name: /Review approved/ })).toHaveFocus();
+  view.rerender(
+    <SessionPullRow pulls={pulls} channelId={chat}>
+      <Native />
+    </SessionPullRow>,
+  );
+  expect(screen.getByRole("button", { name: "Native chat" })).toBe(button);
+  expect(mounts).toBe(1);
 });

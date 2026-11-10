@@ -14,3 +14,21 @@ Preview GitHub repositories, pull requests, issues, and commits without leaving 
 2. On a pull request, switch between **Discussion** and **Checks**.
 3. Switch a pull request from **Summary** to **Changes** to read its diff.
 4. Choose **Open on GitHub** to see the full page.
+
+## Solo pull requests
+
+When an agent announces this chat’s own PR with `send`, it can include
+`pull_request: { url, branch }`. This signed declaration, not links in message
+text, lets GitHub automatically link an owned Solo. The plugin verifies that the
+signed-in GitHub account authored the PR and that its head branch matches.
+References, quotes and code never link a PR. Conflicting declarations in one
+connection require an explicit manual link.
+Existing links and manual unlink records always take precedence, including after
+reconnect. Use `github_link_pr` or the PR panel to explicitly replace a link.
+
+The sidebar keeps the PR lifecycle icon and adds separate checks, review,
+review-thread and readiness indicators. Conflicts get their own signal. Unknown,
+failed, stale or public-only reads cannot indicate merge readiness. “Ready on
+GitHub” requires an open, clean, approved PR with settled passing checks and no
+pending review requests or unresolved/unread review threads. It is not permission
+to bypass your workflow’s approvals or merge policy.
