@@ -101,11 +101,13 @@ export function CommunityDialog({
   const [error, setError] = useState(recovery.error);
   const mounted = useRef(true);
   const attempt = useRef<AbortController>(undefined);
+  const startedDestination = useRef(false);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       attempt.current?.abort();
+      startedDestination.current = false;
     };
   }, []);
   async function work(action: (signal: AbortSignal) => Promise<void>) {
@@ -151,7 +153,6 @@ export function CommunityDialog({
     )
       nameInput.current?.focus();
   }, [busy, step]);
-  const startedDestination = useRef(false);
   useEffect(() => {
     if (!submittedDestination || startedDestination.current || unavailable)
       return;
