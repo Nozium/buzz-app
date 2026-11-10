@@ -11,6 +11,7 @@ import type { PanelProps, RegisteredPanel } from "./service";
 import { PanelSubviewHost } from "./PanelSubview";
 import { PanelView } from "./PanelView";
 import styles from "./Panels.module.css";
+import { usePanelSheet } from "./PanelSheet";
 
 // Ordinary shared UI: the caller still owns placement and selection.
 export function PanelCard({
@@ -24,6 +25,14 @@ export function PanelCard({
   contentKey?: string;
 }) {
   const tabbed = !!usePanelTabHost();
+  const sheet = usePanelSheet(
+    tabbed
+      ? undefined
+      : {
+          title: panel.title,
+          close: props.close,
+        },
+  );
   return (
     <aside
       ref={ref}
@@ -37,10 +46,10 @@ export function PanelCard({
         }
       }}
     >
-      <Panel as="div">
+      <Panel as="div" joined={sheet} flat={sheet}>
         <PanelSubviewHost close={props.close}>
           <div className={styles.card}>
-            {!tabbed && (
+            {!tabbed && !sheet && (
               <PanelHeader
                 title={
                   panel.launcher ? (

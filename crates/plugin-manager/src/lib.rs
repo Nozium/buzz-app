@@ -440,6 +440,10 @@ pub fn bundled_manifests() -> Vec<Manifest> {
     });
     vec![
         serde_json::from_str(include_str!(
+            "../../../src/bundled/smart-sections/manifest.json"
+        ))
+        .expect("smart sections manifest"),
+        serde_json::from_str(include_str!(
             "../../../src/bundled/mesh-compute/manifest.json"
         ))
         .expect("mesh manifest"),
@@ -478,6 +482,11 @@ pub fn bundled_manifests() -> Vec<Manifest> {
             .expect("github manifest"),
         serde_json::from_str(include_str!("../../../src/bundled/inbox/manifest.json"))
             .expect("valid Inbox manifest"),
+        // PROTOTYPE: the Activity sidebar, which replaces the Messages sidebar.
+        serde_json::from_str(include_str!(
+            "../../../src/bundled/activity-sidebar/manifest.json"
+        ))
+        .expect("activity sidebar manifest"),
         serde_json::from_str(include_str!(
             "../../../src/bundled/drafts-sent/manifest.json"
         ))
@@ -535,6 +544,7 @@ fn enabled_by_default(id: &str) -> bool {
     matches!(
         id,
         "buzz.channels"
+            | "buzz.smart-sections"
             | "buzz.feedback"
             | "buzz.diffs"
             | "buzz.mermaid"
@@ -549,6 +559,7 @@ fn enabled_by_default(id: &str) -> bool {
             | "buzz.watching"
             | "buzz.pairing"
             | "buzz.inbox"
+            | "buzz.activity-sidebar"
             | "buzz.repos"
             | "buzz.agents"
             | "buzz.claude-code"

@@ -17,7 +17,7 @@ import {
   scanMarkdown,
 } from "../../features/relay/message-content";
 import { PanelWorkspace } from "../../features/panels/PanelWorkspace";
-import { usePanelSplit } from "../../features/panels/usePanelSplit";
+import { PanelDock } from "../../features/panels/PanelDock";
 import type { Profile } from "../../features/relay/contracts";
 import type { EventData } from "../../features/relay/events";
 import { useRelayConnection } from "../../features/relay/react";
@@ -343,7 +343,6 @@ function NoteCollection({
   const [author, setAuthor] = useState("");
   const [opened, setOpened] = useState<EventData[]>([]);
   const [selected, setSelected] = useState("");
-  const split = usePanelSplit(session.scope, "notes", 448, 320);
   const origin = useRef<HTMLElement | null>(null);
   const refreshRef = useRef<HTMLButtonElement>(null);
   const preserveControlFocus = useCallback((node: HTMLButtonElement | null) => {
@@ -680,11 +679,7 @@ function NoteCollection({
   );
   const readerOpen = !!opened.length || !!profilePanel;
   return (
-    <div
-      className={styles.split}
-      ref={split.ref}
-      data-side={readerOpen ? "" : undefined}
-    >
+    <div className={styles.split} data-expando-scope="">
       <div className={styles.main}>
         <NotesPanel
           refresh={refresh}
@@ -836,8 +831,7 @@ function NoteCollection({
         </NotesPanel>
       </div>
       {readerOpen && (
-        <aside className={styles.side} aria-label="Note reader">
-          {split.handle}
+        <PanelDock open className={styles.side}>
           <Panel aria-label="Note details">
             <PanelWorkspace
               label="Open notes"
@@ -906,7 +900,7 @@ function NoteCollection({
               ]}
             />
           </Panel>
-        </aside>
+        </PanelDock>
       )}
     </div>
   );

@@ -1,12 +1,9 @@
 import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
+import { createPortal } from "react-dom";
 import { canMessageAgent } from "../agents/choices";
+import { useAgentChoices } from "../agents/use-choices";
 import { avatarMedia } from "../../shared/avatar-source";
-import { useChannelWindow } from "../relay/react";
 import type { ChannelSummary } from "../relay/contracts";
-import {
-  ConversationChannel,
-  ConversationTimeline,
-} from "../conversation/Conversation";
 import type { ConversationHostServices } from "../conversation/ConversationHost";
 import { composerMarkdown } from "../messages/composer-markdown";
 import {
@@ -35,13 +32,21 @@ import {
   useVerifiedNames,
   withVerifiedNames,
 } from "../profiles/useVerifiedNames";
-import { RecipientPicker } from "./RecipientPicker";
-import type { Recipient } from "./usePeople";
+import { addressableChannels, RecipientPicker } from "./RecipientPicker";
+import { Tabs } from "../../shared/design-system/ui/Tabs";
+import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
+import { PlusIcon } from "../../shared/design-system/icons";
+import { relativeTimestamp } from "../../shared/relative-timestamp";
+import type { ReactNode } from "react";
+import { usePeople, type Recipient } from "./usePeople";
 import { usePassThroughUntilDrafted } from "../messages/draft-visit";
 import type { PageNavigation } from "../navigation/service";
 import styles from "./NewMessage.module.css";
+import { ExistingDiscussion } from "./ExistingDiscussion";
 
 const draftKey = "direct-message:new-draft";
+const channelViewKey = "direct-message:channel";
+type Kind = "solo" | "team";
 const recoveryKey = "direct-message:new";
 
 type Pending = {
@@ -142,7 +147,32 @@ export function NewMessage({
   onOpenThread,
   onStarted,
   visit,
+  allowChannels = false,
+  layout = "page",
+  expanded = false,
+  onAddressed,
+  contentContainer,
+  renderSolo,
+  onOpenChat,
 }: {
+  /** Activity embeds the same draft and delivery owner without a second history. */
+  layout?: "page" | "composer";
+  expanded?: boolean;
+  onAddressed?: (() => void) | undefined;
+  /** Move the presentation into the host's expanded surface; this owner stays mounted. */
+  contentContainer?: HTMLElement | null;
+  /** To may also name a channel: Send posts a new message there. */
+  allowChannels?: boolean;
+  /** A New chat composer for one agent; without it an agent gets a DM. */
+  renderSolo?:
+    | ((
+        agent: string,
+        focusRequest: number,
+        onDraftChange?: ((draft: MentionDraft) => void) | undefined,
+      ) => ReactNode)
+    | undefined;
+  /** Continue an earlier Solo chat listed beside a chosen agent. */
+  onOpenChat?: ((channelId: string) => void) | undefined;
   session: RelaySession;
   scope: string;
   /** The visit presenting this composer, a Back stop only once drafted. */
@@ -173,6 +203,14 @@ export function NewMessage({
   const [recipients, setRecipients] = useState(() =>
     savedRecipients(scope, session.viewer),
   );
+  const [channelId, setChannelId] = useState<string | undefined>(() => {
+    const saved = allowChannels
+      ? readView<unknown>(scope, channelViewKey, null)
+      : null;
+    return typeof saved === "string" ? saved : undefined;
+  });
+  // A lone agent starts a Solo chat unless Team was picked for it.
+  const [teamFor, setTeamFor] = useState<string>();
   // Recipients keep the facts they were chosen with; their labels follow the
   // current verification and otherwise the current profile name, falling back
   // to those facts.
@@ -196,7 +234,55 @@ export function NewMessage({
     [recipients, verified, profiles],
   );
   const recipientNames = named.map((person) => person.name).join(", ");
-  const roster = useMemo(() => ({ recipients }), [recipients]);
+  const [inlineQuery, setInlineQuery] = useState<string>();
+  const directory = usePeople(
+    session,
+    inlineQuery ?? "",
+    layout === "composer" && inlineQuery !== undefined,
+  );
+  const agents = useAgentChoices(
+    session,
+    layout === "composer",
+    layout === "composer",
+  );
+  const inlinePeople = useMemo(() => {
+    const eligible = new Set(
+      agents.identities.filter(canMessageAgent).map((agent) => agent.pubkey),
+    );
+    return [
+      ...new Map(
+        [
+          ...[...profiles].map(([pubkey, profile]) => ({ ...profile, pubkey })),
+          ...directory.people,
+          ...agents.selectable.map((agent) => ({
+            ...agent,
+            isAgent: true as const,
+          })),
+          ...named,
+        ]
+          .filter(
+            (person) =>
+              person.pubkey !== session.viewer &&
+              (!person.isAgent || eligible.has(person.pubkey)),
+          )
+          .map((person) => [person.pubkey, person]),
+      ).values(),
+    ];
+  }, [
+    agents.identities,
+    agents.selectable,
+    profiles,
+    directory.people,
+    named,
+    session.viewer,
+  ]);
+  const roster = useMemo(
+    () =>
+      layout === "composer"
+        ? { recipients: inlinePeople, onQuery: setInlineQuery }
+        : { recipients },
+    [layout, inlinePeople, recipients],
+  );
   // Text still in the To field may be a recipient not chosen yet, so Send
   // waits for it to become one or be cleared.
   const [typed, setTyped] = useState(false);
@@ -211,6 +297,12 @@ export function NewMessage({
   const focusComposer = useCallback(() => {
     setComposerFocus((request) => request + 1);
   }, []);
+  const previousContainer = useRef(contentContainer);
+  useLayoutEffect(() => {
+    if (previousContainer.current === contentContainer) return;
+    previousContainer.current = contentContainer;
+    focusComposer();
+  }, [contentContainer, focusComposer]);
   const retiring = useRef<string | undefined>(undefined);
   const [busy, setBusy] = useState<"uploading" | "sending" | undefined>();
   const [error, setError] = useState("");
@@ -322,10 +414,91 @@ export function NewMessage({
     prepared.current = undefined;
     setRecipients(people);
     writeView(scope, "direct-message:recipients", people.map(recipientView));
+    if (channelId) {
+      setChannelId(undefined);
+      writeView(scope, channelViewKey, null);
+    }
     setError("");
     setUploadFailed(false);
   }
+  function syncInlineRecipients(draft: MentionDraft) {
+    if (layout !== "composer") return;
+    const people = draft.recipients.map(
+      (person) =>
+        inlinePeople.find((candidate) => candidate.pubkey === person.pubkey) ??
+        person,
+    );
+    if (keyFor(people) === keyFor(recipients)) return;
+    change(people);
+    if (people.length) onAddressed?.();
+  }
+  function chooseChannel(channel: ChannelSummary | undefined) {
+    if (locked || attempt.current) return;
+    prepared.current = undefined;
+    setChannelId(channel?.id);
+    writeView(scope, channelViewKey, channel?.id ?? null);
+    if (channel) {
+      setRecipients([]);
+      writeView(scope, "direct-message:recipients", []);
+    }
+    setError("");
+    setUploadFailed(false);
+  }
+  /** A new top-level message in a channel, which starts its thread. */
+  async function post(
+    channel: ChannelSummary,
+    draft: MentionDraft,
+    files?: AttachmentDraft,
+  ) {
+    const content = composerMarkdown(draft);
+    if (
+      attempt.current ||
+      !ready ||
+      (!content.trim() && !files?.snapshot().length)
+    )
+      return;
+    const controller = new AbortController();
+    attempt.current = controller;
+    setBusy(
+      files?.snapshot().some((file) => !file.uploaded)
+        ? "uploading"
+        : "sending",
+    );
+    setError("");
+    setUploadFailed(false);
+    let preparingFiles = !!files;
+    try {
+      const uploaded = files
+        ? await files.prepareForSend(controller.signal)
+        : [];
+      controller.signal.throwIfAborted();
+      preparingFiles = false;
+      setBusy("sending");
+      const messageId = session.messages.send(
+        channel.id,
+        content,
+        draft.recipients.map((person) => person.pubkey),
+        uploaded,
+      );
+      clearView(scope, draftKey, "direct-message:recipients", channelViewKey);
+      setChannelId(undefined);
+      retire();
+      onStarted(channel.id, messageId);
+    } catch (reason) {
+      if (!controller.signal.aborted && preparingFiles) setUploadFailed(true);
+      else if (!controller.signal.aborted)
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "Could not send your message. Try again.",
+        );
+    } finally {
+      if (!controller.signal.aborted) setBusy(undefined);
+      if (attempt.current === controller) attempt.current = null;
+    }
+  }
   async function send(draft: MentionDraft, files?: AttachmentDraft) {
+    if (target) return post(target, draft, files);
     const content = composerMarkdown(draft);
     if (
       attempt.current ||
@@ -482,192 +655,278 @@ export function NewMessage({
     }
     return match;
   }, [channels, recipients, session.viewer]);
-  return (
+  const channelChoices = useMemo(
+    () => (allowChannels ? addressableChannels(channels) : []),
+    [allowChannels, channels],
+  );
+  const target = channelId
+    ? channelChoices.find((channel) => channel.id === channelId)
+    : undefined;
+  const lone = recipients.length === 1 ? recipients[0] : undefined;
+  const loneAgent =
+    renderSolo &&
+    !target &&
+    lone &&
+    (lone.isAgent || profiles.get(lone.pubkey)?.isAgent)
+      ? lone.pubkey
+      : undefined;
+  const kind: Kind | null =
+    loneAgent && teamFor !== loneAgent
+      ? "solo"
+      : target || recipients.length
+        ? "team"
+        : null;
+  const soloAgent = kind === "solo" ? loneAgent : undefined;
+  const agentLabel = soloAgent ? named[0]?.name : undefined;
+  const recent = useMemo(
+    () =>
+      soloAgent
+        ? channels
+            .filter(
+              (channel) =>
+                channel.channelType === "solo" &&
+                !channel.archived &&
+                !channel.pending &&
+                channel.members?.includes(soloAgent),
+            )
+            .sort(
+              (left, right) =>
+                (right.lastActivityAt ?? 0) - (left.lastActivityAt ?? 0),
+            )
+            .slice(0, 3)
+        : [],
+    [channels, soloAgent],
+  );
+  const kindControl =
+    renderSolo || allowChannels ? (
+      <div className={styles.kind}>
+        <Tabs<Kind>
+          variant="segmented"
+          size="sm"
+          label="Conversation"
+          value={kind}
+          showSelection={kind !== null}
+          items={[
+            { value: "solo", label: "Solo", disabled: !loneAgent },
+            { value: "team", label: "Team", disabled: kind === null },
+          ]}
+          onValueChange={(next) => {
+            if (!loneAgent) return;
+            setTeamFor(next === "team" ? loneAgent : undefined);
+          }}
+        />
+      </div>
+    ) : undefined;
+  const displayed = target ?? existing;
+  const composerName = target ? `#${target.name}` : recipientNames;
+  const content = (
     <section
       className={styles.page}
+      data-layout={layout}
+      data-expanded={expanded || undefined}
       aria-label="New message"
       data-attachment-drop-zone
     >
-      <RecipientPicker
-        session={session}
-        scope={scope}
-        selected={recipients}
-        labels={named}
-        disabled={locked}
-        onChange={change}
-        onComplete={focusComposer}
-        onTyped={setTyped}
-      />
-      <div className={styles.blank} data-new-message-body="">
-        {existing ? (
-          <ExistingDiscussion
-            key={existing.id}
-            session={session}
-            scope={scope}
-            channel={existing}
-            extensions={extensions}
-            host={host}
-            onRecovered={focusComposer}
-            onOpen={(messageId, threadRootId, intent) =>
-              onOpenThread(existing.id, messageId, threadRootId, intent)
-            }
-          />
-        ) : recipients.length > 0 ? (
-          <div className={styles.introduction}>
-            <AvatarStack
-              animateEntrance
-              size="hero-large"
-              max={5}
-              items={named.map((person) => ({
-                id: person.pubkey,
-                name: person.name,
-                src: avatarMedia(person.picture, session.media),
-                shape: person.isAgent ? "squircle" : "circle",
-              }))}
-            />
+      {layout === "page" && (
+        <RecipientPicker
+          session={session}
+          scope={scope}
+          initiallyOpen={layout === "page"}
+          selected={recipients}
+          labels={named}
+          disabled={locked}
+          onChange={change}
+          onComplete={focusComposer}
+          onTyped={setTyped}
+          channelOptions={channelChoices}
+          selectedChannel={target}
+          onChooseChannel={allowChannels ? chooseChannel : undefined}
+          trailing={kindControl}
+        />
+      )}
+      {soloAgent && renderSolo ? (
+        <>
+          {(layout === "page" || expanded) && (
+            <div className={styles.solo} data-new-message-body="">
+              <AvatarStack
+                animateEntrance
+                size="hero-large"
+                max={1}
+                items={named.map((person) => ({
+                  id: person.pubkey,
+                  name: person.name,
+                  src: avatarMedia(person.picture, session.media),
+                  shape: "squircle",
+                }))}
+              />
+              {recent.length > 0 && (
+                <nav
+                  className={styles.recent}
+                  aria-label={`Recent chats with ${agentLabel}`}
+                >
+                  <h3>Recent with {agentLabel}</h3>
+                  <NavigationItem
+                    selected
+                    aria-current="true"
+                    icon={<PlusIcon size={16} aria-hidden="true" />}
+                    label="New chat"
+                    onClick={focusComposer}
+                  />
+                  {recent.map((chat) => (
+                    <NavigationItem
+                      key={chat.id}
+                      label={chat.name}
+                      trailing={
+                        chat.lastActivityAt ? (
+                          <span className={styles.agent}>
+                            {relativeTimestamp(chat.lastActivityAt)}
+                          </span>
+                        ) : undefined
+                      }
+                      onClick={() => onOpenChat?.(chat.id)}
+                    />
+                  ))}
+                </nav>
+              )}
+            </div>
+          )}
+          <div className={styles.soloComposer}>
+            {renderSolo(
+              soloAgent,
+              composerFocus,
+              layout === "composer" ? syncInlineRecipients : undefined,
+            )}
           </div>
-        ) : null}
-      </div>
-      <div className={styles.feedback}>
-        {busy && (
-          <p role="status">
-            {busy === "uploading" ? "Uploading files…" : "Sending message…"}
-          </p>
-        )}
-        {uploadFailed && (
-          <p role="status">
-            A file couldn’t upload. Retry or remove it, then send again.
-          </p>
-        )}
-        {!session.directMessages.available && (
-          <p role="status">
-            Starting direct messages is unavailable on this connection.
-          </p>
-        )}
-        {pending && !failed && !busy && !error && (
-          <Button
-            type="button"
-            onClick={() => pending && void send(pending.draft)}
-          >
-            Retry send
-          </Button>
-        )}
-        {error && (
-          <div role="alert">
-            <p>{error}</p>
-            {pending && !failed && (
+        </>
+      ) : (
+        <>
+          {(layout === "page" || expanded) && (
+            <div className={styles.blank} data-new-message-body="">
+              {displayed ? (
+                <ExistingDiscussion
+                  key={displayed.id}
+                  session={session}
+                  scope={scope}
+                  channel={displayed}
+                  extensions={extensions}
+                  host={host}
+                  onRecovered={focusComposer}
+                  onOpen={(messageId, threadRootId, intent) =>
+                    onOpenThread(displayed.id, messageId, threadRootId, intent)
+                  }
+                />
+              ) : recipients.length > 0 ? (
+                <div className={styles.introduction}>
+                  <AvatarStack
+                    animateEntrance
+                    size="hero-large"
+                    max={5}
+                    items={named.map((person) => ({
+                      id: person.pubkey,
+                      name: person.name,
+                      src: avatarMedia(person.picture, session.media),
+                      shape: person.isAgent ? "squircle" : "circle",
+                    }))}
+                  />
+                </div>
+              ) : null}
+            </div>
+          )}
+          <div className={styles.feedback}>
+            {layout === "composer" &&
+              inlineQuery !== undefined &&
+              directory.error && (
+                <div role="alert">
+                  <p>Could not search people. Your draft is kept.</p>
+                  <Button type="button" onClick={directory.loadMore}>
+                    Retry loading people
+                  </Button>
+                </div>
+              )}
+            {busy && (
+              <p role="status">
+                {busy === "uploading" ? "Uploading files…" : "Sending message…"}
+              </p>
+            )}
+            {uploadFailed && (
+              <p role="status">
+                A file couldn’t upload. Retry or remove it, then send again.
+              </p>
+            )}
+            {!target && !session.directMessages.available && (
+              <p role="status">
+                Starting direct messages is unavailable on this connection.
+              </p>
+            )}
+            {pending && !failed && !busy && !error && (
               <Button
                 type="button"
-                disabled={!!busy}
                 onClick={() => pending && void send(pending.draft)}
               >
                 Retry send
               </Button>
             )}
+            {error && (
+              <div role="alert">
+                <p>{error}</p>
+                {pending && !failed && (
+                  <Button
+                    type="button"
+                    disabled={!!busy}
+                    onClick={() => pending && void send(pending.draft)}
+                  >
+                    Retry send
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      <DraftMentionRoster.Provider value={roster}>
-        <MessageComposer
-          key={`${ready ? "ready" : "hydrating"}:${draftRevision}`}
-          session={session}
-          scope={scope}
-          extensions={extensions}
-          channelId={draftChannel}
-          focusRequest={composerFocus}
-          channelName={recipientNames || "new message"}
-          label={recipientNames ? `Message ${recipientNames}` : "New message"}
-          placeholder={recipientNames ? undefined : ""}
-          disabled={!recipients.length}
-          submission={{
-            draftKey,
-            attachments: true,
-            allowAttachmentOnly: true,
-            recoveredDraft: restoredDraft,
-            onDraftChange: draftEdited,
-            locked,
-            disabled:
-              !ready ||
-              !!busy ||
-              !recipients.length ||
-              typed ||
-              !session.directMessages.available,
-            submit: (draft, files) => void send(draft, files),
-          }}
-        />
-      </DraftMentionRoster.Provider>
+          <DraftMentionRoster.Provider value={roster}>
+            <MessageComposer
+              key={`${ready ? "ready" : "hydrating"}:${draftRevision}`}
+              session={session}
+              scope={scope}
+              extensions={extensions}
+              channelId={draftChannel}
+              focusRequest={composerFocus}
+              channelName={composerName || "new message"}
+              label={composerName ? `Message ${composerName}` : "New message"}
+              placeholder={
+                composerName
+                  ? undefined
+                  : layout === "composer"
+                    ? "@mention someone to start a message…"
+                    : ""
+              }
+              disabled={layout === "page" && !recipients.length && !target}
+              submission={{
+                draftKey,
+                attachments: true,
+                allowAttachmentOnly: true,
+                recoveredDraft: restoredDraft,
+                onDraftChange: (draft) => {
+                  draftEdited(draft);
+                  syncInlineRecipients(draft);
+                },
+                locked,
+                disabled:
+                  !ready ||
+                  !!busy ||
+                  (target
+                    ? false
+                    : !recipients.length ||
+                      !session.directMessages.available) ||
+                  typed,
+                submit: (draft, files) => void send(draft, files),
+              }}
+            />
+          </DraftMentionRoster.Provider>
+        </>
+      )}
     </section>
   );
+  return contentContainer ? createPortal(content, contentContainer) : content;
 }
 const empty: readonly never[] = [];
 const emptySnapshot = () => empty;
 const noSubscribe = () => () => {};
-
-/** History owns paging and loading; the draft and send journal stay mounted above. */
-function ExistingDiscussion({
-  session,
-  scope,
-  channel,
-  extensions,
-  host,
-  onOpen,
-  onRecovered,
-}: {
-  session: RelaySession;
-  scope: string;
-  channel: ChannelSummary;
-  extensions?: ConversationExtensions | undefined;
-  host: ConversationHostServices;
-  onOpen(messageId: string, threadRootId: string, intent?: "reply"): void;
-  onRecovered(): void;
-}) {
-  const window = useChannelWindow(session.channels, channel.id);
-  const retry = useRef<HTMLButtonElement>(null);
-  const [recovering, setRecovering] = useState(false);
-  const waiting = !window.rows.length && window.status !== "ready";
-  useLayoutEffect(() => {
-    if (waiting || !recovering) return;
-    // Hand off before removing Retry, and only while it still owns focus.
-    if (document.activeElement === retry.current) onRecovered();
-    setRecovering(false);
-  }, [waiting, recovering, onRecovered]);
-  if (waiting || recovering)
-    return (
-      <div
-        className={styles.feedback}
-        role={window.status === "error" ? "alert" : "status"}
-      >
-        <p>{window.status === "error" ? window.error : "Loading messages…"}</p>
-        {(window.status === "error" || recovering) && (
-          <Button
-            ref={retry}
-            type="button"
-            loading={window.status !== "error"}
-            onClick={() => {
-              setRecovering(true);
-              session.channels.ensure(channel.id);
-            }}
-          >
-            Retry messages
-          </Button>
-        )}
-      </div>
-    );
-  return (
-    <ConversationChannel
-      session={session}
-      scope={scope}
-      channel={channel}
-      extensions={extensions}
-      active={false}
-      host={host}
-    >
-      <ConversationTimeline
-        window={window}
-        transient
-        marksRead={false}
-        onOpenThread={onOpen}
-      />
-    </ConversationChannel>
-  );
-}

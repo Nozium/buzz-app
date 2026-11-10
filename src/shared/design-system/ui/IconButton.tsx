@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactElement } from "react";
 import { Button, type ButtonProps } from "./Button";
+import "../styles/action-list.css";
 
 type IconButtonVariant =
   | NonNullable<ButtonProps["variant"]>
@@ -66,6 +67,9 @@ export function IconButton({
       data-icon-shape={shape}
     >
       {icon}
+      <span className="buzz-icon-action-label" aria-hidden="true">
+        {props.title ?? props["aria-label"]}
+      </span>
     </Button>
   );
 }

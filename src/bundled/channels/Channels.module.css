@@ -61,6 +61,15 @@
   --sidenav-emoji-size: 0.8125rem;
   padding-inline: var(--sidebar-padding) var(--sidebar-padding-end);
 }
+.mainConversation {
+  width: 100%;
+  max-width: var(--size-conversation-frame);
+  margin-inline: auto;
+}
+.collectionSidebar {
+  --sidebar-padding: var(--space-4);
+  --sidebar-filter-inset: 0;
+}
 .conversation
   :is(
     [data-tab-pane-toggle],
@@ -71,7 +80,7 @@
 }
 .sidebarFilter {
   flex: 0 0 auto;
-  padding: var(--space-3) 0 0;
+  padding: var(--sidebar-filter-inset, var(--space-3)) 0 0;
   min-width: 0;
 }
 .sidebarBody {
@@ -175,11 +184,15 @@
     var(--channel-row-fill-end)
   );
   margin-inline: var(--channel-row-fill-start) var(--channel-row-fill-end);
+}
+/* ConversationRow owns its content inset inside the shared fill geometry. */
+.channelList [data-variant="row"]:not([data-conversation-row]),
+.sidebarFilter [data-variant="row"]:not([data-conversation-row]) {
   padding-inline: calc(var(--space-2) - var(--channel-row-fill-start))
     calc(var(--space-1) + var(--space-half));
 }
-.channelList [data-variant="row"][data-inset],
-.sidebarFilter [data-variant="row"][data-inset] {
+.channelList [data-variant="row"][data-inset]:not([data-conversation-row]),
+.sidebarFilter [data-variant="row"][data-inset]:not([data-conversation-row]) {
   padding-inline-start: calc(
     var(--space-2) +
     var(--space-6) -
@@ -214,6 +227,20 @@
   flex-direction: column;
   gap: var(--space-half);
   padding-block-end: var(--sidebar-padding);
+}
+/* The recency list shares the filter strip's 12px content edge: a 4px fill
+   gutter plus ConversationRow's 8px inset. Keep that gutter in the scrollport
+   so keyboard focus stays visible. */
+.channelListFrame:has([data-activity-sidebar]) {
+  width: calc(100% + 2 * var(--sidebar-padding));
+  margin-inline: calc(-1 * var(--sidebar-padding));
+}
+.channelList:has([data-activity-sidebar]) {
+  padding-inline: var(--space-1);
+}
+.channelList [data-activity-sidebar] [data-conversation-row] {
+  width: 100%;
+  margin-inline: 0;
 }
 /* Inset Retry like a row, so its focus ring stays inside the scrollport. */
 .channelListContent > button {
@@ -932,6 +959,12 @@ details:not([open]) > summary .sectionChevron {
   display: flex;
   margin-left: auto;
   gap: var(--space-1h);
+}
+[data-action-list] .channelLaunchers {
+  flex-direction: column;
+  align-items: stretch;
+  margin-left: 0;
+  width: 100%;
 }
 .channelDrawer {
   --panel-motion-exit-duration: 0ms;

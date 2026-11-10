@@ -503,7 +503,7 @@ it.each([
   },
 );
 
-it("shows global pages in the side dock and keeps the conversation mounted across selection", async () => {
+it("shows global pages in the top dock and keeps the conversation mounted across selection", async () => {
   const current = createServices();
   services = current;
   const onSelect = vi.fn();
@@ -548,24 +548,30 @@ it("shows global pages in the side dock and keeps the conversation mounted acros
   const draft = screen.getByRole("textbox", { name: "Message draft" });
   await user.type(draft, "Keep this draft");
   const dock = screen.getByRole("navigation", { name: "Apps dock" });
+  expect(
+    within(dock).getByRole("button", { name: /^Community switcher:/ }),
+  ).toBeVisible();
+  expect(
+    within(dock).getByRole("button", { name: "Your profile" }),
+  ).toBeVisible();
+  const settings = within(dock).getByRole("button", {
+    name: "Settings",
+  });
+  expect(settings).toBeVisible();
   const tabs = within(dock).getAllByRole("tab");
   expect(tabs.map((tab) => tab.textContent)).toEqual([
     "Bestie",
     "Inbox",
     "Messages",
   ]);
-  expect(screen.getByRole("tablist")).toHaveAttribute(
-    "aria-orientation",
-    "vertical",
-  );
   expect(screen.getByRole("tabpanel", { name: "Messages" })).toContainElement(
     draft,
   );
-  expect(screen.getByRole("button", { name: "Search Buzz" })).toHaveTextContent(
-    "Search",
-  );
+  expect(
+    within(dock).getByRole("button", { name: "Search Buzz" }),
+  ).toBeVisible();
   tabs[0]?.focus();
-  await user.keyboard("{ArrowDown}");
+  await user.keyboard("{ArrowRight}");
   expect(tabs[1]).toHaveFocus();
   expect(onSelect).not.toHaveBeenCalled();
   await user.keyboard("{Enter}");
@@ -577,6 +583,8 @@ it("shows global pages in the side dock and keeps the conversation mounted acros
   expect(draft).toHaveValue("Keep this draft");
   expect(mounted).toHaveBeenCalledOnce();
   expect(unmounted).not.toHaveBeenCalled();
+  await user.click(settings);
+  expect(onSelect).toHaveBeenLastCalledWith("settings");
 });
 
 it.each([
@@ -950,13 +958,13 @@ it.each(["sidebar", "topbar"] as const)(
       if (placement === "topbar") {
         // Keyboard focus names the icon-only tile without opening its preview.
         await user.click(within(nav).getByRole(role, { name: "Home" }));
-        await user.keyboard("{ArrowDown}");
+        await user.keyboard("{ArrowRight}");
         expect(inbox).toHaveFocus();
         expect(
           await screen.findByRole("tooltip", { name: "Inbox" }),
         ).toBeVisible();
         expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-        await user.keyboard("{ArrowUp}");
+        await user.keyboard("{ArrowLeft}");
         await waitFor(() =>
           expect(screen.queryByRole("tooltip", { name: "Inbox" })).toBeNull(),
         );
@@ -1025,7 +1033,7 @@ it.each(["sidebar", "topbar"] as const)(
         await waitFor(() =>
           expect(screen.queryByRole("tooltip", { name: "Inbox" })).toBeNull(),
         );
-        await user.keyboard("{ArrowDown}");
+        await user.keyboard("{ArrowRight}");
         expect(inbox).toHaveFocus();
         expect(
           await screen.findByRole("tooltip", { name: "Inbox" }),

@@ -1,6 +1,7 @@
 import {
   AlarmIcon,
   BellIcon,
+  BestieIcon,
   BrowserIcon,
   ChatsCircleIcon,
   NoteIcon,
@@ -54,6 +55,7 @@ export function orderPages(
 }
 
 const bundledIcons = new Map<string, typeof BrowserIcon>([
+  ["buzz.bestie/bestie", BestieIcon],
   ["buzz.inbox/inbox", BellIcon],
   ["buzz.drafts-and-sent/drafts-sent", SendIcon],
   ["buzz.reminders/reminders", AlarmIcon],
@@ -65,9 +67,10 @@ const bundledIcons = new Map<string, typeof BrowserIcon>([
 export function pagePlacement(page: RegisteredPage) {
   if (!page.primary) return undefined;
   switch (page.key) {
+    case "buzz.bestie/bestie":
+      return "sidebar";
     case "buzz.channels/channels":
     case "buzz.inbox/inbox":
-    case "buzz.bestie/bestie":
     case "buzz.reminders/reminders":
     case "buzz.agents/agents":
     case "buzz.workflows/workflows":

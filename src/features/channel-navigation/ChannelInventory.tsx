@@ -139,7 +139,7 @@ const emptySidebarSections: SidebarSections = {
   version: 1,
   snapshot: noSidebarSections,
   subscribe: noSubscription,
-  register: () => {},
+  register: () => () => {},
 };
 
 /** Channel data, actions and notices; the primary sidebar owns their framing. */

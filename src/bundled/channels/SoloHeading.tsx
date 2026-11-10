@@ -1,3 +1,4 @@
+import { ConversationHeaderTools } from "../../features/conversation/ConversationHeaderTools";
 import type { Conversation } from "../../features/conversation/service";
 import { prepareSoloMove } from "../../features/channel-navigation/solo-navigation";
 import { useSoloNavigation } from "../../features/channel-navigation/solo-navigation-react";
@@ -73,7 +74,9 @@ export function SoloHeading(props: SoloToolbarProps) {
   ) : (
     <div className={identityStyles.soloHeader}>
       <PanelHeader
-        title={
+        divider={false}
+        title={props.channel.name}
+        icon={
           <ChannelMembersButton
             session={props.session}
             channelId={props.channel.id}
@@ -83,7 +86,11 @@ export function SoloHeading(props: SoloToolbarProps) {
             signal={props.signal}
           />
         }
-        actions={<SoloToolbar {...props} membershipInHeader />}
+        actions={
+          <ConversationHeaderTools
+            actions={<SoloToolbar {...props} membershipInHeader />}
+          />
+        }
       />
     </div>
   );

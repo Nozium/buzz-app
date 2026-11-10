@@ -21,7 +21,7 @@
 }
 .feed {
   --message-hover-inset: var(--space-panel-inset);
-  --timeline-measure: var(--buzz-message-width, 52rem);
+  --timeline-measure: var(--size-conversation-measure);
 
   flex: 1;
   min-height: 0;
@@ -718,7 +718,7 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   border-radius: calc(var(--radius-icon-button) + var(--space-1h) + 1px);
   box-shadow: var(--shadow-xs);
   padding: var(--space-3) var(--space-1h) var(--space-1h);
-  width: min(calc(100% - 2 * var(--space-4)), var(--buzz-message-width, 52rem));
+  width: calc(100% - 2 * var(--space-3));
   margin: 0 auto var(--space-4);
   display: flex;
   flex-shrink: 0;
@@ -738,13 +738,6 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
 .emptyConversation {
   padding-block: var(--space-panel-inset);
 }
-.composer[data-chat-presentation] {
-  margin-bottom: var(--space-3);
-}
-/* The composer spans the same full width as a compact list. */
-:where(html[data-message-density="compact"]) .composer {
-  width: calc(100% - 2 * var(--space-4));
-}
 .empty {
   padding: var(--space-8) var(--space-4);
   color: var(--text-subtle);
@@ -758,13 +751,6 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   }
   .emptyConversation {
     padding-block: var(--space-3);
-  }
-  .composer {
-    width: min(
-      calc(100% - 2 * var(--space-3)),
-      var(--buzz-message-width, 52rem)
-    );
-    margin: 0 auto var(--space-3);
   }
 }
 .composer[data-editing] {
@@ -994,7 +980,7 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
 
 .threadHistory {
   --message-hover-inset: var(--space-4);
-  --timeline-measure: var(--buzz-message-width, 52rem);
+  --timeline-measure: var(--size-conversation-measure);
   position: relative;
   flex: 1;
   min-height: 0;
@@ -1019,6 +1005,9 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   --timeline-measure: 100%;
   --message-hover-start-inset: var(--space-3);
   padding-inline-start: var(--space-3);
+}
+:where(html[data-message-density="compact"]) .composer {
+  max-width: none;
 }
 /* Measure loaded rows without painting a scroll position we will replace,
    then fade them in once positioned. */
@@ -2344,6 +2333,15 @@ html[data-keyboard-navigation] .replyBranchCollapse:focus-visible {
   grid-template-rows: 1fr;
   margin-block-start: calc(-1 * var(--space-1h));
 }
+/* Reply holds are provisional: reveal above the editor without resizing the
+   transcript and provoking scroll corrections on every preview/cancellation. */
+.composerReplySlot:not([data-animate-size]) {
+  position: absolute;
+  inset-inline: var(--space-1h);
+  bottom: calc(100% + var(--space-2));
+  margin: 0;
+  z-index: 1;
+}
 .composerReplyClip {
   min-height: 0;
   overflow: hidden;
@@ -2353,17 +2351,21 @@ html[data-keyboard-navigation] .replyBranchCollapse:focus-visible {
   opacity: 0;
   transform: translateY(var(--space-1h));
 }
+.composerReplySlot:not([data-animate-size]) .composerReplyContent {
+  padding-block-end: 0;
+}
 .composerReplySlot[data-open] .composerReplyContent {
   opacity: 1;
   transform: translateY(0);
 }
 @media (prefers-reduced-motion: no-preference) {
-  html:not([data-keyboard-navigation]) .composerReplySlot {
+  html:not([data-keyboard-navigation]) .composerReplySlot[data-animate-size] {
     transition:
       grid-template-rows var(--duration-state) var(--easing-enter),
       margin-block-start var(--duration-state) var(--easing-enter);
   }
-  html:not([data-keyboard-navigation]) .composerReplySlot[data-open] {
+  html:not([data-keyboard-navigation])
+    .composerReplySlot[data-open][data-animate-size] {
     transition-duration: var(--duration-settle);
 
     @starting-style {

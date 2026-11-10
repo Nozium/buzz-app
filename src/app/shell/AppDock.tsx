@@ -1,0 +1,78 @@
+import type { ComponentProps, ReactNode } from "react";
+import { PageNavigation } from "./PageNavigation";
+import { SidebarNavigation } from "../../shared/design-system/ui/SidebarNavigation";
+import { NavigationSection } from "../../shared/design-system/ui/NavigationSection";
+import styles from "./AppDock.module.css";
+import { useScrollEdges } from "../../shared/design-system/ui/useScrollEdges";
+import sectionStyles from "./RailArrangement.module.css";
+
+export function AppDock({
+  search,
+  community,
+  profile,
+  settings,
+  children,
+  showPrimaryNavigation = true,
+  open = true,
+  onDismiss,
+  ...pages
+}: Omit<ComponentProps<typeof PageNavigation>, "placement"> & {
+  search: ReactNode;
+  community: ReactNode;
+  profile: ReactNode;
+  settings: ReactNode;
+  children?: ReactNode;
+  showPrimaryNavigation?: boolean;
+  open?: boolean;
+  onDismiss?: () => void;
+}) {
+  const scrollEdges = useScrollEdges("block");
+  return (
+    <nav
+      className={styles.frame}
+      aria-label="Apps"
+      id="shell-rail"
+      hidden={!open}
+      onKeyDown={(event) => {
+        if (
+          event.key === "Escape" &&
+          !event.defaultPrevented &&
+          !(
+            event.target instanceof Element &&
+            event.target.closest(
+              '[role="menu"], [role="dialog"], [data-context-menu-present], [aria-haspopup="menu"][aria-expanded="true"]',
+            )
+          )
+        )
+          onDismiss?.();
+      }}
+      data-search-external={!search || undefined}
+    >
+      <div
+        className={styles.apps}
+        ref={scrollEdges}
+        data-scroll-fade="scrolled"
+      >
+        <SidebarNavigation>
+          {showPrimaryNavigation && (
+            <div className={`${sectionStyles.group} ${styles.primary}`}>
+              <NavigationSection>
+                {search}
+                <PageNavigation {...pages} placement="sidebar" />
+              </NavigationSection>
+            </div>
+          )}
+          {children}
+        </SidebarNavigation>
+      </div>
+      <div id="rail-drop-slot" className={styles.dropSlot} />
+      {(community || profile || settings) && (
+        <div className={styles.footer}>
+          {community}
+          {profile}
+          {settings}
+        </div>
+      )}
+    </nav>
+  );
+}

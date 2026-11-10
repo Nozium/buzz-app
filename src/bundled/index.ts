@@ -1,3 +1,5 @@
+import smartSectionsManifest from "./smart-sections/manifest.json";
+import * as smartSections from "./smart-sections";
 import meshManifest from "./mesh-compute/manifest.json";
 import * as mesh from "./mesh-compute";
 import voiceNotesManifest from "./voice-notes/manifest.json";
@@ -48,6 +50,8 @@ import bestieManifest from "./bestie/manifest.json";
 import * as bestie from "./bestie";
 import usageManifest from "./usage/manifest.json";
 import * as usage from "./usage";
+import activitySidebarManifest from "./activity-sidebar/manifest.json";
+import * as activitySidebar from "./activity-sidebar";
 import inboxManifest from "./inbox/manifest.json";
 import * as inbox from "./inbox";
 import focusManifest from "./focus/manifest.json";
@@ -85,6 +89,11 @@ const claudeHarness: BundledPlugin = {
 };
 
 export const bundledPlugins: readonly BundledPlugin[] = [
+  {
+    manifest: { ...smartSectionsManifest, apiVersion: 1 },
+    module: smartSections,
+    enabledByDefault: true,
+  },
   {
     manifest: { ...meshManifest, apiVersion: 1 },
     module: mesh,
@@ -190,6 +199,13 @@ export const bundledPlugins: readonly BundledPlugin[] = [
   {
     manifest: { ...inboxManifest, apiVersion: 1 },
     module: inbox,
+    enabledByDefault: true,
+  },
+  // PROTOTYPE: on by default on this branch. The desktop catalog in
+  // crates/plugin-manager lists it too.
+  {
+    manifest: { ...activitySidebarManifest, apiVersion: 1 },
+    module: activitySidebar,
     enabledByDefault: true,
   },
   {

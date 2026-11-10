@@ -333,6 +333,17 @@ function AvatarStackSpecimen() {
           max={5}
         />
       </Button>
+      {[1, 2, 3].map((count) => (
+        <span
+          key={count}
+          className="size-9"
+          role="img"
+          aria-label={`${count} conversation members`}
+        >
+          <AvatarStack items={items.slice(0, count)} size="cluster" />
+        </span>
+      ))}
+      <AvatarStack items={items} size="large" />
       <AvatarStack items={items} size="hero-large" max={5} animateEntrance />
     </div>
   );
@@ -341,6 +352,25 @@ function AvatarStackSpecimen() {
 function AvatarSpecimen() {
   return (
     <div className="component-specimen-stack">
+      <div className="component-specimen-row">
+        {(
+          [
+            "categorical-purple",
+            "categorical-blue",
+            "categorical-green",
+            "categorical-orange",
+          ] as const
+        ).map((surface) => (
+          <Specimen key={surface} prop={`fallbackSurface="${surface}"`}>
+            <Avatar
+              alt="Channel"
+              fallback="Channel"
+              shape="squircle"
+              fallbackSurface={surface}
+            />
+          </Specimen>
+        ))}
+      </div>
       <SpecimenGroup
         label="Identity shape: circles for humans, squircles for agents"
         code={`<div className="flex flex-wrap items-center gap-4">
@@ -725,6 +755,14 @@ function FullPageSurfaceSpecimen() {
 function PanelSpecimen() {
   return (
     <div className="component-specimen-stack">
+      <SpecimenGroup
+        label="Flat canvas"
+        code={'<Panel flat aria-label="Flat canvas" />'}
+      >
+        <div className="component-single-surface-demo">
+          <Panel flat aria-label="Flat canvas" />
+        </div>
+      </SpecimenGroup>
       <Panel as="div" shape="card" aria-label="Account card surface">
         <div className="p-8">Standalone account card</div>
       </Panel>
@@ -827,6 +865,13 @@ function TabsSpecimen() {
   return (
     <div className="component-specimen-stack">
       <Tabs
+        label="Button filters"
+        variant="buttons"
+        value={panelDestination}
+        onValueChange={setPanelDestination}
+        items={iconItems}
+      />
+      <Tabs
         label="Segmented filters"
         variant="segmented"
         value={panelDestination}
@@ -852,6 +897,14 @@ function TabsSpecimen() {
       <Tabs
         label="Dock destinations"
         variant="dock"
+        value={panelDestination}
+        onValueChange={setPanelDestination}
+        items={iconItems}
+      />
+      <Tabs
+        label="Compact dock destinations"
+        variant="dock"
+        size="sm"
         value={panelDestination}
         onValueChange={setPanelDestination}
         items={iconItems}
@@ -1107,6 +1160,12 @@ function PanelHeaderSpecimen() {
           icon={<ChatCircleIcon size={16} aria-hidden="true" />}
           actions={actions}
         />
+      </SpecimenGroup>
+      <SpecimenGroup
+        label="Divider hidden, toolbar height preserved"
+        code={"<PanelHeader title={null} actions={actions} divider={false} />"}
+      >
+        <PanelHeader title={null} actions={actions} divider={false} />
       </SpecimenGroup>
       <SpecimenGroup
         label="Detail — back navigation before the title"
@@ -1368,6 +1427,27 @@ function NavigationItemSpecimen() {
   const [dropTarget, setDropTarget] = useState(false);
   return (
     <div className="component-specimen-stack">
+      <SpecimenGroup
+        label="Avatar destinations — accessible labels with persistent selection"
+        code={
+          '<NavigationItem variant="avatar" label="Alex" icon={<Avatar size="fill" alt="" fallback="Alex" />} selected />'
+        }
+      >
+        <div className="flex gap-3">
+          {["Alex", "Morgan", "Unavailable"].map((name) => (
+            <Tooltip key={name} content={name} hint="dock">
+              <NavigationItem
+                variant="avatar"
+                label={name}
+                icon={<Avatar size="fill" alt="" fallback={name} />}
+                selected={selected === name}
+                disabled={name === "Unavailable"}
+                onClick={() => setSelected(name)}
+              />
+            </Tooltip>
+          ))}
+        </div>
+      </SpecimenGroup>
       {/* Interactive: clicking moves `selected`, so the selected fill and the
           unselected rest state are both visible at once and comparable. */}
       <SpecimenGroup
@@ -1406,12 +1486,12 @@ function NavigationItemSpecimen() {
       </SpecimenGroup>
       <SpecimenGroup
         label="Card — selected item in a collection"
-        code={`<NavigationCard>
+        code={`<NavigationCard align="center">
   <NavigationItem label="Selected draft" selected aria-current="true" />
 </NavigationCard>`}
       >
         <div className="component-navigation-section-demo">
-          <NavigationCard>
+          <NavigationCard align="center">
             <NavigationItem
               label="Selected draft"
               selected

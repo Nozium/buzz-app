@@ -1,9 +1,13 @@
+import { isInboxRoute } from "../inbox/route";
 import { StartLinkedChat, canStartLinkedChat } from "./StartLinkedChat";
 import { ChannelCompletion } from "./ChannelCompletion";
 import { channelQuery } from "./channel-query";
 import { isChannelRoute } from "../../features/channel-navigation/routes";
 import type { PluginModule } from "../../plugins/api";
 import { ChannelsPage } from "./ChannelsPage";
+import { MessagesIndex } from "./MessagesIndex";
+import { RailSectionPage } from "../../app/shell/RailSectionPage";
+import { isSidebarSectionRoute } from "../../features/channel-navigation/sidebar-section-route";
 import { PageTabs } from "./PageTabs";
 import { registerCanvas } from "./canvas-panel";
 import { ChannelTemplateSettings } from "./ChannelTemplateSettings";
@@ -133,22 +137,49 @@ export const apply: PluginModule["apply"] = (ctx) => {
     layout: "workspace",
     companion: true,
     handlesNavigation: true,
-    route: { version: 1, validate: isChannelRoute },
-    component: ({ companion, navigation }) => (
-      <ChannelsPage
-        chatMenus={ctx.conversation.chatMenus}
-        navigation={navigation}
-        navigator={navigator}
-        extensions={extensions}
-        relay={relay}
-        panels={panels}
-        archive={archive}
-        read={read}
-        companion={companion}
-        agents={agents}
-        communities={ctx.communityReader}
-        membership={membership}
-      />
-    ),
+    route: {
+      version: 1,
+      validate: (params) =>
+        isChannelRoute(params) ||
+        isInboxRoute(params) ||
+        isSidebarSectionRoute(params),
+    },
+    component: ({ companion, navigation }) =>
+      navigation?.target.kind === "page" &&
+      isSidebarSectionRoute(navigation.target.route?.params) ? (
+        <RailSectionPage
+          section={navigation.target.route.params.section}
+          relay={relay}
+          navigator={navigator}
+          pages={ctx.pages}
+          sidebarSections={ctx.reflect.get("sidebarSections")}
+          navigation={navigation}
+        />
+      ) : navigation?.target.kind === "page" &&
+        (!navigation.target.route ||
+          isInboxRoute(navigation.target.route.params)) ? (
+        <MessagesIndex
+          host={ctx}
+          extensions={extensions}
+          relay={relay}
+          navigator={navigator}
+          navigation={navigation}
+        />
+      ) : (
+        <ChannelsPage
+          chatMenus={ctx.conversation.chatMenus}
+          navigation={navigation}
+          navigator={navigator}
+          extensions={extensions}
+          relay={relay}
+          panels={panels}
+          archive={archive}
+          read={read}
+          companion={companion}
+          agents={agents}
+          communities={ctx.communityReader}
+          membership={membership}
+        />
+      ),
   });
 };

@@ -1,5 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -10,7 +11,11 @@ import {
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { buzzLinkTarget } from "../navigation/buzz-links";
 import { PanelView } from "../panels/PanelView";
-import { panelOpening, type PanelOpening } from "../panels/service";
+import {
+  panelOpening,
+  type PanelOpening,
+  type RegisteredPanel,
+} from "../panels/service";
 import type { ThreadPanelProps } from "../messages/ThreadPanel";
 import { useConversationPresentation } from "./ConversationPresentation";
 import { ForwardMessageProvider } from "../messages/ForwardMessage";
@@ -23,6 +28,15 @@ export type ConversationHostServices = Pick<
 export type ConversationInteractions = Required<
   Pick<ThreadPanelProps, "onOpenLink" | "canOpenLink" | "onOpenMediaReview">
 >;
+export type ConversationHostInteractions = ConversationInteractions & {
+  canOpenLink(target: string): boolean;
+  /** Explicit channel launchers may open panels without a URL matcher. */
+  openPanel(
+    panel: RegisteredPanel,
+    target: string,
+    returnFocus?: HTMLElement | null,
+  ): boolean;
+};
 type ConversationHostProps = Pick<
   ThreadPanelProps,
   "session" | "scope" | "channelId" | "channelName"
@@ -30,7 +44,7 @@ type ConversationHostProps = Pick<
   host: ConversationHostServices;
   threadId?: string | undefined;
   children(
-    interactions: ConversationInteractions,
+    interactions: ConversationHostInteractions,
     mediaReview: MediaReview | undefined,
   ): ReactNode;
 };
@@ -104,7 +118,10 @@ export function ConversationHost({
           ? document.activeElement
           : null;
   };
-  const canOpen = (target: string) => !!host.panels.resolve(target);
+  const canOpen = useCallback(
+    (target: string) => !!host.panels.resolve(target),
+    [host.panels],
+  );
   /** Replacements stay in the opening message's thread, like Channels. */
   const open = (url: string, rootId?: string) => {
     if (!active()) return false;
@@ -128,6 +145,19 @@ export function ConversationHost({
     >
       {children(
         {
+          openPanel: (panel, target, returnFocus) => {
+            if (!active() || !host.panels.snapshot().includes(panel))
+              return false;
+            enter();
+            if (returnFocus) trigger.current = returnFocus;
+            setOverlay({
+              panel,
+              target,
+              channelId,
+              ...(threadId && { rootId: threadId }),
+            });
+            return true;
+          },
           onOpenLink: (url, origin) => open(url, origin?.rootId),
           canOpenLink: canOpen,
           onOpenMediaReview: (
@@ -163,7 +193,10 @@ export function ConversationHost({
         <Dialog
           open
           title={overlay.panel.title}
-          placement="right"
+          placement="bottom"
+          backdrop="subtle"
+          size="wide"
+          closePlacement="start"
           height="stable"
           finalFocus={() =>
             trigger.current?.isConnected ? trigger.current : false

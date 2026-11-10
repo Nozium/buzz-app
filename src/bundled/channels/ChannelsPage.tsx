@@ -1,3 +1,4 @@
+import { useInlineReply } from "../../features/messages/use-inline-reply";
 import { useChannelHistoryFocus } from "./useChannelHistoryFocus";
 import type { Conversation } from "../../features/conversation/service";
 import { StartLinkedChat, canStartLinkedChat } from "./StartLinkedChat";
@@ -786,7 +787,7 @@ function ChannelWorkspace({
   // also files into a project; the conversation scope owns composer policy.
   const solo = current?.channelType === "solo";
   // Solo has no main tab workspace; its threads open beside the chat.
-  const threadPane = solo ? ("side" as const) : undefined;
+  const threadPane = "side" as const;
   // Confirmations belong to this visit; a Solo conversation that leaves the
   // owner's view opens its nearest sidebar neighbor, or else a new draft,
   // rather than an empty page.
@@ -927,6 +928,12 @@ function ChannelWorkspace({
     };
   }, [read, readableId, queries, navigation]);
   const onComposerSend = useComposerSent(currentId, setSent);
+  const inlineReply = useInlineReply(
+    queries,
+    currentId,
+    onComposerSend,
+    composerFocus,
+  );
   const [exactOpening, setExactOpening] = useState<{
     request: PageNavigation;
     inTimeline: boolean;
@@ -1245,7 +1252,7 @@ function ChannelWorkspace({
     extensions,
     leadingIds: settings ? ["settings"] : [],
     threadId: routedThread?.messageId,
-    mainPane: !solo,
+    mainPane: false,
     navigation: navigator,
     routed: routedThread,
     onVisitPanel: visitPanel,
@@ -2043,6 +2050,13 @@ function ChannelWorkspace({
             holding={contextHolding}
             inlineTarget={contextTarget}
             onOpenThread={openThread}
+            onReply={
+              !current.archived &&
+              current.viewerRole !== "guest" &&
+              !current.readOnly
+                ? inlineReply.select
+                : undefined
+            }
             revealMessageId={
               sent?.channelId === current.id ? sent.id : undefined
             }
@@ -2137,9 +2151,8 @@ function ChannelWorkspace({
                 <WorkspaceControl session={queries} channelId={current.id} />
               ) : undefined
             }
-            onSend={onComposerSend}
+            {...inlineReply.composer}
             onCommand={handleCommand}
-            focusRequest={composerFocus}
           />
         )}
     </div>
@@ -2150,6 +2163,7 @@ function ChannelWorkspace({
       data-reading-thread={readingThread ? "" : undefined}
       data-companion={companion ? "" : undefined}
       ref={split.ref}
+      data-expando-scope=""
       style={split.style}
       className={`${styles.board} ${panelStyles.splitMotion}`}
     >
@@ -2184,7 +2198,7 @@ function ChannelWorkspace({
         data-solo-focus-pane={solo ? "" : undefined}
       >
         <div
-          className={`${styles.conversation}${solo ? ` ${styles.soloConversation}` : ""}`}
+          className={`${styles.conversation} ${styles.mainConversation}${solo ? ` ${styles.soloConversation}` : ""}`}
           style={
             {
               "--channel-preview-inset": channelNotice
@@ -2203,6 +2217,37 @@ function ChannelWorkspace({
               extensions={extensions}
               onPreparing={(pubkeys) => handoff?.prepareDm(pubkeys)}
               onOpenThread={openChannelThread}
+              allowChannels
+              onOpenChat={(channelId) => {
+                if (!behindSettings()) select(channelId);
+              }}
+              renderSolo={(agent, focusRequest) => (
+                <SoloDraft
+                  key={agent}
+                  embedded
+                  agent={agent}
+                  focusRequest={focusRequest}
+                  session={queries}
+                  scope={scope}
+                  extensions={extensions}
+                  onStarted={(channelId) => {
+                    if (!behindSettings()) select(channelId);
+                  }}
+                  onFailed={(_channelId, message, retry) =>
+                    notify(
+                      message,
+                      "error",
+                      retry
+                        ? {
+                            label: "Retry restoring message",
+                            onClick: () => void retry(),
+                            timeout: Infinity,
+                          }
+                        : undefined,
+                    )
+                  }
+                />
+              )}
               onStarted={(channelId, id) => {
                 handoff?.clearPreparingDm();
                 if (behindSettings()) return;
@@ -2321,6 +2366,8 @@ function ChannelWorkspace({
                 <div className={styles.mainWorkspace}>
                   <PanelWorkspace
                     main
+                    identityPlacement="content"
+                    headerDivider={false}
                     tabMenu={tabMenu}
                     drag={secondary.drag.main}
                     label="Channel tabs"
@@ -2501,6 +2548,8 @@ function ChannelWorkspace({
       </p>
       <PanelDock
         open={!!showingPanel && !showingMediaReview}
+        title={drawer.title}
+        close={drawer.close}
         keepMounted={
           tabState.entries.length > 0 || (!!hasPanel && !tabState.paneOpen)
         }

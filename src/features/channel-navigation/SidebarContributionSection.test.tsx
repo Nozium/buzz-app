@@ -78,7 +78,7 @@ it("isolates a contribution render failure and keeps sibling section actions usa
     version: 1,
     snapshot: () => [broken, good],
     subscribe: () => () => {},
-    register: () => {},
+    register: () => () => {},
   };
   const open = vi.fn().mockResolvedValue({ status: "opened" });
   const navigator = { open } as unknown as Navigation;
@@ -149,7 +149,7 @@ it("keeps failed header-action feedback visible while the section is collapsed",
     version: 1,
     snapshot: () => [entry],
     subscribe: () => () => {},
-    register: () => {},
+    register: () => () => {},
   };
 
   render(
@@ -239,7 +239,7 @@ it("selects an unscoped page row in its current community only", () => {
     version: 1,
     snapshot: () => [entry],
     subscribe: () => () => {},
-    register: () => {},
+    register: () => () => {},
   };
 
   render(
@@ -316,7 +316,7 @@ it("keeps conversation-level rows selected through in-conversation navigation", 
     version: 1,
     snapshot: () => [entry],
     subscribe: () => () => {},
-    register: () => {},
+    register: () => () => {},
   };
   const renderSection = (target: OpenTarget) => (
     <ChannelSidebarDnd
@@ -392,7 +392,7 @@ it("preserves the receiver for an external row store", () => {
     version: 1,
     snapshot: () => [entry],
     subscribe: () => () => {},
-    register: () => {},
+    register: () => () => {},
   };
 
   render(

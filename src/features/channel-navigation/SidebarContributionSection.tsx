@@ -11,43 +11,13 @@ import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { OwnedContribution } from "../../plugins/OwnedContribution";
 import styles from "../../bundled/channels/Channels.module.css";
 import type { Navigation } from "../navigation/controller";
-import { targetKey, type OpenTarget } from "../navigation/targets";
+import type { OpenTarget } from "../navigation/targets";
 import type {
   RegisteredSidebarSection,
   SidebarSections,
 } from "./sidebar-sections-service";
+import { isSelectedDestination } from "./sidebar-destinations";
 import { DroppableSidebarSection } from "./ChannelSidebarDnd";
-
-function isSelectedDestination(destination: OpenTarget, target: OpenTarget) {
-  const selectedKey = targetKey(target);
-  if (targetKey(destination) === selectedKey) return true;
-  if (
-    destination.kind === "conversation" &&
-    target.kind === "conversation" &&
-    destination.messageId === undefined &&
-    destination.panel === undefined
-  ) {
-    const conversationKey = (conversation: typeof destination) =>
-      targetKey({
-        version: 1,
-        kind: "conversation",
-        scope: conversation.scope,
-        channelId: conversation.channelId,
-      });
-    return conversationKey(destination) === conversationKey(target);
-  }
-  if (
-    destination.kind !== "page" ||
-    target.kind !== "page" ||
-    destination.scope !== undefined ||
-    target.scope === undefined ||
-    target.scope === null
-  )
-    return false;
-
-  // An omitted page scope retains the current community.
-  return targetKey({ ...destination, scope: target.scope }) === selectedKey;
-}
 
 export function SidebarContributionSection({
   entry,

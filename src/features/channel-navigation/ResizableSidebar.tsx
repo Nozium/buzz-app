@@ -30,7 +30,10 @@ const widths = new Map<
 >();
 
 /** One width per community/viewer workspace, shared by every primary sidebar. */
-export function readSidebarWidth(scope: string): number {
+export function readSidebarWidth(
+  scope: string,
+  defaultWidth = SIDEBAR_DEFAULT_WIDTH,
+): number {
   const memory = widths.get(scope);
   const revision = viewRevision(scope, VIEW);
   if (memory && (revision === undefined || revision === memory.revision))
@@ -39,7 +42,7 @@ export function readSidebarWidth(scope: string): number {
   const saved = readView<{ width?: unknown } | null>(scope, VIEW, null);
   return typeof saved?.width === "number" && Number.isFinite(saved.width)
     ? clampSidebarWidth(saved.width)
-    : SIDEBAR_DEFAULT_WIDTH;
+    : clampSidebarWidth(defaultWidth);
 }
 
 function saveSidebarWidth(scope: string, width: number) {
@@ -65,23 +68,28 @@ function saveSidebarWidth(scope: string, width: number) {
 export function ResizableSidebar({
   scope,
   className = "shell-sidebar-default",
+  defaultWidth = SIDEBAR_DEFAULT_WIDTH,
   children,
 }: {
   scope: string;
   className?: string;
+  /** A host's comfortable width; saved user choices still take precedence. */
+  defaultWidth?: number;
   children: ReactNode;
 }) {
   // A workspace change reads that workspace's width without remounting the
   // sidebar contents (which would detach focus and in-flight interactions).
   const [view, setView] = useState(() => ({
     scope,
-    width: readSidebarWidth(scope),
+    width: readSidebarWidth(scope, defaultWidth),
   }));
-  if (view.scope !== scope) setView({ scope, width: readSidebarWidth(scope) });
-  const width = view.scope === scope ? view.width : readSidebarWidth(scope);
+  if (view.scope !== scope)
+    setView({ scope, width: readSidebarWidth(scope, defaultWidth) });
+  const width =
+    view.scope === scope ? view.width : readSidebarWidth(scope, defaultWidth);
   useLayoutEffect(() => {
     const update = () => {
-      const width = readSidebarWidth(scope);
+      const width = readSidebarWidth(scope, defaultWidth);
       setView((current) =>
         current.scope === scope && current.width === width
           ? current
@@ -91,12 +99,12 @@ export function ResizableSidebar({
     const stop = subscribeView(scope, update);
     update();
     return stop;
-  }, [scope]);
+  }, [scope, defaultWidth]);
   const resize = (next: number) => {
     const clamped = clampSidebarWidth(next);
     if (clamped === width) return;
     saveSidebarWidth(scope, clamped);
-    setView({ scope, width: readSidebarWidth(scope) });
+    setView({ scope, width: readSidebarWidth(scope, defaultWidth) });
   };
   return (
     <>
@@ -109,7 +117,7 @@ export function ResizableSidebar({
         setWidth={resize}
         min={SIDEBAR_MIN_WIDTH}
         max={SIDEBAR_MAX_WIDTH}
-        reset={() => resize(SIDEBAR_DEFAULT_WIDTH)}
+        reset={() => resize(defaultWidth)}
         label="Resize sidebar"
         className={styles.handle}
       />

@@ -97,9 +97,8 @@ export function PageTabs({
       return true;
     },
     fallbackFocus,
-    mainPane: true,
-    anyMainThread: true,
-    // The page stays in view; a thread reaches the main pane only when moved.
+    mainPane: false,
+    // Detail tabs stay in the sheet; the page remains visible behind it.
     threadPane: "side",
     visits,
     navigation: host.navigation,
@@ -321,6 +320,7 @@ export function PageTabs({
       >
         <div
           ref={split.ref}
+          data-expando-scope=""
           style={split.style}
           data-reading-thread={readingTab ? "" : undefined}
           className={`${styles.board} ${panelStyles.splitMotion}`}

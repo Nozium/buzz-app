@@ -1,0 +1,117 @@
+// @vitest-environment jsdom
+import { act, cleanup, renderHook } from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import { useRailLayout } from "./rail-layout";
+import type { RailEntry } from "./rail-pins";
+import { writeView } from "../../shared/view-state";
+
+const entry: RailEntry = {
+  id: "channel:planning",
+  label: "Planning",
+  kind: "channel",
+  target: {
+    version: 1,
+    kind: "conversation",
+    channelId: "planning",
+    scope: { viewer: "a".repeat(64), communityOrigin: "https://example.org" },
+  },
+};
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+  vi.restoreAllMocks();
+});
+
+test("the former fixed card becomes movable without losing saved order or rows", () => {
+  writeView("legacy-layout", "navigation-layout:v1", {
+    order: ["agents", "pins", "messages", "plugins"],
+    sections: [],
+    placements: [{ section: "plugins", entry }],
+  });
+  const { result, unmount } = renderHook(() => useRailLayout("legacy-layout"));
+  expect(result.current.layout.order).toEqual([
+    "navigation",
+    "agents",
+    "pins",
+    "messages",
+  ]);
+  expect(result.current.layout.placements).toEqual([
+    { section: "navigation", entry },
+  ]);
+  act(() => {
+    result.current.reorder("pins", "navigation", [
+      "navigation",
+      "agents",
+      "pins",
+      "messages",
+    ]);
+  });
+  unmount();
+  const restored = renderHook(() => useRailLayout("legacy-layout"));
+  expect(restored.result.current.layout.order).toEqual([
+    "pins",
+    "navigation",
+    "agents",
+    "messages",
+  ]);
+  expect(restored.result.current.layout.placements).toEqual([
+    { section: "navigation", entry },
+  ]);
+});
+
+// Storage failure and account switches are state-owner contracts; pointer/drop
+// geometry and the naming/cancel flow belong to messages-layout.spec.mjs.
+test("a saved arrangement survives remounts, stays scoped, and retains confirmed placement after a failed write", () => {
+  const first = renderHook(({ scope }) => useRailLayout(scope), {
+    initialProps: { scope: "account-a:community-a" },
+  });
+  act(() => {
+    expect(
+      first.result.current.create("project", "Project", entry, [
+        "pins",
+        "messages",
+        "agents",
+      ]),
+    ).toBe(true);
+    expect(
+      first.result.current.reorder("agents", "pins", [
+        "pins",
+        "messages",
+        "agents",
+        "custom:project",
+      ]),
+    ).toBe(true);
+  });
+  first.rerender({ scope: "account-a:community-b" });
+  expect(first.result.current.layout.placements).toEqual([]);
+  first.rerender({ scope: "account-b:community-a" });
+  expect(first.result.current.layout.sections).toEqual([]);
+  first.unmount();
+  const restored = renderHook(() => useRailLayout("account-a:community-a"));
+  expect(restored.result.current.layout.order).toEqual([
+    "agents",
+    "pins",
+    "messages",
+    "custom:project",
+  ]);
+  expect(restored.result.current.layout.placements).toEqual([
+    { section: "custom:project", entry },
+  ]);
+  const write = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("Storage unavailable");
+    });
+  act(() => {
+    expect(restored.result.current.move(entry, "pins")).toBe(false);
+  });
+  expect(restored.result.current.layout.placements).toEqual([
+    { section: "custom:project", entry },
+  ]);
+  write.mockRestore();
+  act(() => {
+    expect(restored.result.current.remove("custom:project")).toBe(true);
+  });
+  expect(restored.result.current.layout.sections).toEqual([]);
+  expect(restored.result.current.layout.placements).toEqual([]);
+});

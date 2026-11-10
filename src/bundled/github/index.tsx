@@ -1,3 +1,4 @@
+import { openPullsSource } from "./smart-sections";
 import { ResolvePull } from "./ResolvePull";
 import type { PullChecklist as Checklist } from "./pull";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -67,6 +68,12 @@ export const REFRESH_MS = PANEL_REFRESH_MS;
 export const inject = ["panels", "host", "conversation", "relay", "agents"];
 export const apply: PluginModule["apply"] = (ctx) => {
   const gh = gitHubCli(ctx.host);
+  if (gh)
+    ctx.inject(["smartSections"], (scope) => {
+      scope.effect(
+        () => scope.smartSections?.register(openPullsSource(gh)) ?? (() => {}),
+      );
+    });
   const diff = gitHubDiff(ctx.host);
   // A pull request's state is nobody's community's: one store serves every
   // session's sidebar, every link in messages, the panel and agents, so one

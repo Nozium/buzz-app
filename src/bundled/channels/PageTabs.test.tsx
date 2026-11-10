@@ -161,26 +161,23 @@ function fixture(visits?: boolean) {
     },
   };
 }
-const tabs = (name: string) =>
-  within(screen.getByRole("tablist", { name }))
-    .getAllByRole("tab")
-    .map((tab) => tab.textContent);
-
 const side = () => {
-  const list = screen
-    .getAllByRole("tablist")
-    .find((item) => item.getAttribute("aria-label") !== "Switchboard tabs");
-  return within(list as HTMLElement)
-    .getAllByRole("tab")
-    .map((tab) => tab.textContent);
+  const sheet = within(screen.getByRole("dialog"));
+  const tabs = sheet.queryAllByRole("tab");
+  return tabs.length
+    ? tabs.map((tab) => tab.textContent)
+    : [sheet.getByRole("heading", { level: 2 }).textContent];
 };
 
-it("keeps the page in view, opening threads in the side pane", () => {
+it("keeps the page in view, opening threads in the bottom expansion", () => {
   setThreadPlacementPreference("main");
   const page = fixture();
   expect(screen.getByText("Chat list")).toBeVisible();
   expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
-  expect(tabs("Switchboard tabs")).toEqual(["Switchboard"]);
+  expect(screen.getByRole("dialog")).toHaveAttribute(
+    "data-placement",
+    "bottom",
+  );
   expect(side()).toEqual(["Root text"]);
   expect(screen.getByText("Chat list")).toBeVisible();
   expect(screen.getByText("thread in alpha")).toBeVisible();
@@ -227,23 +224,15 @@ it("gives each conversation tab its sidebar icon", () => {
   ).toEqual(["tabler-icon-hash beta", "tabler-icon-message-circle Alice"]);
 });
 
-it("opens a thread moved to the main pane where it is", () => {
+it("reopens the same thread in its sheet and retains it when another preview is kept", () => {
   const page = fixture();
   expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
-  act(() => {
-    fireEvent.keyDown(screen.getByRole("tab", { name: /Root text/ }), {
-      key: "ArrowLeft",
-      altKey: true,
-      shiftKey: true,
-    });
-  });
-  expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
+  const thread = screen.getByText("thread in alpha");
   expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
-  expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
-  // The next plain open does not replace it.
-  expect(page.open({ channelId: "beta" })).toBe(true);
-  expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
-  expect(side()).toEqual(["beta"]);
+  expect(screen.getByText("thread in alpha")).toBe(thread);
+  expect(page.open({ channelId: "beta" }, { keep: true })).toBe(true);
+  expect(side()).toEqual(["Root text", "beta"]);
+  expect(screen.getByText("Chat list")).toBeVisible();
 });
 
 it("opens at a message, asking again on each open, with the page's read choice", () => {
@@ -362,26 +351,26 @@ it("names a thread's conversation inside it, linking where the menu's Open in ch
       name: `DM · Ann, Bob, ${formatPublicKey("e".repeat(64))} +1`,
     }),
   ).toBeVisible();
-  expect(screen.getByRole("tab", { name: "Root text" })).toBeVisible();
+  expect(screen.getByRole("dialog", { name: "Root text" })).toBeVisible();
 });
 
-it("opens a tab's conversation in its channel from the tab's menu", async () => {
+it("opens a detail's conversation from its header actions and hands focus to navigation", async () => {
   const user = userEvent.setup();
   const page = fixture();
   page.open({ channelId: "alpha", threadId: "root", messageId: "reply" });
   const scope = { viewer: "viewer", communityOrigin: "origin" };
-  // The menu has handed focus back to the tab, so the destination can take it.
+  // Header actions return focus to the workspace before navigating.
   let focused: Element | null = null;
   vi.mocked(page.navigation.open).mockImplementation(async () => {
     focused = document.activeElement;
     return { status: "opened" };
   });
-  const thread = screen.getByRole("tab", { name: /Root text/ });
-  await user.pointer({ keys: "[MouseRight]", target: thread });
+  const workspace = document.querySelector("[data-panel-workspace]");
+  await user.click(screen.getByRole("button", { name: "Detail actions" }));
   await user.click(
-    await screen.findByRole("menuitem", { name: "Open in channel" }),
+    await screen.findByRole("button", { name: "Open in channel" }),
   );
-  await vi.waitFor(() => expect(focused).toBe(thread));
+  await vi.waitFor(() => expect(focused).toBe(workspace));
   expect(page.navigation.open).toHaveBeenLastCalledWith({
     version: 1,
     kind: "conversation",
@@ -392,12 +381,9 @@ it("opens a tab's conversation in its channel from the tab's menu", async () => 
     context: "channel",
   });
   page.open({ channelId: "beta" });
-  await user.pointer({
-    keys: "[MouseRight]",
-    target: screen.getByRole("tab", { name: /beta/ }),
-  });
+  await user.click(screen.getByRole("button", { name: "Detail actions" }));
   await user.click(
-    await screen.findByRole("menuitem", { name: "Open in channel" }),
+    await screen.findByRole("button", { name: "Open in channel" }),
   );
   await vi.waitFor(() =>
     expect(page.navigation.open).toHaveBeenLastCalledWith({

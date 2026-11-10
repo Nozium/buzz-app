@@ -1,3 +1,4 @@
+import { useMessageReplyHold, type ReplyHold } from "./use-message-reply-hold";
 import { requestWork, isSettledWork } from "../agents/request-work";
 import { ActivityDisclosure } from "./ActivityDisclosure";
 import { ActivityOutcome } from "./ActivityOutcome";
@@ -146,7 +147,9 @@ export type MessageRowProps = {
   onOpenThread?:
     | ((messageId: string, threadRootId: string, intent?: "reply") => void)
     | undefined;
-  onReply?: ((messageId: string) => void) | undefined;
+  onReply?:
+    | ((messageId: string, deferFocus?: boolean) => ReplyHold | undefined)
+    | undefined;
   /** False: existing threads open, but the row offers none to start or reply in. */
   startsThreads?: boolean;
   quickControls?: ReactNode;
@@ -451,6 +454,16 @@ function MessageRowContent({
     (!session.channels.get || listed) &&
     !archived &&
     !readOnly
+  );
+  const replyDisabled =
+    !!(row.delivery && !["accepted", "seen"].includes(row.delivery)) ||
+    archived ||
+    (!!session?.channels.get && (!listed || readOnly));
+  const replyHold = useMessageReplyHold(
+    row.id,
+    onReply && !replyDisabled && !row.membership && !row.huddle
+      ? (deferFocus) => onReply(row.id, deferFocus)
+      : undefined,
   );
   const rowRef = useRef<HTMLDivElement>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
@@ -779,11 +792,7 @@ function MessageRowContent({
               )
           : undefined)
       }
-      replyDisabled={
-        !!(row.delivery && !["accepted", "seen"].includes(row.delivery)) ||
-        archived ||
-        (!!session?.channels.get && (!listed || readOnly))
-      }
+      replyDisabled={replyDisabled}
       onSendToChannel={
         session &&
         listed &&
@@ -1080,6 +1089,7 @@ function MessageRowContent({
     );
   const message = (
     <div
+      {...replyHold}
       data-message-id={renderMessage ? undefined : row.id}
       data-huddle-row={row.huddle ? "" : undefined}
     >

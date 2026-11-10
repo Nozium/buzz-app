@@ -1,7 +1,9 @@
 import { focusWithKeyboard } from "../shared/design-system/useKeyboardFocusVisibility";
 
 const PRIMARY = "[data-main-workspace], [data-solo-focus-pane]";
-const WORKSPACE = `${PRIMARY}, [data-panel-workspace]`;
+const SECONDARY =
+  "[data-panel-workspace], [data-panel-sheet-body]:not(:has([data-panel-workspace]))";
+const WORKSPACE = `${PRIMARY}, ${SECONDARY}`;
 const COVERING = `${WORKSPACE}, [data-panel-dock]`;
 
 function available(element: HTMLElement) {
@@ -23,11 +25,7 @@ function available(element: HTMLElement) {
 }
 
 function workspaces() {
-  return Array.from(
-    document
-      .getElementById("main-content")
-      ?.querySelectorAll<HTMLElement>(WORKSPACE) ?? [],
-  );
+  return Array.from(document.querySelectorAll<HTMLElement>(WORKSPACE));
 }
 
 function focusedWorkspace() {
@@ -81,13 +79,15 @@ export function paneFocusTarget(pane?: "main" | "side") {
   const targets = workspaces()
     .filter(
       (workspace) =>
-        !pane ||
-        workspace.matches(pane === "main" ? PRIMARY : "[data-panel-workspace]"),
+        !pane || workspace.matches(pane === "main" ? PRIMARY : SECONDARY),
     )
     .map(
       (pane) =>
         composerIn(pane) ??
-        pane.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'),
+        pane.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ??
+        (pane.tabIndex >= -1 && pane.closest("[data-panel-sheet-body]")
+          ? pane
+          : undefined),
     )
     .filter((target): target is HTMLElement => !!target && available(target));
   if (pane) return targets[0];

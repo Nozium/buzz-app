@@ -253,38 +253,67 @@ test("dialog close button closes the controlled frame", async () => {
   );
 });
 
-test("tabs link each trigger to its visible panel", async () => {
-  const user = userEvent.setup();
-  function Example() {
-    const [value, setValue] = useState("notes");
-    return (
-      <Tabs
-        value={value}
-        onValueChange={setValue}
-        label="Workspace"
-        variant="panel"
-        items={[
-          { value: "notes", label: "Notes" },
-          { value: "activity", label: "Activity" },
-        ]}
-        renderPanel={(tab) => (
-          <p>{tab === "notes" ? "Your notes" : "Recent activity"}</p>
-        )}
-      />
+test.each(["panel", "buttons"] as const)(
+  "tabs link each trigger to its visible panel (%s)",
+  async (variant) => {
+    const user = userEvent.setup();
+    const create = vi.fn();
+    const filter = vi.fn();
+    function Example() {
+      const [value, setValue] = useState("notes");
+      return (
+        <Tabs
+          value={value}
+          onValueChange={setValue}
+          label="Workspace"
+          variant={variant}
+          leadingAction={
+            variant === "buttons" ? (
+              <Button onClick={create}>New</Button>
+            ) : undefined
+          }
+          trailingAction={
+            variant === "buttons" ? (
+              <Button onClick={filter}>Filter</Button>
+            ) : undefined
+          }
+          items={[
+            { value: "notes", label: "Notes" },
+            { value: "activity", label: "Activity" },
+          ]}
+          renderPanel={(tab) => (
+            <p>{tab === "notes" ? "Your notes" : "Recent activity"}</p>
+          )}
+        />
+      );
+    }
+    render(<Example />);
+    const notes = screen.getByRole("tab", { name: "Notes" });
+    expect(notes).toHaveAttribute(
+      "aria-controls",
+      screen.getByRole("tabpanel").id,
     );
-  }
-  render(<Example />);
-  const notes = screen.getByRole("tab", { name: "Notes" });
-  expect(notes).toHaveAttribute(
-    "aria-controls",
-    screen.getByRole("tabpanel").id,
-  );
-  expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Notes");
-  await user.click(screen.getByRole("tab", { name: "Activity" }));
-  expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Activity");
-  expect(screen.getByRole("tabpanel")).toHaveTextContent("Recent activity");
-  expect(screen.queryByText("Your notes")).not.toBeInTheDocument();
-});
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Notes");
+    if (variant === "buttons") {
+      const tablist = screen.getByRole("tablist", { name: "Workspace" });
+      expect(within(tablist).queryByRole("button")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "New" }));
+      await user.click(screen.getByRole("button", { name: "Filter" }));
+      expect(create).toHaveBeenCalledOnce();
+      expect(filter).toHaveBeenCalledOnce();
+      expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Notes");
+    }
+    await user.click(screen.getByRole("tab", { name: "Activity" }));
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Activity");
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("Recent activity");
+    expect(screen.queryByText("Your notes")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(notes).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Notes");
+  },
+);
 
 test("navigation keeps warm-read events and data attributes on the focusable button", async () => {
   const user = userEvent.setup();

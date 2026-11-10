@@ -900,7 +900,16 @@ it("lists active primary pages in the app dock", async () => {
   services = createServices();
   const current = services;
   render(<App services={current} />);
-  await screen.findByRole("tab", { name: "Activity" });
+  const activity = await screen.findByRole("tab", { name: "Activity" });
+  await waitFor(() =>
+    expect(activity).toHaveAttribute("aria-selected", "true"),
+  );
+  expect(current.navigation.snapshot().entry.target).toMatchObject({
+    kind: "page",
+    pluginId: "buzz.inbox",
+    pageId: "inbox",
+  });
+  await userEvent.click(screen.getByRole("tab", { name: "Messages" }));
   expect(screen.getByRole("tab", { name: "Bestie" })).toBeInTheDocument();
 
   expect(

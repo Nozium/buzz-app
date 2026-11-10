@@ -174,7 +174,15 @@ export function SoloDraft({
   linkedId,
   source,
   visit,
+  embedded = false,
+  draftPrefix,
+  onDraftChange,
 }: {
+  /** Only the composer, inside a host's own page (New message's To). */
+  embedded?: boolean;
+  /** An embedded New message host can retain its draft when switching to Solo. */
+  draftPrefix?: string;
+  onDraftChange?: ((draft: MentionDraft) => void) | undefined;
   /** The visit presenting this draft, a Back stop only once drafted. */
   visit?: PageNavigation | undefined;
   linkedId?: string | undefined;
@@ -199,7 +207,7 @@ export function SoloDraft({
     ? linkedDraftKey(linkedId)
     : projectId
       ? `solo:project:${projectId}`
-      : "solo";
+      : (draftPrefix ?? "solo");
   const notify = useToastNotification();
   // Before the composer reads it: a named agent replaces a saved draft that
   // only tags another agent, since that tag was the earlier default.
@@ -734,7 +742,10 @@ export function SoloDraft({
           unsaved: (held) => {
             unsaved.current = held;
           },
-          onDraftChange: draftEdited,
+          onDraftChange: (draft) => {
+            draftEdited(draft);
+            onDraftChange?.(draft);
+          },
           submit: (draft, files, addressed, picks, draftPicks, revision) => {
             void start(draft, files, addressed, picks, draftPicks, revision);
           },
@@ -749,6 +760,7 @@ export function SoloDraft({
       {error && <p role="alert">{error}</p>}
     </div>
   );
+  if (embedded) return composer;
   return (
     <SoloDraftView
       actions={

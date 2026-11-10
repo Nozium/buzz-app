@@ -148,6 +148,7 @@ export function DraftsSentPage({
             <Header />
             <div className={styles.sections}>
               <EmptyState
+                frame="none"
                 icon={<SendIcon size={24} />}
                 title="Choose a community"
                 description="Your drafts and sent messages appear once a community is selected."
@@ -788,6 +789,7 @@ function ScopedPage({
                 </ul>
               ) : (
                 <EmptyState
+                  frame="none"
                   icon={<SendIcon size={24} />}
                   title={
                     search ? `No drafts match “${search.trim()}”.` : "No drafts"
@@ -867,6 +869,7 @@ function ScopedPage({
                   ))
                 ) : sentLoading || sent.status === "error" ? null : search ? (
                   <EmptyState
+                    frame="none"
                     icon={<SendIcon size={24} />}
                     title={`No sent messages match “${search.trim()}”`}
                     description={`Search covers your latest ${SENT_LIMIT} messages.`}
@@ -884,6 +887,7 @@ function ScopedPage({
                   />
                 ) : (
                   <EmptyState
+                    frame="none"
                     icon={<SendIcon size={24} />}
                     title="Nothing sent yet"
                     description="Messages you send in this community show up here."

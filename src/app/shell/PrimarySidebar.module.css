@@ -1,4 +1,7 @@
 /* Global navigation and filters sit above the shared sidebar scrollport. */
+.pinnedConversation {
+  margin-block-end: var(--space-3);
+}
 .sidebarControls {
   display: flex;
   flex-wrap: wrap;

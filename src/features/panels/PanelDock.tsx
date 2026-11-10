@@ -1,10 +1,40 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import styles from "./Panels.module.css";
+import { PanelSheet } from "./PanelSheet";
 
 /** Layout owns overlay breakpoints; CSS owns motion and input preferences.
  * Retain closing content only until its own transitions finish, without timers.
  * Selection, focus restoration, and page lifetime remain with the callers. */
 export function PanelDock({
+  presentation = "sheet",
+  title,
+  close,
+  ...props
+}: {
+  open: boolean;
+  className: string | undefined;
+  children: ReactNode;
+  resizeHandle?: ReactNode;
+  keepMounted?: boolean;
+  presentation?: "sheet" | "inline";
+  title?: string | undefined;
+  close?: (() => void) | undefined;
+}) {
+  return presentation === "sheet" ? (
+    <PanelSheet
+      open={props.open}
+      keepMounted={props.keepMounted}
+      title={title}
+      close={close}
+    >
+      {props.children}
+    </PanelSheet>
+  ) : (
+    <InlineDock {...props} />
+  );
+}
+
+function InlineDock({
   open,
   className,
   children,

@@ -1,5 +1,7 @@
+import type { PageTabsProps } from "../../features/conversation/contracts";
 import type { PluginModule } from "../../plugins/api";
 import { InboxPage } from "./InboxPage";
+import { InboxSheet } from "./InboxSheet";
 import { InboxPreview } from "./InboxPreview";
 import { inboxRouteTarget, isInboxRoute, type InboxRoute } from "./route";
 export const inject = [
@@ -42,6 +44,13 @@ export const apply: PluginModule["apply"] = (ctx) => {
     activity: "mentions",
   });
   open("open-dms", "Open DMs in Activity", "k", 50, { activity: "dms" });
+  const Sheet = (
+    props: PageTabsProps & {
+      navigation?:
+        | import("../../features/navigation/service").PageNavigation
+        | undefined;
+    },
+  ) => <InboxSheet {...props} host={ctx} extensions={ctx.conversation} />;
   ctx.pages.register({
     id: "inbox",
     title: "Activity",
@@ -52,7 +61,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
       <InboxPage
         relay={relay}
         navigator={navigator}
-        tabs={ctx.conversation.ui.Tabs}
+        tabs={Sheet}
         navigation={navigation}
       />
     ),

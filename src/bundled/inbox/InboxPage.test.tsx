@@ -2,7 +2,7 @@ const emptyPanels: never[] = [];
 import type { ConversationHostServices } from "../../features/conversation/ConversationHost";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cloneElement, StrictMode, type ReactElement } from "react";
+import { cloneElement, StrictMode, useState, type ReactElement } from "react";
 import {
   act,
   cleanup,
@@ -15,7 +15,10 @@ import {
 import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { PageTabs } from "../channels/PageTabs";
-import { InboxPage } from "./InboxPage";
+import { InboxPage, InboxView } from "./InboxPage";
+import type { PageTabsProps } from "../../features/conversation/contracts";
+import { ConversationPresentation } from "../../features/conversation/ConversationPresentation";
+import { InboxSheet } from "./InboxSheet";
 import { InboxPreview } from "./InboxPreview";
 import { huddleDescription } from "../../features/huddle/lifecycle";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
@@ -61,6 +64,259 @@ afterEach(() => {
   vi.restoreAllMocks();
   for (const owner of owners.splice(0)) owner.dispose();
   vi.useRealTimers();
+});
+
+// The sheet changes Activity's host placement/dismissal, while real session
+// readers, composers and drafts continue through the existing conversation owner.
+it.each([false, true])(
+  "Activity opens a composer sheet and restores its draft after dismissal (DM: %s)",
+  async (dm) => {
+    const h = fixture({ sheet: true, withWriter: true, withDm: dm });
+    render(h.view);
+    if (dm) await userEvent.click(screen.getByRole("button", { name: "DMs" }));
+    await waitFor(() => expect(rows()).toHaveLength(dm ? 1 : 2));
+    const opener = within(rows()[0] as HTMLElement).getByRole("button", {
+      name: /^Open /,
+    });
+    await userEvent.click(opener);
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("button", {
+        name: `Manage members of ${dm ? "Alice" : "Design"}`,
+      }),
+    ).toBeVisible();
+    const editor = (await within(dialog).findByRole(
+      "textbox",
+    )) as ComposerInputElement;
+    act(() => editor.insertText("Keep my Activity draft"));
+    expect(
+      within(dialog).getByRole("region", { name: /^Conversation in / }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("tablist", { name: "Activity tabs" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Close" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(opener).toHaveFocus();
+    await userEvent.click(opener);
+    const reopened = await screen.findByRole("dialog");
+    expect(await within(reopened).findByRole("textbox")).toHaveTextContent(
+      "Keep my Activity draft",
+    );
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(opener).toHaveFocus();
+    expect(h.open).not.toHaveBeenCalled();
+  },
+);
+
+it("a sheet host's local UI update does not recalculate the Activity feed", async () => {
+  const h = fixture();
+  const closed = () => false;
+  function Host({ children }: PageTabsProps) {
+    const [revision, setRevision] = useState(0);
+    return (
+      <>
+        <button type="button" onClick={() => setRevision(revision + 1)}>
+          Update host {revision}
+        </button>
+        {children(closed, closed, closed)}
+      </>
+    );
+  }
+  render(
+    <InboxView
+      session={h.session}
+      scope={h.scope}
+      navigator={{ open: h.open } as unknown as Navigation}
+      tabs={Host}
+    />,
+  );
+  await waitFor(() => {
+    expect(rows()).toHaveLength(2);
+    expect(h.session.unread.inbox().status).toBe("ready");
+    expect(h.session.inboxFeed.snapshot().status).toBe("ready");
+    expect(h.session.inboxFeed.reactions.snapshot().status).toBe("ready");
+  });
+  const activity = vi.spyOn(h.session.unread, "activity");
+  fireEvent.click(screen.getByRole("button", { name: "Update host 0" }));
+  expect(screen.getByRole("button", { name: "Update host 1" })).toBeVisible();
+  expect(activity).not.toHaveBeenCalled();
+});
+
+it("a covered feed skips pending row paints and disables them when exposed during a held read", async () => {
+  const h = fixture();
+  function Host({ children }: PageTabsProps) {
+    const [shown, setShown] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setShown(false)}>
+          Close fixture sheet
+        </button>
+        <ConversationPresentation value={!shown}>
+          {children(
+            () => {
+              setShown(true);
+              return true;
+            },
+            () => false,
+            () => shown,
+          )}
+        </ConversationPresentation>
+      </>
+    );
+  }
+  render(
+    <InboxView
+      session={h.session}
+      scope={h.scope}
+      navigator={{ open: h.open } as unknown as Navigation}
+      tabs={Host}
+    />,
+  );
+  await waitFor(() => {
+    expect(rows()).toHaveLength(2);
+    expect(h.session.unread.inbox().status).toBe("ready");
+    expect(h.session.inboxFeed.snapshot().status).toBe("ready");
+    expect(h.session.inboxFeed.reactions.snapshot().status).toBe("ready");
+  });
+  const first = rows()[0],
+    second = rows()[1];
+  if (!first || !second) throw new Error("Missing Activity rows");
+  const sibling = within(second).getByRole("button", { name: /^Open / });
+  const resolve = vi.spyOn(h.session.names, "resolve");
+  const release = h.holdSave();
+  try {
+    fireEvent.click(within(first).getByRole("button", { name: /^Open / }));
+    await waitFor(() => expect(h.saveStarted()).toBe(true));
+    expect(screen.getByRole("list", { name: "Activity" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    expect(sibling).not.toBeDisabled();
+    // No StrictMode in this host: selecting the first row renders one identity.
+    expect(
+      resolve.mock.calls.filter(([id]) => id === h.alice.pubkey).length,
+    ).toBeLessThanOrEqual(1);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close fixture sheet" }),
+    );
+    expect(sibling).toBeDisabled();
+  } finally {
+    await act(async () => release());
+  }
+  await waitFor(() => expect(sibling).not.toBeDisabled());
+});
+
+it("opening one Activity row menu leaves the other row identities untouched", async () => {
+  const h = fixture();
+  render(h.view);
+  await waitFor(() => expect(rows()).toHaveLength(2));
+  await waitFor(() => {
+    expect(h.session.unread.inbox().status).toBe("ready");
+    expect(h.session.inboxFeed.snapshot().status).toBe("ready");
+    expect(h.session.inboxFeed.reactions.snapshot().status).toBe("ready");
+    expect(
+      screen.queryByText("Checking recent activity…"),
+    ).not.toBeInTheDocument();
+  });
+  const resolve = vi.spyOn(h.session.names, "resolve");
+  const first = rows()[0];
+  if (!first) throw new Error("Missing Activity row");
+  fireEvent.keyDown(within(first).getByRole("button", { name: /^Open / }), {
+    key: "F10",
+    shiftKey: true,
+  });
+  expect(await screen.findByRole("menu")).toBeVisible();
+  // StrictMode may render the affected row twice; its untouched sibling should
+  // do no identity/preview/avatar work for a local menu state change.
+  expect(
+    resolve.mock.calls.filter(([id]) => id === h.alice.pubkey).length,
+  ).toBeLessThanOrEqual(2);
+});
+
+it.each(["data-base-ui-inert", "aria-hidden", "data-activity-covered"])(
+  "does not measure Activity rows covered by %s",
+  async (marker) => {
+    const h = fixture({ readCapability: "read-only" });
+    const view = render(h.view);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    const first = rows()[0];
+    if (!first) throw new Error("Missing Activity row");
+    fireEvent.click(within(first).getByRole("button", { name: /^Open / }));
+    await findReader();
+    const list = scroller();
+    if (!list) throw new Error("Missing Activity scroller");
+    view.container.setAttribute(marker, "true");
+    const measure = vi.spyOn(Element.prototype, "getBoundingClientRect");
+    const mention = message(h.alice, "room", "Covered feed update", 100, [
+      ["p", h.viewer.pubkey],
+    ]);
+    h.addEvent(mention);
+    act(() => h.emit([mention]));
+    await waitFor(() => expect(list).toHaveTextContent("Covered feed update"));
+    fireEvent.scroll(list);
+    expect(
+      measure.mock.contexts.filter(
+        (element) => element instanceof Node && list.contains(element),
+      ),
+    ).toEqual([]);
+  },
+);
+
+it("includes ordinary channel activity in All and isolates it in Channels", async () => {
+  const h = fixture({ sheet: true, withWriter: true, withDm: true });
+  h.session.channels.ensureList();
+  await waitFor(() => {
+    expect(h.session.channels.list().status).toBe("ready");
+    expect(h.session.live.snapshot().roster.state).toBe("verified");
+  });
+  h.addEvent(message(h.alice, "room", "An ordinary channel post", 30));
+  render(h.view);
+  const feed = within(await screen.findByRole("list", { name: "Activity" }));
+  expect(
+    await screen.findByRole("heading", { level: 2, name: "All activity" }),
+  ).toBeVisible();
+  expect(await feed.findByText("An ordinary channel post")).toBeVisible();
+  expect(await feed.findByText("A direct reply")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Channels" }));
+  expect(
+    screen.getByRole("heading", { level: 2, name: "Channels" }),
+  ).toBeVisible();
+  expect(await feed.findByText("An ordinary channel post")).toBeVisible();
+  expect(feed.queryByText("A direct reply")).not.toBeInTheDocument();
+  await userEvent.click(feed.getByRole("button", { name: /Design/ }));
+  const sheet = await screen.findByRole("dialog", {
+    name: "Design",
+  });
+  await userEvent.click(
+    within(sheet).getByRole("button", { name: "Manage members of Design" }),
+  );
+  const members = await screen.findByRole("dialog", {
+    name: "Manage members",
+  });
+  await userEvent.click(within(members).getByRole("button", { name: "Close" }));
+  expect(sheet).toBeVisible();
+});
+
+it("Activity retires an open sheet when channel membership is revoked", async () => {
+  const h = fixture({ sheet: true, withWriter: true });
+  render(h.view);
+  await waitFor(() => expect(rows()).toHaveLength(2));
+  await userEvent.click(
+    within(rows()[0] as HTMLElement).getByRole("button", { name: /^Open / }),
+  );
+  await within(await screen.findByRole("dialog")).findByRole("textbox");
+  act(() => h.revokeRoom());
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
 });
 
 it.each([false, true])(
@@ -830,6 +1086,7 @@ it("retries the card's connection, activity and read-state failures", async () =
 
 function fixture(
   options: {
+    sheet?: boolean;
     failRoster?: boolean;
     archivedChannel?: boolean;
     withDm?: boolean;
@@ -888,7 +1145,11 @@ function fixture(
     }
     if (filter.top_level && filter["#h"]?.[0]) {
       return [
-        ...result,
+        ...result
+          .sort(
+            (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
+          )
+          .slice(0, filter.limit),
         ...events.filter(
           (event) =>
             event.kind === 5 &&
@@ -1394,7 +1655,26 @@ function fixture(
     view: (
       <StrictMode>
         <InboxPage
-          tabs={(props) => <PageTabs {...props} host={host} />}
+          tabs={(props) =>
+            options.sheet ? (
+              <InboxSheet
+                {...props}
+                host={host}
+                extensions={{
+                  tools: {
+                    snapshot: () => emptyPanels,
+                    subscribe: () => () => {},
+                  },
+                  inline: {
+                    snapshot: () => emptyPanels,
+                    subscribe: () => () => {},
+                  },
+                }}
+              />
+            ) : (
+              <PageTabs {...props} host={host} />
+            )
+          }
           relay={relay}
           navigator={{ open } as unknown as Navigation}
         />

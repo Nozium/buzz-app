@@ -12,7 +12,6 @@ import {
   type HistoryPresentation,
 } from "../../features/agents/history-presentation";
 import { ConfigHistoryRow } from "../../features/agents/AgentConfigHistoryRow";
-import { usePanelSplit } from "../../features/panels/usePanelSplit";
 import { AgentDetails, useSyncLine } from "./AgentDetails";
 import { communityDestination } from "../../features/communities/destination";
 import { communityIcon } from "../../features/communities/community-icon";
@@ -22,6 +21,7 @@ import type {
   Membership,
 } from "../../features/communities/service";
 import { PanelWorkspace } from "../../features/panels/PanelWorkspace";
+import { PanelDock } from "../../features/panels/PanelDock";
 import { AgentMessageButton } from "./AgentMessageButton";
 import { ProviderDialog } from "./ProviderDialog";
 // Agents, teams, and marketplace, with creation and import from their menus.
@@ -122,7 +122,10 @@ import {
   MenuRoot,
   MenuTrigger,
 } from "../../shared/design-system/ui/Menu";
-import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
+import {
+  PanelHeader,
+  PanelHeaderLabel,
+} from "../../shared/design-system/ui/PanelHeader";
 import { SplitButton } from "../../shared/design-system/ui/SplitButton";
 import { Tabs } from "../../shared/design-system/ui/Tabs";
 import { Textarea } from "../../shared/design-system/ui/Textarea";
@@ -199,7 +202,6 @@ export function AgentsPage({
 }) {
   const { snapshot, types } = useAgents(agents);
   const connection = useRelayConnection(relay);
-  const split = usePanelSplit(connection.scope, "agents", 448, 320);
   const channels = useChannelChoices(
     connection.status === "ready" ? connection.session.channels : undefined,
   );
@@ -846,34 +848,15 @@ export function AgentsPage({
 
   return (
     <div className="h-full min-h-0">
-      <div
-        ref={split.ref}
-        style={split.style}
-        className={styles.browse}
-        data-side={
-          (panel && tab === "yours") || (shared && tab === "marketplace")
-            ? ""
-            : undefined
-        }
-      >
+      <div data-expando-scope="" className={styles.browse}>
         <div className={styles.main}>
           <Panel aria-label="Agents">
             <div className="flex h-full min-h-0 flex-col">
               <PanelHeader
                 title={
-                  <Tabs
-                    variant="navigation"
-                    label="Agents header"
-                    value="agents"
-                    onValueChange={() => {}}
-                    showSelection={false}
-                    items={[
-                      {
-                        value: "agents",
-                        label: "Agents",
-                        icon: <RobotIcon size="1rem" />,
-                      },
-                    ]}
+                  <PanelHeaderLabel
+                    title="Agents"
+                    icon={<RobotIcon size={24} />}
                   />
                 }
               />
@@ -882,8 +865,7 @@ export function AgentsPage({
           </Panel>
         </div>
         {shared && tab === "marketplace" && (
-          <aside className={styles.side}>
-            {split.handle}
+          <PanelDock open className={styles.side}>
             <Panel aria-label="Shared agent profile">
               <PanelWorkspace
                 value={shared.agent.id}
@@ -908,16 +890,11 @@ export function AgentsPage({
                 ]}
               />
             </Panel>
-          </aside>
+          </PanelDock>
         )}
         {panel && selected && (
-          <aside
-            ref={profileSide}
-            className={styles.side}
-            hidden={tab !== "yours"}
-          >
-            {split.handle}
-            <Panel aria-label="Agent profile">
+          <PanelDock open={tab === "yours"} keepMounted className={styles.side}>
+            <Panel ref={profileSide} aria-label="Agent profile">
               <PanelWorkspace
                 focusOnMount={false}
                 adoptSelection={selected.pubkey}
@@ -937,7 +914,7 @@ export function AgentsPage({
                 ]}
               />
             </Panel>
-          </aside>
+          </PanelDock>
         )}
       </div>
       {flow && (

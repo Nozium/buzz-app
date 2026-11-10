@@ -33,7 +33,7 @@ import {
 import { WorkflowWebhookSecrets } from "./WorkflowWebhookSecrets";
 import { WorkflowLanding, workflowOperationLocked } from "./WorkflowLanding";
 import { PanelWorkspace } from "../../features/panels/PanelWorkspace";
-import { usePanelSplit } from "../../features/panels/usePanelSplit";
+import { PanelDock } from "../../features/panels/PanelDock";
 import "./workflows.css";
 
 export function WorkflowsPage({ relay }: { relay: RelayData }) {
@@ -94,7 +94,6 @@ export function WorkflowCommunity({
   const [deleteError, setDeleteError] = useState<string>();
   const [createOpen, setCreateOpen] = useState(false);
   const [filter, setFilter] = useState<readonly string[]>([]);
-  const split = usePanelSplit(session.scope, "workflows", 448, 320);
   const [detail, setDetail] = useState<{ key: string; name: string }>();
   const [detailTarget, setDetailTarget] = useState<HTMLElement | null>(null);
   const mainRef = useRef<HTMLDivElement>(null);
@@ -201,11 +200,7 @@ export function WorkflowCommunity({
 
   return (
     <>
-      <div
-        ref={split.ref}
-        className="workflows-split"
-        data-side={detail ? "" : undefined}
-      >
+      <div data-expando-scope="" className="workflows-split">
         <div className="workflows-main" ref={mainRef}>
           <WorkflowsPanel>
             <WorkflowPageHeader
@@ -282,8 +277,7 @@ export function WorkflowCommunity({
           </WorkflowsPanel>
         </div>
         {detail && (
-          <aside className="workflows-side">
-            {split.handle}
+          <PanelDock open className="workflows-side">
             <Panel aria-label="Workflow details">
               <PanelWorkspace
                 focusOnMount={false}
@@ -308,7 +302,7 @@ export function WorkflowCommunity({
                 ]}
               />
             </Panel>
-          </aside>
+          </PanelDock>
         )}
       </div>
       {deleteError && (

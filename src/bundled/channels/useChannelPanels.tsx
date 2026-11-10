@@ -134,6 +134,7 @@ export function useChannelPanels(
   const bound = (binding: ChannelPanelContext, panel: RegisteredPanel) =>
     mounted.current === binding && panels.snapshot().includes(panel);
   return {
+    title: selected?.panel.title,
     close: () => setOpened(undefined),
     launchers: context && (
       <div className={styles.channelLaunchers}>
@@ -215,6 +216,10 @@ export function useChannelPanels(
     content: (
       <PanelDock
         open={!!selected && selected.panel.channelPlacement !== "side"}
+        title={selected?.panel.title}
+        close={() => {
+          if (selected) hide(selected);
+        }}
         className={styles.channelDrawer}
       >
         {selected && selected.panel.channelPlacement !== "side" && (

@@ -627,7 +627,7 @@ it("preserves disabled contribution positions when active sections reorder", asy
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    register: () => {},
+    register: () => () => {},
   };
   const h = fixture(undefined, "ready", [], registry);
   const scope = h.snapshot.scope;
@@ -707,7 +707,7 @@ it("retries a contributed section after invalid rows recover", async () => {
       version: 1,
       snapshot: () => sections,
       subscribe: () => () => {},
-      register: () => {},
+      register: () => () => {},
     };
     const h = fixture(undefined, "ready", [], registry);
     const work = () => {

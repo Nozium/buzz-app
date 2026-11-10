@@ -1,3 +1,4 @@
+import { ConversationHeaderTools } from "../conversation/ConversationHeaderTools";
 import {
   createContext,
   useCallback,
@@ -21,11 +22,16 @@ import {
 } from "../../shared/design-system/ui/Tabs";
 import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
 import styles from "./Panels.module.css";
+import { usePanelSheet } from "./PanelSheet";
+import { Button } from "../../shared/design-system/ui/Button";
+import { PopoverClose } from "../../shared/design-system/ui/Popover";
 import type { TabDragHost } from "./useTabDrag";
 
 type Item = {
   id: string;
   label: string;
+  /** Conversation/thread content needs the bottom composer expansion. */
+  composer?: boolean;
   icon?: ReactNode;
   content: ReactNode;
   /** Increment when an opening returns to this existing tab. */
@@ -111,6 +117,8 @@ export function PanelWorkspace({
   select,
   actions,
   identity,
+  identityPlacement = "header",
+  headerDivider = true,
   main = false,
   label = "Panel tabs",
   focusOnMount = true,
@@ -134,6 +142,9 @@ export function PanelWorkspace({
   actions?: ReactNode;
   /** Interactive conversation identity; a lone permanent tab needs no tab strip. */
   identity?: ReactNode;
+  /** The permanent conversation may present its identity above its scrollport. */
+  identityPlacement?: "header" | "content";
+  headerDivider?: boolean;
   /**
    * The page's main pane: a lone permanent tab reads as a title, and native
    * Close acts here only while focus is inside (the side pane is the default).
@@ -364,6 +375,58 @@ export function PanelWorkspace({
       closingTab.current = undefined;
     }
   });
+  const conversationTools =
+    identityPlacement === "content" && selected === items[0]?.id && !!identity;
+  const activeToolbar = active && "toolbar" in active ? active.toolbar : null;
+  const headerTools =
+    activeToolbar || actions ? (
+      <>
+        {activeToolbar}
+        {actions}
+      </>
+    ) : null;
+  const sheet = usePanelSheet(
+    active?.close
+      ? {
+          title: active.label,
+          composer: "composer" in active && active.composer === true,
+          icon: active.icon,
+          actions: (
+            <>
+              {activeToolbar}
+              {("actions" in active ? active.actions : undefined)?.map(
+                (action) => (
+                  <PopoverClose
+                    key={action.label}
+                    render={
+                      <Button size="sm" variant="ghost">
+                        {action.label}
+                      </Button>
+                    }
+                    onClick={() => {
+                      root.current?.focus({ preventScroll: true });
+                      action.run();
+                    }}
+                  />
+                ),
+              )}
+              {tabMenu && (
+                <PopoverClose
+                  render={
+                    <Button size="sm" variant="ghost">
+                      Close all details
+                    </Button>
+                  }
+                  onClick={() => tabMenu.closeAll()}
+                />
+              )}
+            </>
+          ),
+          source: root,
+          close: active.close,
+        }
+      : undefined,
+  );
   const identityOnly = !!identity && tabs.length === 1 && !tabs[0]?.close;
   const heading = identity ? (
     <div data-workspace-identity="" className={styles.workspaceIdentity}>
@@ -392,6 +455,7 @@ export function PanelWorkspace({
         : { "data-panel-workspace": "" })}
       data-active-tab-closable={!!active?.close || undefined}
       data-overlay-boundary=""
+      tabIndex={sheet ? -1 : undefined}
       className={styles.workspace}
       ref={(element) => {
         root.current = element;
@@ -435,81 +499,99 @@ export function PanelWorkspace({
         }
       }}
     >
-      <PanelHeader
-        navigation={!identityOnly ? heading : undefined}
-        actions={
-          active && "toolbar" in active && active.toolbar ? (
-            <>
-              {active.toolbar}
-              {actions}
-            </>
-          ) : (
-            actions
-          )
-        }
-        title={
-          identityOnly ? (
-            heading
-          ) : (
-            <Tabs
-              label={label}
-              variant="navigation"
-              showSelection={!main || tabs.length > 1}
-              value={selected}
-              items={tabs.map((tab) => ({
-                value: tab.id,
-                label: tab.label,
-                icon: tab.icon,
-                panelId: panelId(tab.id),
-                attentionRequest:
-                  "attentionRequest" in tab ? tab.attentionRequest : undefined,
-                onMove: "move" in tab ? tab.move : undefined,
-                onRename: "rename" in tab ? tab.rename : undefined,
-                actions: "actions" in tab ? tab.actions : undefined,
-                draggable: !!drag && "move" in tab && !!tab.move,
-                onClose: tab.close
-                  ? () => {
-                      // Recover focus only when removing its current owner.
-                      closingTab.current = document
-                        .getElementById(`${panelId(tab.id)}-tab`)
-                        ?.parentElement?.contains(document.activeElement)
-                        ? tab.id
-                        : undefined;
-                      if (tab.close?.() === false)
-                        closingTab.current = undefined;
-                    }
-                  : undefined,
-              }))}
-              tabMenu={
-                tabMenu && {
-                  ...tabMenu,
-                  // A detail tab cannot outlive its owner, so the owner is kept.
-                  // Details live only here: close the kept owner's ones too,
-                  // even when the channel has no other tab to close.
-                  closeOthers:
-                    tabMenu.closeOthers &&
-                    ((id) => {
-                      const local = owned.find((tab) => tab.id === id);
-                      const keep = local?.owner ?? id;
-                      const details = owned.filter((tab) => tab.owner === keep);
-                      const closed = tabMenu.closeOthers?.(keep) ?? false;
-                      if (!closed && !details.length) return false;
-                      // Focus follows the chosen detail's removal to its owner.
-                      if (local) closingTab.current = local.id;
-                      for (const tab of details) tab.close({ keepOwner: true });
-                      return true;
-                    }),
+      {(!sheet || tabs.length > 1) && (
+        <PanelHeader
+          divider={headerDivider}
+          icon={
+            identityPlacement === "content" && selected === items[0]?.id
+              ? heading
+              : undefined
+          }
+          navigation={
+            !identityOnly && identityPlacement === "header"
+              ? heading
+              : undefined
+          }
+          actions={
+            sheet ? undefined : conversationTools ? (
+              <ConversationHeaderTools actions={headerTools} />
+            ) : (
+              headerTools
+            )
+          }
+          title={
+            identityOnly ? (
+              identityPlacement === "header" ? (
+                heading
+              ) : (
+                tabs[0]?.label
+              )
+            ) : (
+              <Tabs
+                label={label}
+                variant="navigation"
+                showSelection={!main || tabs.length > 1}
+                value={selected}
+                items={tabs.map((tab) => ({
+                  value: tab.id,
+                  label: tab.label,
+                  icon: tab.icon,
+                  panelId: panelId(tab.id),
+                  attentionRequest:
+                    "attentionRequest" in tab
+                      ? tab.attentionRequest
+                      : undefined,
+                  onMove: !sheet && "move" in tab ? tab.move : undefined,
+                  onRename: "rename" in tab ? tab.rename : undefined,
+                  actions: "actions" in tab ? tab.actions : undefined,
+                  draggable: !sheet && !!drag && "move" in tab && !!tab.move,
+                  onClose: tab.close
+                    ? () => {
+                        // Recover focus only when removing its current owner.
+                        closingTab.current = document
+                          .getElementById(`${panelId(tab.id)}-tab`)
+                          ?.parentElement?.contains(document.activeElement)
+                          ? tab.id
+                          : undefined;
+                        if (tab.close?.() === false)
+                          closingTab.current = undefined;
+                      }
+                    : undefined,
+                }))}
+                tabMenu={
+                  tabMenu && {
+                    ...tabMenu,
+                    // A detail tab cannot outlive its owner, so the owner is kept.
+                    // Details live only here: close the kept owner's ones too,
+                    // even when the channel has no other tab to close.
+                    closeOthers:
+                      tabMenu.closeOthers &&
+                      ((id) => {
+                        const local = owned.find((tab) => tab.id === id);
+                        const keep = local?.owner ?? id;
+                        const details = owned.filter(
+                          (tab) => tab.owner === keep,
+                        );
+                        const closed = tabMenu.closeOthers?.(keep) ?? false;
+                        if (!closed && !details.length) return false;
+                        // Focus follows the chosen detail's removal to its owner.
+                        if (local) closingTab.current = local.id;
+                        for (const tab of details)
+                          tab.close({ keepOwner: true });
+                        return true;
+                      }),
+                  }
                 }
-              }
-              onValueChange={(id) => {
-                focusContent.current = pointerTab.current;
-                pointerTab.current = false;
-                choose(id);
-              }}
-            />
-          )
-        }
-      />
+                onValueChange={(id) => {
+                  focusContent.current = pointerTab.current;
+                  pointerTab.current = false;
+                  choose(id);
+                }}
+              />
+            )
+          }
+        />
+      )}
       <div className={styles.workspaceBody}>
         {items.map((item) => (
           <TabScope
@@ -521,7 +603,7 @@ export function PanelWorkspace({
             slots={slots}
           >
             <div
-              {...(identityOnly
+              {...(identityOnly || (sheet && tabs.length === 1)
                 ? { role: "region", "aria-label": item.label }
                 : {
                     role: "tabpanel",

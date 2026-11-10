@@ -1055,6 +1055,30 @@ export const test = base.extend({
         .map((entry) => entry.event);
     };
     const answer = (community, filter) => {
+      // Sent-history requests are bounded own-author reads across this community.
+      if (
+        filter.authors?.length === 1 &&
+        filter.authors[0] === viewer &&
+        !filter["#h"] &&
+        !filter["#d"] &&
+        ((filter.kinds?.length === 1 &&
+          filter.kinds[0] === 9 &&
+          filter.limit === 100) ||
+          (JSON.stringify(filter.kinds) === "[40003,5,9005]" &&
+            filter.limit === 500))
+      ) {
+        return [...histories.entries()]
+          .filter(([key]) => key.startsWith(`${community}/`))
+          .flatMap(([, events]) => events)
+          .filter(
+            (event) =>
+              event.pubkey === viewer && filter.kinds.includes(event.kind),
+          )
+          .toSorted(
+            (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
+          )
+          .slice(0, filter.limit);
+      }
       // These ordinary fixture channels have no Huddle creation receipt.
       if (filter.kinds?.length === 1 && filter.kinds[0] === 9007) return [];
       // The real relay can return both current metadata and rosters in one query.

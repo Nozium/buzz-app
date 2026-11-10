@@ -219,7 +219,11 @@ function HuddleWindowContent({ view, act, error }: WindowProps) {
         </footer>
       </main>
       {open && (
-        <PanelDock open={!closing} className={styles.windowDiscussion}>
+        <PanelDock
+          presentation="inline"
+          open={!closing}
+          className={styles.windowDiscussion}
+        >
           {view.discussion && (
             <aside
               className={styles.windowDiscussionBody}

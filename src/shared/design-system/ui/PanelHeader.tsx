@@ -1,3 +1,5 @@
+import { HeaderIcon } from "./HeaderIcon";
+import { SquaresFourIcon } from "../icons";
 import type { ReactNode } from "react";
 
 /** Shared header frame. Product identity and controls are supplied through slots.
@@ -8,15 +10,23 @@ export function PanelHeader({
   navigation,
   actions,
   variant = "default",
+  divider = false,
 }: {
   title: ReactNode;
   icon?: ReactNode;
   navigation?: ReactNode;
   actions?: ReactNode;
   variant?: "default" | "compact" | "card";
+  /** Keep the separator's space while omitting its visible line. */
+  divider?: boolean;
 }) {
   return (
-    <header data-buzz-ui="" className="panel-header" data-variant={variant}>
+    <header
+      data-buzz-ui=""
+      className="panel-header"
+      data-variant={variant}
+      data-divider={divider ? undefined : "hidden"}
+    >
       {navigation}
       <div className="panel-header-title">
         {icon}
@@ -43,11 +53,7 @@ export function PanelHeaderLabel({
 }) {
   return (
     <div className="panel-header-label">
-      {icon && (
-        <span className="panel-header-label-icon" aria-hidden="true">
-          {icon}
-        </span>
-      )}
+      <HeaderIcon>{icon ?? <SquaresFourIcon size={24} />}</HeaderIcon>
       <h2>{title}</h2>
       {children}
     </div>

@@ -286,3 +286,37 @@ test("pointer completion animates surviving rows in a scrolled list", async ({
     "the next row moves through intermediate positions instead of jumping into the fading row",
   ).toBe(true);
 });
+
+// Empty-state geometry is browser-owned; use the real page with an empty store.
+test("empty reminders shares the header column without a nested card", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.goto(`${url}?width=880&empty`);
+  const heading = page.getByRole("heading", { name: "Reminders", exact: true });
+  const empty = page.getByRole("heading", {
+    name: "No reminders yet",
+    exact: true,
+  });
+  await expect(empty).toBeVisible();
+  const bounds = await heading.evaluate((node) =>
+    node.closest("header").getBoundingClientRect().toJSON(),
+  );
+  const content = await empty.evaluate((node) => {
+    const surface = node.closest("[data-frame]");
+    const rect = surface.getBoundingClientRect();
+    return {
+      x: rect.x,
+      right: rect.right,
+      border: getComputedStyle(surface).borderTopWidth,
+    };
+  });
+  expect(content.x).toBeGreaterThan(bounds.x);
+  expect(content.right).toBeLessThan(bounds.right);
+  expect((content.x + content.right) / 2).toBeCloseTo(
+    (bounds.x + bounds.right) / 2,
+    0,
+  );
+  expect(content.border).toBe("0px");
+  await page.screenshot({ path: testInfo.outputPath("empty-reminders.png") });
+});

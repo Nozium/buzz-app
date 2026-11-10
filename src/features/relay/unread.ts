@@ -34,6 +34,14 @@ export type UnreadSnapshot = Readonly<{
   target: ReadTarget;
   /** Latest verified content evidence, including read and self-authored messages. */
   latestMessage?: Readonly<{ id: string; createdAt: number }>;
+  /** PROTOTYPE: the latest top-level message, not a thread reply or quiet
+   * agent coordination, for the Activity sidebar's order and preview. */
+  latestTopLevel?: Readonly<{
+    id: string;
+    createdAt: number;
+    authorId: string;
+    content: string;
+  }>;
   /** null means unobserved/denied, never a fabricated zero or an exact relay total. */
   observedCount: number | null;
   attentionCount: number | null;
@@ -436,6 +444,7 @@ export function createUnread({
   // Ids named by an `e` tag of any retained or fetched event: a deletion, edit
   // or reply that arrived before its target. Built with the index.
   const referenced = new Set<string>();
+  const edited = new Set<string>();
   // Conversation membership: the viewer's own messages, and the parents the
   // viewer has replied to, each keyed by channel. A conversation is the set of
   // replies to one parent.
@@ -525,7 +534,10 @@ export function createUnread({
   }
   function markReferenced(event: RelayEvent) {
     for (const [name, id] of event.tags)
-      if (name === "e" && id) referenced.add(id.toLowerCase());
+      if (name === "e" && id) {
+        referenced.add(id.toLowerCase());
+        if (event.kind === 40003) edited.add(id.toLowerCase());
+      }
   }
   /** Indexes one counted content event: the body of one `indexEvidence` step. */
   function indexContent(event: RelayEvent) {
@@ -587,6 +599,7 @@ export function createUnread({
     byId.clear();
     tombstones.clear();
     referenced.clear();
+    edited.clear();
     own.clear();
     joined.clear();
     ownThreads.clear();
@@ -991,8 +1004,18 @@ export function createUnread({
     const dm = isDm(target.channelId);
     indexEvidence();
     let latest: RelayEvent | undefined;
+    let topLevel: RelayEvent | undefined;
     for (const entry of byChannel.get(target.channelId) ?? []) {
       const event = entry.event;
+      if (
+        target.kind === "channel" &&
+        !entry.rootId &&
+        !entry.quiet &&
+        (!topLevel ||
+          event.created_at > topLevel.created_at ||
+          (event.created_at === topLevel.created_at && event.id < topLevel.id))
+      )
+        topLevel = event;
       if (
         target.kind === "channel" &&
         (!latest ||
@@ -1028,10 +1051,26 @@ export function createUnread({
               )
             ? "remote"
             : "none";
+    const topRow =
+      topLevel &&
+      (topLevel.kind !== 9 || edited.has(topLevel.id)) &&
+      folded(target.channelId).find((row) => row.id === topLevel.id);
     return Object.freeze({
       target,
       ...(latest
         ? { latestMessage: { id: latest.id, createdAt: latest.created_at } }
+        : {}),
+      ...(topLevel
+        ? {
+            latestTopLevel: {
+              id: topLevel.id,
+              createdAt: topLevel.created_at,
+              authorId: topRow
+                ? topRow.authorId
+                : messageAuthor(topLevel, signingAuthority),
+              content: topRow ? topRow.content : topLevel.content,
+            },
+          }
         : {}),
       observedCount: evidence ? count : null,
       attentionCount: evidence ? attention : null,
@@ -1052,6 +1091,9 @@ export function createUnread({
   }
   const equal = (a: UnreadSnapshot, b: UnreadSnapshot) =>
     a.latestMessage?.id === b.latestMessage?.id &&
+    a.latestTopLevel?.id === b.latestTopLevel?.id &&
+    a.latestTopLevel?.content === b.latestTopLevel?.content &&
+    a.latestTopLevel?.authorId === b.latestTopLevel?.authorId &&
     a.observedCount === b.observedCount &&
     a.attentionCount === b.attentionCount &&
     a.row?.observedCount === b.row?.observedCount &&

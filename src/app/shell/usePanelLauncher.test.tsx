@@ -59,7 +59,11 @@ test("a fresh opening retires a closed plugin draft even before its exit finishe
         >
           Notes
         </button>
-        <PanelDock open={!!launcher.selected} className="">
+        <PanelDock
+          presentation="inline"
+          open={!!launcher.selected}
+          className=""
+        >
           {launcher.selected && (
             <PanelCard
               key={launcher.openingId}

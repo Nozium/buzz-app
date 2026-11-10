@@ -1,7 +1,5 @@
-import type { ReactNode, Ref } from "react";
-import styles from "./Inbox.module.css";
-import { Button } from "../../shared/design-system/ui/Button";
-import { Switch } from "../../shared/design-system/ui/Switch";
+import type { Ref } from "react";
+import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Tabs } from "../../shared/design-system/ui/Tabs";
 import {
   MenuRoot,
@@ -9,106 +7,128 @@ import {
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
+  MenuGroupLabel,
+  MenuSeparator,
 } from "../../shared/design-system/ui/Menu";
-import { CaretDownIcon } from "../../shared/design-system/icons";
+import {
+  BellIcon,
+  MessageReplyIcon,
+  AtIcon,
+  ChatCircleIcon,
+  SmileyIcon,
+  Filter2Icon,
+  UsersIcon,
+  CircleNotchIcon,
+  ClockIcon,
+  HashIcon,
+} from "../../shared/design-system/icons";
 
 export type ActivityFilter =
   | "all"
+  | "channels"
   | "threads"
   | "mentions"
   | "dms"
-  | "reactions";
+  | "reactions"
+  | "direct"
+  | "working"
+  | "waiting";
 export type SenderFilter = "everyone" | "humans" | "agents";
-const views = [
-  { value: "all", label: "All" },
-  { value: "threads", label: "Threads" },
-  { value: "mentions", label: "Mentions" },
-  { value: "dms", label: "DMs" },
-  { value: "reactions", label: "Reactions" },
+export const activityViews = [
+  { value: "all", label: "All", icon: <BellIcon size={20} /> },
+  { value: "threads", label: "Threads", icon: <MessageReplyIcon size={20} /> },
+  { value: "direct", label: "Direct", icon: <UsersIcon size={20} /> },
+  { value: "working", label: "Working", icon: <CircleNotchIcon size={20} /> },
+  { value: "waiting", label: "Waiting", icon: <ClockIcon size={20} /> },
+  { value: "channels", label: "Channels", icon: <HashIcon size={20} /> },
+  { value: "mentions", label: "Mentions", icon: <AtIcon size={20} /> },
+  { value: "dms", label: "DMs", icon: <ChatCircleIcon size={20} /> },
+  { value: "reactions", label: "Reactions", icon: <SmileyIcon size={20} /> },
 ] as const;
+
 const senders = [
   { value: "everyone", label: "Anyone" },
   { value: "humans", label: "People" },
   { value: "agents", label: "Agents" },
 ] as const satisfies readonly { value: SenderFilter; label: string }[];
 
-/**
- * Type tabs, From and Unread as one left-aligned group, like Slack's Activity,
- * so Unread stays in view on a wide page. From's visible label stays short so
- * the bar fits one row in a narrow list; its name says the choice, and a fill
- * shows when it narrows the list.
- */
-export function InboxFilters({
+/** Activity's view selection stays independent of the list's sender/unread menu. */
+export function InboxViewFilter({
   view,
+  onViewChange,
+}: {
+  view: ActivityFilter;
+  onViewChange(view: ActivityFilter): void;
+}) {
+  return (
+    <Tabs
+      label="Activity views"
+      variant="buttons"
+      value={view}
+      items={activityViews}
+      onValueChange={onViewChange}
+    />
+  );
+}
+
+export function InboxFilters({
   sender,
   unreadOnly,
   triggerRef,
-  onViewChange,
   onSenderChange,
   onUnreadChange,
-  status,
 }: {
-  view: ActivityFilter;
   sender: SenderFilter;
   unreadOnly: boolean;
   triggerRef: Ref<HTMLButtonElement>;
-  onViewChange(view: ActivityFilter): void;
   onSenderChange(sender: SenderFilter): void;
   onUnreadChange(checked: boolean): void;
-  /** Refresh status, sharing the last line with Unread so it never adds one. */
-  status?: ReactNode;
 }) {
   const from = senders.find((entry) => entry.value === sender) ?? senders[0];
   const fromLabel = `From ${from.label.toLowerCase()}`;
   return (
-    <div className={styles.filters}>
-      <div className={styles.typeTabs}>
-        <Tabs
-          label="Activity type"
-          variant="panel"
-          size="sm"
-          value={view}
-          items={views}
-          onValueChange={onViewChange}
-        />
-      </div>
-      <MenuRoot>
-        <MenuTrigger
-          ref={triggerRef}
-          render={
-            <Button
-              size="sm"
-              variant={sender === "everyone" ? "ghost" : "subtle"}
-              aria-label={fromLabel}
-              title={fromLabel}
-            >
-              From
-              <CaretDownIcon size="1rem" />
-            </Button>
-          }
-        />
-        <MenuPopup
-          aria-label="From"
-          style={{ maxHeight: "var(--available-height)" }}
-        >
-          <MenuRadioGroup
-            value={sender}
-            onValueChange={(value) => onSenderChange(value as SenderFilter)}
-          >
-            {senders.map(({ value, label }) => (
-              <MenuRadioItem key={value} value={value} closeOnClick>
-                {label}
-              </MenuRadioItem>
-            ))}
-          </MenuRadioGroup>
-        </MenuPopup>
-      </MenuRoot>
-      <Switch
-        label="Unread"
-        checked={unreadOnly}
-        onCheckedChange={onUnreadChange}
+    <MenuRoot>
+      <MenuTrigger
+        ref={triggerRef}
+        render={
+          <IconButton
+            size="sm"
+            variant="inset"
+            shape="round"
+            aria-label={fromLabel}
+            title={`${fromLabel}${unreadOnly ? ", unread only" : ""}`}
+            icon={<Filter2Icon size={16} aria-hidden="true" />}
+          />
+        }
       />
-      {status}
-    </div>
+      <MenuPopup aria-label="Activity filters">
+        <MenuRadioGroup
+          value={sender}
+          onValueChange={(value) => onSenderChange(value as SenderFilter)}
+          aria-label="From"
+        >
+          <MenuGroupLabel>From</MenuGroupLabel>
+          {senders.map(({ value, label }) => (
+            <MenuRadioItem key={value} value={value} closeOnClick>
+              {label}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
+        <MenuSeparator />
+        <MenuRadioGroup
+          value={unreadOnly ? "unread" : "all"}
+          onValueChange={(value) => onUnreadChange(value === "unread")}
+          aria-label="Show"
+        >
+          <MenuGroupLabel>Show</MenuGroupLabel>
+          <MenuRadioItem value="all" closeOnClick>
+            All activity
+          </MenuRadioItem>
+          <MenuRadioItem value="unread" closeOnClick>
+            Unread only
+          </MenuRadioItem>
+        </MenuRadioGroup>
+      </MenuPopup>
+    </MenuRoot>
   );
 }

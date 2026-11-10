@@ -32,6 +32,8 @@ export type SidebarSectionContribution = Readonly<{
     subscribe: (listener: () => void) => () => void;
   }>;
   select: (row: SidebarSectionRow) => OpenTarget;
+  /** Optional full list destination used by the host's View more control. */
+  listTarget?: OpenTarget;
   actions?: readonly SidebarSectionAction[];
 }>;
 
@@ -40,7 +42,7 @@ export type SidebarSections = Readonly<{
   version: 1;
   snapshot: () => readonly RegisteredSidebarSection[];
   subscribe: (listener: () => void) => () => void;
-  register: (section: SidebarSectionContribution) => void;
+  register: (section: SidebarSectionContribution) => () => void;
 }>;
 
 declare module "@deepseek-ai/cordis" {
@@ -67,7 +69,7 @@ export class SidebarSectionsService extends Service implements SidebarSections {
   register(section: SidebarSectionContribution) {
     if (section?.version !== 1) {
       console.warn("Ignoring unsupported sidebar section contribution version");
-      return;
+      return () => {};
     }
     if (
       typeof section.id !== "string" ||
@@ -95,6 +97,6 @@ export class SidebarSectionsService extends Service implements SidebarSections {
       throw new Error(
         "A sidebar section needs an id, title, rows, and select action",
       );
-    this.contributions.register(this.ctx, section);
+    return this.contributions.register(this.ctx, section);
   }
 }

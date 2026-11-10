@@ -1,0 +1,47 @@
+.frame {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-1);
+  gap: var(--space-6);
+}
+.frame[hidden] {
+  display: none;
+}
+.apps {
+  min-width: 0;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.primary {
+  margin-block-end: var(--space-1);
+}
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-inline: var(--space-2);
+}
+
+@media (max-width: 650px) {
+  .frame:not([hidden]) {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(var(--size-navigation-rail), calc(100vw - var(--space-8)));
+    z-index: 20;
+    background: var(--surface-panel);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--elevation-dock);
+  }
+}
+
+.dropSlot {
+  position: relative;
+  height: 0;
+  margin-block: calc(-1 * var(--space-3));
+  z-index: 1;
+}

@@ -89,7 +89,39 @@ body filters and list/detail ownership; [Solo chats](../../bundled/channels/Chan
 demonstrates a working area with a persistent composer. Neither is a blanket visual
 template: check the adoption review before copying their surrounding chrome.
 
+The shell bounds primary destinations as a whole to `--size-conversation-frame`,
+so their header, body, and scrollport share one column. Collection bodies fill
+that column with the shared panel inset instead of adding a second narrower
+maximum width. Settings keeps its documented form layout below.
+
+Conversation views share `--size-conversation-measure` (the Messages width
+preference, 52rem by default) and `--size-conversation-frame` (that measure plus
+the timeline's two panel gutters). Activity, Messages, New message, and composer
+sheets use this same frame. Keep recipient headers within the composer measure;
+message history and the composer keep their shared internal insets.
+Main destinations use 16px vertical edge spacing: the header supplies the top
+inset and the composer supplies the bottom inset. The shell and feature hosts
+do not stack additional top padding around these shared owners.
+Activity and Messages reuse the page and composer-aware scrollport recipes in
+`features/conversation/FeedList.module.css`; their hosts retain top spacing and
+container-query ownership. Channel artwork uses `channelAvatarSurface` from
+`features/channels/channel-icon.ts` so feed and rail colors stay consistent.
+
 ### Detail panels
+
+Main-app detail workspaces use `features/panels/PanelSheet`, supplied by the
+default `PanelDock` presentation. Conversation and thread owners opt into the
+bottom reveal, anchored to the host's visible composer. Other details use Dialog's
+non-modal `placement="rail"`: an inset right card sharing left navigation cards'
+spacing, corners and fill, with 4rem more reading width and the composer's shadow.
+Rail cards sit 4px below the main workspace's top edge, enter from the right,
+and reserve 3rem less height than the original
+44rem/viewport-capped frame. Keyboard and reduced-motion openings stay immediate.
+Both leave the reader's width intact.
+Workspace/Card owners supply their identity, tools, and existing guarded closer;
+the frame owns no content reads or navigation state. Retained workspaces use
+Dialog's `keepMounted` option so hidden editors and terminals retain their DOM.
+Only a native Huddle window's discussion retains PanelDock's inline presentation.
 
 First inspect the mounting host. `PanelCard` and `PanelWorkspace` can already supply
 the surface, identity, close action, and tabs. A contributed body supplies object
@@ -194,6 +226,22 @@ For an illustrated introduction, `artwork` places feature-owned imagery above a
 centered title and description, keeping shared Close at the top right. Keep the
 artwork bounded and leave room beside its top edge for Close. Community import
 uses this slot for the agent portrait and its overlapping community images.
+When embedding an existing object identity header, use `identity` with a plain
+`title` for the accessible name. Activity uses the Messages conversation identity
+here; Dialog retains the framing and Close control.
+Anchored reading sheets use `backdrop="subtle"` for lighter dimming. Omit
+`container` when the scrim must cover the whole app window; `anchor` still keeps
+the popup aligned with its composer. `initialFocus="dialog"` focuses the popup
+itself without selecting its first control.
+
+Floating detail cards use `placement="rail"`. Base UI leaves the page interactive
+without a backdrop or focus trap. Owners retain close guards and history; details
+stay open while interacting with the page when `dismissOnOutsideClick={false}`.
+The shared navigation-rail size and `surface-rail-card` role keep left and right
+cards consistent. Contributed content does not add another outer card.
+
+For a centered conversation identity with trailing tools, `closePlacement="start"`
+keeps Close at the leading edge and `headerActions` at the trailing edge.
 
 | Task | Shared starting point | Scrolling |
 | --- | --- | --- |
@@ -577,6 +625,10 @@ Avatar-only controls use `IconButton variant="avatar"` so the surrounding backdr
 shows through their cutouts at rest, hover, press, and while a menu is open. The focus
 target stays unmasked. Its keyboard-ring recipe follows the focus appearance
 policy below.
+Pinned destinations use `NavigationItem variant="avatar"` to retain navigation
+selection and keyboard focus in a 52px artwork tile. Its label stays accessible
+and a shared Tooltip reveals the name on hover or focus. The rail owns the
+responsive grid, with at most four columns; unread state stays with ConversationRow.
 Circular and squircle avatars can add `statusBadge="online" | "away" | "offline"`. The dot
 uses a semantic green, yellow, or grey role with light and dark values. Its inset
 cutout and dot scale with the existing avatar size; the dot is separate from the
@@ -602,6 +654,12 @@ expanding the hit target. They inherit the fill, including hover/pressed/menu-op
 states, rather than painting over the adjacent surface. Hover uses the same
 contextual row highlight as NavigationItem, not the brighter floating-button
 step. Shared pressed and keyboard behavior remains unchanged.
+
+Proposed for the Activity sidebar: `AvatarStack size="cluster"` fills a square
+conversation slot with one, two, or three member avatars; callers exclude the
+viewer and cap the roster before passing it. Avatar categorical fallback surfaces
+use purple, blue, green, or orange identity fills with `text-standard`. A channel's
+first letter selects a stable hue; it does not communicate state or priority.
 
 ## Public identity text
 
@@ -647,6 +705,16 @@ surfaces quiet and functional so the conversation stays central. Use character
 in identity, guidance, transitions, and ceremony. Use color to convey meaning.
 
 ## Surface and depth
+
+Use `Panel flat` for a continuous canvas that needs the shared opaque fill and
+clipping without an outer border or shadow. The app shell uses this treatment;
+independent floating panels retain their usual contour.
+
+The window toolbar sits on `surface-window-underlay`: the navigation cards'
+composited background with a 5% theme tint, following the app's color mode. The sidebar and main
+content share one `surface-panel` workspace card with concentric top corners:
+the navigation cards' 24px radius plus their 4px outer inset, giving 28px. The shell
+owns this geometry; window-level modal portals remain outside the card.
 
 Use the surface that matches the content and its position in the interface.
 
@@ -1239,25 +1307,34 @@ that header, reuse it rather than adding a second one. Keep the frame present
 during loading, empty, error, and populated states. Content cards and Settings
 groups are not workspace panes and do not each need chrome.
 
-The approved visual reference is the main channel header in
-[`ChannelsPage.tsx`](../../bundled/channels/ChannelsPage.tsx): compact identity at
-the leading edge and **icon-only actions at the trailing edge**. Reuse the shared
-components, not a screenshot's measured offsets.
+The visual reference for page and panel headers is the Messages list: a
+left-aligned `text-label` title, 16px vertical padding and the shared 24px panel
+gutters, a 64px minimum header row, no divider
+by default, and icon actions at the trailing edge. `Header` and the default
+`PanelHeader` share this treatment. An explicit divider remains available where
+a workspace needs it. Conversation names use the same left title slot;
+membership avatars stay centered. Model cards
+retain their compact `card` variant. Inline section headings retain their own
+smaller hierarchy.
 
 - **Leading identity:** static destinations use `PanelHeaderLabel`, including its
   icon slot and title typography. Omit the icon when there is no meaningful one.
   Additional channel/workspace tabs retain `Tabs variant="navigation"`; the lone
   conversation uses its membership identity. Do not invent tab semantics for a
   static page just to reproduce its appearance.
-- **Conversation membership identity (proposed):** channels and DMs combine the
-  compact member avatar stack before the name in one left-aligned
-  `SurfaceButton`. It uses 24px avatars and sidebar-row body-sm labels, while
-  trailing actions retain the standard panel-header alignment. Solo chats
-  preview their participating agents.
-  It shares the header bottom hairline; message history fades at its top and bottom edges. It opens the existing
-  membership manager. `PanelWorkspace` uses this identity
-  instead of a lone permanent tab; when extra tabs exist, it retains their strip
-  beside the identity. Other header actions stay at the trailing edge.
+- **Conversation membership identity (proposed):** channels, DMs and Solo chats
+  show the other members in a centered `SurfaceButton` above
+  the message scrollport. Human previews exclude the viewer; Solo previews retain
+  participating agents. Member avatars use the shared 48px large stack, twice
+  the small preview. The control opens the existing membership manager.
+  The toolbar keeps its height and trailing actions: `PanelHeader divider={false}`
+  makes its existing separator transparent. `PanelWorkspace identityPlacement="content"`
+  presents the identity only above its permanent conversation; additional tabs
+  retain their shared header strip. With a lone conversation and enough pane width,
+  the centered avatars share the header row, clear of the left title, instead of
+  reserving a second toolbar row. Narrow panes keep it below the controls.
+  Anchored conversation dialogs keep their title beside the leading Close button
+  and center the membership avatars independently.
 - **Trailing actions:** use `IconButton size="sm" variant="ghost"` with 1rem
   artwork, an action-specific `aria-label`, and a matching `title` hint. Ordinary
   trailing actions use metadata ink; disabled, pressed, and expanded controls
@@ -1314,6 +1391,9 @@ block inset), 1rem identity icons, and
 0.25rem gaps between action buttons without reducing their hit areas. Navigation
 tabs use 1rem icons or fill avatars and 0.5rem leading padding.
 Header spacing, icons, and controls scale with rem. Panel headers use a `border-standard` bottom hairline. Titles and actions may wrap when their content needs more room.
+The compact top app dock uses `Tabs variant="dock" size="sm"` with 32px tiles
+and 16px icons. Its host keeps history and Search at the left and wraps the dock
+onto a second top row when needed, preserving all controls and keyboard targets.
 Static identities use PanelHeaderLabel to share navigation tabs’ icon slot,
 regular title weight, and leading inset without adding a tab stop. Terminal context
 can follow the label; Inbox and Bestie use the same composition.
@@ -1364,6 +1444,23 @@ scrolls horizontally from a safe start edge so both ends remain reachable.
 inline layer (such as an inspector) before dismissing the dialog. Nested modal
 layers still use Dialog so Base UI owns their focus trap and dismissal order;
 `placement="right"` and explicit `dismissOnOutsideClick` suit inspector sheets.
+`placement="bottom"` is the Activity conversation sheet: it stays inside its
+host with a wide, viewport-capped reader and the existing composer below. The
+surface measures its `anchor` and reveals upward from that composer using clip-path without scaling
+text or the editor; keyboard, Escape, and reduced motion remain immediate.
+Anchored bottom sheets leave composer spacing to the shared editor: `space-3`
+(12px at default size) on the left and right, with `space-4` (16px) bottom and header insets. The source composer stays
+mounted so its draft and any pending delivery survive inspection.
+Keep the entire frame inside its host; the composer's own bottom inset replaces
+the frame's bottom padding. New message moves one stable portal surface into the
+sheet, preserving the editor and caret instead of remounting them during entry.
+Keep the covered composer's measured footprint fixed, including when its editor
+moves into the sheet. Position the anchored frame before its first visible paint;
+only its clip changes during the reveal. The surface stays opaque so the feed
+does not ghost through the reader. Use `duration-sheet` (250ms) with `easing-sheet`
+for the unfold, and the existing fast exit. Keyboard and reduced-motion entry
+remain immediate.
+
 Use `size="wide"` for two-column catalogs such as Add harness. It caps the width
 at 55rem and preserves viewport gutters; `height="stable"` can reserve the body
 while changing catalog selection. Content-sized dialogs also scroll only their
@@ -1530,6 +1627,15 @@ window (the composer, the preview's Join notice) call `useToastClearance` with
 their element, and the stack rises above them so a notice never covers Send.
 F6 enters notifications, Tab reaches actions. Modals remain above the stack. Content updates do not restart expiry; timeout changes do.
 
+Proposed for Activity view filters: `Tabs variant="buttons"` composes the shared
+small Button with inline icons and labels. Selection uses the prominent variant;
+other filters use subtle. The strip scrolls horizontally with focus-ring insets,
+overflow-edge fades and a hidden scrollbar. Its host can set
+`--tabs-button-gutter` to extend the scrollport to pane edges while retaining
+content insets. Optional leading and trailing actions remain ordinary buttons
+outside the tablist but inside the same scroller. Activity places New first
+and its all/unread filter last.
+
 Tabs with content use renderPanel, which lets Base UI connect each tab and panel.
 Route navigation uses NavigationItem with aria-current instead, except for the
 shell dock described below. Tabs can also
@@ -1557,7 +1663,8 @@ preloading and product shortcuts remain with the caller.
 `multiline` lets a stacked navigation label grow with its content. Use
 `NavigationCard` when a destination has supporting detail or separate sibling
 controls: the primary NavigationItem owns focus and `aria-current`, while the
-card owns the shared hover and selected surface. Put details in its `footer`,
+card owns the shared hover and selected surface. Use `align="center"` for
+single-line destinations with sibling actions of a different height. Put details in its `footer`,
 not inside the primary button. Nested destinations keep their own selection.
 Default cards use sidebar selection for `aria-current="page"` and neutral
 collection selection for `aria-current="true"`; selection persists during hover.
@@ -2090,8 +2197,10 @@ designer choices, with no size-to-stroke or selection-to-fill rules. Existing bo
 uses have `strokeWidth={2.5}`; video play/pause controls use explicit filled icons.
 Keep the public gateway names stable. For chat and conversation metaphors, use
 `ChatCircleIcon` / `ChatsCircleIcon` (Tabler’s MessageCircle / Messages), choosing
-the variant that matches the meaning. Keep accessible names on controls and
-decorative artwork hidden from assistive technology.
+the variant that matches the meaning. Reply actions use `MessageIcon` (Tabler
+Message), the designer-approved choice confirmed for the inline reply composer.
+Keep accessible names on controls and decorative artwork hidden from assistive
+technology.
 
 `RobotIcon` is the designer-approved **Soft & wide** custom agent mark, using the
 **Fuller canvas** refinement: a larger rounded head, short antenna, narrow ear
@@ -2138,8 +2247,10 @@ The dock uses independent 40px icon tiles with 12px corners, a transparent resti
 state, and an inactive hover fill. The active tile uses the theme-accent
 `surface-sidebar-selected` / `text-sidebar-selected` pair and retains its
 accessible selected state.
-Dock artwork stays still on hover and press. Bestie uses its configured avatar
-from the shared page presentation, at the standard avatar size.
+Artwork stays at its layout size. Bestie uses its configured avatar from the
+shared page presentation, at the standard avatar size. The current shell places
+its destinations in the combined left rail; dock/top renderers retain their tab
+and preview behavior without a separate magnification owner.
 Dock labels remain accessible and use the dock label hover bucket to the right of each vertical dock
 button (beneath horizontal docks); badges overlay the tile. A tile with a page
 preview shows its label on keyboard focus and while its preview is closed.
@@ -2212,8 +2323,9 @@ Inline search settings use the search variant of PreferenceRow with a gear icon 
 
 Proposed pending designer sign-off, as a narrow exception to the chat and
 conversation icon rule under Icons. Use `ChatCircleIcon` for a Solo chat in navigation, headers, tabs and chat cards.
-Use `MessageReplyIcon` (Tabler MessageReply) for thread tabs, thread links and
-Reply actions. Keep private Team channels' lock icon; privacy alone does not
+Use `MessageReplyIcon` (Tabler MessageReply) for thread tabs and thread links.
+Reply actions use the approved `MessageIcon` choice under [Icons](#icons).
+Keep private Team channels' lock icon; privacy alone does not
 replace a Solo chat's identity icon. Accessible chat cards end with a right
 chevron. Unavailable chat cards retain a lock and unavailable accessible text;
 unknown access does not earn a chevron. Display chat cards as **Chat:**, while
@@ -2248,3 +2360,15 @@ and IconButton actions, currently used by message reaction capsules and their
 Add reaction control. It supplies a 1.625rem height, square icon geometry, and
 content-width labelled controls. Features retain placement and behavior; the
 shared recipe owns sizing. Do not infer this treatment from product data attributes.
+
+### Combined app rail (prototype)
+
+The current shell combines navigation and discovery in one left
+`SidebarNavigation` with labelled routes, Pins, recent Messages, Agents, and
+plugin-contributed sections. Activity and Messages use the same centered
+conversation frame, collection heading, view strip, and floating composer.
+Sender/unread choices remain with the collection they filter. At narrow widths,
+navigation opens as a drawer from **Show navigation** rather than reducing the
+content to two cramped columns. Shared rows, menus, headers and panels own
+appearance; the shell owns column geometry. The titlebar retains window/history
+controls and Search.

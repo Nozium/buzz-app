@@ -1,52 +1,17 @@
 .page {
   container-type: inline-size;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
 }
 
-/* Status fills the unused space after Unread, never wrapping controls or
-   rows: its margin cancels the gap before it, so it takes no room
-   on a full line, and its text keeps that gap instead. */
-.refreshSlot {
-  display: flex;
-  flex: 1;
-  width: 0;
+.listHeading {
+  flex: none;
   min-width: 0;
-  align-items: center;
-  margin-inline-start: calc(var(--space-2) * -1);
-}
-
-/* Type tabs (sized to their words, like Slack's), From and Unread read as one
-   left-aligned group, so Unread stays in view on a wide page; the status after
-   them fills the row. Too narrow, Unread wraps first to the start of the next
-   line, then From. */
-.filters {
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-2);
-  min-width: 0;
-  padding-block: var(--space-1);
-}
-
-/* The panel tab strip insets its tabs by the focus ring's room; cancel that
-   here so the first tab's text starts on the toolbar edge, like Unread and
-   From when they wrap, and From follows DMs about a tab gap away. */
-.typeTabs {
-  flex: 0 1 auto;
-  min-width: 0;
-  margin-inline: calc(var(--space-1) * -1);
+  /* The shared Header owns the pane-heading insets. */
 }
 
 .refreshStatus {
-  min-width: 0;
-  padding-inline-start: var(--space-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: block;
+  margin-block-start: var(--space-2);
+  padding-inline: var(--space-4);
 }
 
 .workspace,
@@ -61,24 +26,6 @@
 .scroll {
   container-name: inbox-list;
   container-type: inline-size;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  overflow: auto;
-}
-
-.toolbar {
-  display: flex;
-  flex: 0 0 auto;
-  min-height: var(--size-panel-header);
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-1);
-  /* Start the first tab's text on the title bar's bell: the panel header's
-     inset plus its label's. */
-  padding-inline: calc(var(--space-1) + var(--space-2));
-  border-bottom: 1px solid var(--border-standard);
 }
 
 .notice {
@@ -97,16 +44,6 @@
   padding: var(--space-page-section-gap) var(--space-panel-inset);
 }
 
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0 var(--space-row-gap) var(--space-panel-inset);
-}
-
-.row {
-  min-width: 0;
-}
-
 .rowSurface {
   display: grid;
   position: relative;
@@ -116,7 +53,7 @@
   border-radius: var(--radius-row);
 }
 
-.row[data-selected] .rowSurface {
+[data-inbox-row][data-selected] .rowSurface {
   background: var(--interaction-selected);
 }
 
@@ -140,13 +77,13 @@
   opacity: 0;
 }
 
-.row:hover .rowAction,
-.row:focus-within .rowAction {
+[data-inbox-row]:hover .rowAction,
+[data-inbox-row]:focus-within .rowAction {
   opacity: 1;
 }
 
-.row[data-action]:hover [data-inbox-date],
-.row[data-action]:focus-within [data-inbox-date] {
+[data-inbox-row][data-action]:hover [data-inbox-date],
+[data-inbox-row][data-action]:focus-within [data-inbox-date] {
   opacity: 0;
 }
 
@@ -155,14 +92,8 @@
     opacity: 1;
   }
 
-  .row[data-action] [data-inbox-date] {
+  [data-inbox-row][data-action] [data-inbox-date] {
     opacity: 0;
-  }
-}
-
-@media (max-width: 600px) {
-  .row {
-    padding-bottom: var(--space-3);
   }
 }
 
@@ -189,4 +120,60 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sheetHost {
+  width: 100%;
+  max-width: var(--size-conversation-frame);
+  margin-inline: auto;
+  container: activity / inline-size;
+  overflow-x: clip;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  isolation: isolate;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.sheetFeed {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.newMessage {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  inset-block-end: 0;
+  isolation: isolate;
+  width: 100%;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  min-width: 0;
+  background: var(--surface-panel);
+  border-radius: var(--radius-container) var(--radius-container) 0 0;
+}
+
+.newMessage[data-covered] {
+  height: var(--activity-composer-clearance);
+}
+
+.draftContent {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.composerEdge {
+  --scroll-edge-surface: var(--surface-panel);
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 100%;
+  height: var(--space-8);
+  pointer-events: none;
 }

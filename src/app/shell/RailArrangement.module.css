@@ -1,0 +1,189 @@
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.pageRows {
+  padding-inline: var(--space-panel-inset);
+  padding-block-end: var(--space-4);
+}
+.pageRow {
+  padding-block: var(--space-2);
+}
+.createSection {
+  display: flex;
+  justify-content: center;
+  padding-block: var(--space-4);
+}
+.rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  gap: var(--space-half);
+}
+.pinsGrid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(
+      auto-fill,
+      minmax(min(100%, var(--size-control-lg)), 1fr)
+    );
+  max-width: calc(4 * var(--size-control-lg) + 3 * var(--space-3));
+  margin-inline: auto;
+  gap: var(--space-3);
+  justify-items: center;
+}
+.group {
+  position: relative;
+  min-width: 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-container);
+  background: var(--surface-rail-card);
+}
+.group[data-drop-target]:not([data-section-drag]) {
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--surface-message) 50%, transparent) 90%,
+    black
+  );
+}
+.group::before,
+.group::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 50%;
+  width: var(--space-16);
+  height: var(--space-half);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sidebar-selected);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%) scaleX(0.75);
+  transition:
+    opacity var(--time-fast) var(--ease-enter),
+    transform var(--time-fast) var(--ease-enter);
+}
+.group::before {
+  bottom: calc(100% + var(--space-half) / 2);
+}
+.group::after {
+  top: calc(100% + var(--space-half) / 2);
+}
+.group[data-insertion-edge="before"]::before,
+.group[data-insertion-edge="after"]::after {
+  opacity: 1;
+  transform: translateX(-50%) scaleX(1);
+  transition:
+    opacity var(--time-fast) var(--ease-enter),
+    transform var(--time-settle) cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .group::before,
+  .group::after,
+  .group[data-insertion-edge="before"]::before,
+  .group[data-insertion-edge="after"]::after {
+    transition: none;
+  }
+}
+.newSectionReveal[data-drop-target] {
+  background: color-mix(in srgb, var(--surface-message-own) 90%, black);
+}
+.row {
+  min-width: 0;
+}
+.handle {
+  display: flex;
+  opacity: 0;
+}
+.group:hover .handle,
+.group:focus-within .handle,
+.handle:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+.group,
+.row {
+  transition: opacity var(--time-fast) var(--ease-enter);
+}
+.group[data-dragging="true"],
+.row[data-dragging="true"] {
+  opacity: 0.4;
+}
+.overlay {
+  background: var(--surface-panel);
+  border-radius: var(--radius-control);
+  box-shadow: var(--elevation-dock);
+  transform: scale(1.03) rotate(-1deg);
+  transform-origin: center;
+  transition:
+    transform var(--time-settle) cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity var(--time-fast) var(--ease-enter);
+  @starting-style {
+    opacity: 0.7;
+    transform: scale(0.98) rotate(0deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overlay {
+    transform: none;
+    transition: none;
+    @starting-style {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+.newSection {
+  position: absolute;
+  bottom: var(--space-6);
+  inset-inline: var(--space-2);
+  z-index: 1;
+  pointer-events: none;
+}
+.newSectionReveal {
+  position: relative;
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface-message-own);
+  color: var(--text-message-own);
+  border-radius: var(--radius-pill);
+  opacity: 0;
+  transform: translateY(var(--space-4)) scale(0.95);
+  transition:
+    transform var(--time-fast) var(--ease-enter),
+    opacity var(--time-fast) var(--ease-enter);
+}
+.newSectionLabel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--size-control);
+  font-size: var(--text-label);
+  font-weight: var(--type-weight-medium);
+  line-height: var(--text-label--line-height);
+  letter-spacing: var(--text-label--letter-spacing);
+}
+.newSection[data-shown] {
+  pointer-events: auto;
+}
+.newSection[data-shown] .newSectionReveal {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  /* A small overshoot welcomes the dragged row without moving its hit target. */
+  transition:
+    transform var(--time-sheet) cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity var(--time-fast) var(--ease-enter);
+}
+@media (hover: none) and (pointer: coarse) {
+  .handle {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .newSectionReveal,
+  .newSection[data-shown] .newSectionReveal {
+    transform: none;
+    transition: opacity var(--time-fast) var(--ease-state);
+  }
+}

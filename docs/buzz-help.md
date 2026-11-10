@@ -336,7 +336,32 @@ revokes all of them, and a pairing unused for 30 days expires.
   Folders are optional unless **Work in a new worktree** is on. In that mode,
   add at least one project folder; the form shows a message beside Folders
   until you add one or turn worktree mode off.
-- **Activity** (the bell in the app dock) collects DMs, ordinary responses in Solo chats, mentions of you, and
+- **Activity** is the default landing view. The visible filter strip below its title selects All, Channels, Threads,
+  Mentions, DMs or Reactions.
+  Direct, Working and Waiting use the same conversation
+  views as Messages; the filter icon beside each list heading chooses whose activity to show and whether
+  to show unread only. Select an item to grow its conversation out of the bottom
+  composer; Close or Escape returns to the feed without discarding either draft.
+  Back returns to the feed and Forward restores the sheet. Explicit Close or
+  following a link retires the sheet so Back does not reopen it.
+  Messages uses the same compact column and floating bottom composer. Selecting
+  a conversation expands its detail above the composer; Back, Forward and Close
+  behave as in Activity. Messages restores its saved conversation filters when
+  you switch accounts or communities. Type **@name** to expand a new message with existing DM
+  history when available. Full-page conversations remain available from the rail.
+  All includes recent channel posts alongside personal activity; Channels lists
+  channels by their latest post or participating-thread activity. Conversation
+  details place member avatars before the title, matching Messages; select the header
+  to view or manage members.
+  Close is on the left. Select the ellipsis on the right of the conversation
+  header to open its tools as a labeled action list. Expanded details include **Open in Messages** in that menu.
+  Channel previews load as rows come into view; sender and Waiting filters may load additional previews to find matching conversations.
+  Activity uses a narrow, centered feed with a floating composer. Type **@name**
+  and select someone to expand New message above the editor, including the existing
+  DM's history when available. The expanded composer lightly dims the whole app window behind it;
+  Close, Escape or clicking outside keeps your draft. A selected agent starts a
+  Solo chat. Back and Forward preserve the return path. Sending opens the resulting conversation.
+  Activity (the bell in the app rail) collects DMs, ordinary responses in Solo chats, mentions of you, and
   replies in threads you started, replied in, or follow. Solo chats appear under All, not DMs; their nested
   threads stay separate. Agent-only coordination stays out. The tabs (All, Threads, Mentions, DMs, Reactions) narrow it by
   kind, and **From** by sender (Anyone, People or Agents). Turn on **Unread** to see only what you haven't read:
@@ -366,7 +391,7 @@ revokes all of them, and a pairing unused for 30 days expires.
   newer message; **Mark as unread** still shows on it. On another device, rows
   with unread mentions, DMs or replies to you light again until you read them.
 - **Communities** have their own channels, people, and agents. Switch with
-  the community switcher at the bottom of the dock; in **Personal space**,
+  the community switcher beside your profile in the top-right bar; in **Personal space**,
   Messages offers **Choose a community**, which opens it. Switching
   communities changes the available context. A channel reopens where you
   stopped reading, or at the latest message once you had caught up. You and
@@ -524,6 +549,14 @@ revokes all of them, and a pairing unused for 30 days expires.
   instead. **History** shows how each saved version differs from the current
   Canvas, with + marking lines only that version has and − marking current
   lines it lacks. Turn on **Show full content** to read a version as written.
+- **Reply to a message**: hold its text for 0.1 seconds to select it in the
+  reply preview floating above the composer without resizing the transcript. Release to focus the composer, or drag to
+  select text and dismiss the provisional preview. Send to reply in its thread.
+  This also works in Solo chats, Inbox conversation previews, Bestie, and conversation tabs.
+  Selecting or canceling a reply preserves your current draft. The preview follows
+  message edits; if the target becomes unavailable, cancel it before sending.
+  Press **Escape** or use **Cancel reply target** to return to the normal composer.
+  Short clicks, links, embedded controls, and selecting text keep their usual behavior.
 - **Keyboard shortcuts** follow Slack where they can. Press ⌘/ (Ctrl+/ on
   Windows and Linux) to open **Settings → Shortcuts**, which lists them, lets
   you change most of them and also shows the fixed message-formatting keys. In
@@ -612,24 +645,60 @@ revokes all of them, and a pairing unused for 30 days expires.
   to close, it closes the window while Buzz and running agents stay open.
   Reopen Buzz from the Dock. ⌘⇧W clears the current channel's tabs without
   closing the window. These tab shortcuts do nothing while a modal is open.
-- **Conversation members**: click the combined member avatars and conversation
-  name in the header to open membership management. Other header actions remain
-  on the right. Compact avatars sit before the name on the left; Solo chats show
-  the included agents.
-- **App navigation**: use the left dock to switch apps. Bestie is first,
-  Activity second, followed by the other apps. Community and profile controls
-  sit at the bottom of the dock. Search stays wide in the top bar.
-  Messages has All / Solo / Team sidebar filters; other apps use their main
-  view unless they provide their own sidebar. Pages listed in the Messages
-  sidebar, such as the Drafts & sent plugin, keep Messages selected in the dock. The
-  Messages sidebar stays open unless the page provides its own sidebar, which
-  replaces it.
-  The sidebar and message pane share one surface with a persistent divider;
-  panel headers also have bottom hairlines. Dock icons stay still, highlight
-  on hover, and show instant labels to their right. Bestie uses your
-  configured avatar.
-  The **+** opens New from the sidebar. **Cmd/Ctrl+N** opens that menu where
-  the current app has a creation sidebar.
+- **Conversation list filters**: All combines chats, DMs and channels by recent
+  activity. Threads shows channel threads; Direct combines chats, DMs and mentions.
+  Working shows Solo chats with an active agent; Waiting shows Solo chats where
+  the other side spoke last and no agent is working. Scroll the filter buttons
+  horizontally to reach more views. The small New button leads the strip;
+  the all/unread filter sits after the view buttons.
+- **Conversation list artwork**: Solo chats and direct messages show up to three
+  other members' avatars. Channels keep their channel icon on a colored background
+  chosen consistently from the first letter of the channel name.
+- **Conversation members**: the conversation name sits at the left of the header.
+  Click the centered avatars to open membership management. Avatars exclude you;
+  Solo chats show participating agents. The toolbar actions stay at the top right.
+- **Conversation timestamps**: sidebar times appear when you hover or focus a row.
+  Touch devices keep them visible.
+- **App navigation**: one left rail contains Search, Activity, **Pins**, **Messages**,
+  **Solo**, and **Agents**. Plugin destinations and **Plugins** sit with Search and Activity
+  in the Plugins card, which starts at the top and can be moved like any section.
+  The Plugins catalog row stays at the bottom of that card.
+  Each object card shows up to four rows, then **View more**;
+  **View more** opens a dedicated list in the main content area without expanding
+  the card. Back and Forward return between the list and its items. Pins remains uncapped. Messages shows the most recently active
+  distinct DMs, groups, and channels with received messages in the loaded session, with one
+  preview per conversation, with Bestie counting toward the four-row limit. **View more** opens the full,
+  centered conversation list; selecting a row opens its conversation in the
+  reading area. **Solo** lists active Solo chats by recent activity, including
+  chats you have just started before an agent replies. Its **+** opens New chat.
+  Agents shows up to four available agents, ranked by existing
+  conversation/search usage. Select an agent to open their DM; **View more** opens
+  the agent directory. **Plugins** opens the plugin catalog. Conversations and agent
+  details use centered content columns. Messages, Activity, New message, and expanded
+  conversation sheets share the message-width preference and the same composer
+  and history measure. New message keeps its recipient bar within that column.
+  Community, profile, and Settings controls
+  sit at the bottom; history and native window controls stay at the top.
+  In a narrow window, **Show navigation** opens the rail over the content.
+  Pins, recent conversations, and agent DM rows show an unread dot using the
+  conversation's shared read state. Read conversations have no dot.
+  Drag a section title to reorder the entire rail, including above Plugins,
+  or drag a row into another section. Activity and plugin destinations can move too.
+  The accent marker previews the section’s destination; sections settle into place
+  after a drop. Reduced motion skips the movement.
+  Choose **New section** below the sidebar cards to name and create an empty section.
+  While dragging a row, **New section** appears at the bottom; drop there, name
+  the section, and choose **Create and move**. Cancel leaves the row in place.
+  Right-click a row (or press Shift+F10) for **Pin**/**Unpin**, **Move to** and **New section**;
+  a section's ellipsis menu offers Move up/down and removal of custom sections.
+  Removing a custom section restores its rows to their original lists when available.
+  This arrangement stays on this device for the current account and community.
+- **Pins**: use **+** beside Pins to search loaded chats, people, channels, agents,
+  and pages. Pins appear as an avatar grid with at most four columns; hover or
+  focus an avatar to see its name, and select it to open its destination.
+  You can also pin the current view. Right-click an item and choose **Pin** or
+  **Unpin**. A person pin opens their direct message. Pins stay on this
+  device for the current account and community, including after restarting.
 - **Link boundaries**: a bare http(s) or buzz link ends at whitespace and at
   fullwidth, CJK or curly-quote punctuation such as `，`, `。`, `」` or `’`. In a
   host name, `。` works as a dot. Wrap it as `<url>` to keep them in it.
@@ -638,8 +707,8 @@ revokes all of them, and a pairing unused for 30 days expires.
   are signed in to Builderlab. Approve it there, return to Buzz and click
   **Reload** to open the app.
 - **Drafts & sent** is an optional plugin, off by default. Turn it on in
-  **Settings → Plugins**, and it appears in the Messages sidebar. Opening it keeps
-  the conversation sidebar available, so you can switch straight back to a chat.
+  **Settings → Plugins**, and it appears under Plugins in the left rail. Opening it keeps
+  the rail available, so you can switch straight back to a chat.
   Saved links to it open the plugin, or offer to turn it on. Use the **Drafts**
   and **Sent** tabs to switch lists; Buzz remembers your choice for this community.
   Rows lead with the destination and message text. It lists
@@ -663,7 +732,7 @@ revokes all of them, and a pairing unused for 30 days expires.
   where you left it: **Draft** on a message's reply line, or **Draft reply** when
   no one has replied yet (hidden while that thread is open).
 - **Activity preview**: with a mouse or trackpad, rest the pointer on
-  **Activity** in the app dock to see recent mentions, DMs, thread replies, and reactions
+  **Activity** in the app rail to see recent mentions, DMs, thread replies, and reactions
   without opening the Activity page. Clicking a conversation opens it directly;
   **Open Activity** opens the page. The card's **Unread only** switch is
   separate from the Activity page's filters and hides reactions when on. The preview is not shown on touch
@@ -677,14 +746,15 @@ revokes all of them, and a pairing unused for 30 days expires.
   for that community and identity. Collapsed section headings highlight when
   their channels have unread messages or thread replies. Muted channels do not
   highlight the heading.
-- **Side panels stay with their conversation**: a tab or panel you open beside a
-  conversation, such as a thread, **Canvas**, a huddle, or Todos, stays open for
-  that conversation when you go to another conversation or page and come back,
-  until you close it. Reloading Buzz does not restore it. The Terminal drawer
-  closes when you leave the conversation.
-- **Panel dividers**: the divider between a page and its side panel (such as
-  the Activity list and a conversation) works the same way. Each page remembers
-  its own width within the same community and identity; double-click to reset.
+- **Expanded details**: replies, threads and conversation previews open in a
+  bottom sheet that grows from the composer. Profiles, GitHub, Terminal and other
+  tools open in a floating right rail card, matching the left navigation cards.
+  The right card leaves the page interactive. Agents, Notes and Workflows use
+  the same card frame. Close is on the left; additional detail actions are in
+  the ellipsis menu. Existing unsaved-change confirmations still apply.
+  Conversation details stay with their conversation when you navigate away and
+  return, until closed. Reloading Buzz does not restore their retained workspace.
+  Terminal closes when you leave the conversation.
 
 ## Saved Solo follow-ups
 
@@ -831,12 +901,13 @@ available rather than silently discarding it.
   in new Solo chats for that community. It does not replace recipients in an
   existing chat or an edited draft. People can choose a different agent for a
   particular conversation. When the optional **Bestie** plugin is on, that saved
-  choice also opens the agent's DM from the left Apps dock. The Messages
-  sidebar omits the duplicate Bestie row. Bestie uses the same conversation tabs as
-  Messages: threads open beside the chat (or in the main pane, following your
-  thread placement setting), and can be moved, renamed, or closed. Collapsing
-  the side pane keeps its open threads and reply drafts. Its header includes the
+  choice appears at the top of the Messages list with the agent's name and
+  avatar. Selecting it opens their DM beside the list. The list omits the
+  duplicate ordinary DM row. Bestie uses the same conversation tabs as
+  Messages: threads open in the bottom expando sheet and tools in floating right
+  rail cards, retaining reply drafts while hidden. Its header includes the
   same DM controls and actions, including Huddle when supported and enabled.
+  Select the centered avatars in the header to open the DM's members.
   A verified existing DM stays available if
   agent discovery fails. If a replacement save fails, the last confirmed Bestie
   remains selected and the confirmation offers another attempt. Being the bestie
@@ -985,6 +1056,52 @@ Typing its name alone does not notify it. Empty teams, teams with more than 32
 members, and teams with unavailable members cannot be selected; edit the team or
 refresh the choices. Adding people to a channel still requires the normal send
 confirmation. **Delete team** asks first; it doesn't delete the team's agents.
+
+## Smart sections
+
+With the Smart Sections plugin enabled, open **Smart sections → New smart section**
+and describe what you want, for example “Track my active agents” or “Show open PRs in
+example-org/example-repo.” **Generate section** uses a configured tool-free model,
+previews real source rows, and lets you **Add section** here, without opening Bestie
+or starting a chat. Missing details and unsupported sources are explained in the
+dialog; update your description and generate again. **Describe a change** refines an
+existing section; **Configure manually** keeps the source/filter form available.
+Direct generation currently uses Claude or Pi’s configured model transport. Configure
+one in **Settings → Agent setup**. A lightweight catalog model is preselected when
+available; otherwise choose a model explicitly. Generation sends your request,
+existing section settings, and source descriptions to that provider. Credentials stay
+with the runtime. No agent needs to be running for generation or direct-source updates.
+Each section uses ordinary sidebar rows, can collapse, and has **View all** for its
+centered collection. Its manage button opens editing, pause/resume, and removal.
+
+Active Agents uses your current community’s observed working/waiting activity;
+incomplete remote coverage does not mean other agents are idle. Open GitHub PRs
+requires the GitHub plugin and this desktop’s signed-in `gh` CLI. It includes drafts,
+shows at most the 100 most recently updated open PRs in a repository, and marks
+limited results. Equivalent sections share a repository read, with automatic refresh
+about every five minutes while Buzz is open. Closed/merged PRs leave the collection.
+
+Optional matching instructions use your selected **Decisions API** provider and send
+only candidate item text. Unknown matches stay excluded; previously confirmed matches
+can remain visible as stale when a read or inference fails. Refresh retries matching.
+Definitions, display metadata, and matching decisions are saved on this device for
+the signed-in account/community. PR descriptions are not stored in the display cache.
+Direct generation configures enabled source adapters. Jev/TypeSafe supplies optional
+matching through Decisions, rather than free-form generation. Stock prices, weather,
+and other external facts need an appropriate data-source integration; the generator
+cannot invent quotes or fetch arbitrary websites. Source plugins can extend the
+available catalog without changing the creation flow. Agents can still discover,
+preview, save, and revise sections through tools. Existing agent-maintained collections
+retain their compact values, observation times, source links, and assigned-agent updates.
+
+Agent-maintained collections automatically ask their assigned agent for an update
+about every 15 minutes while Buzz is open. You can ask for another interval between
+5 minutes and 24 hours. One refresh stays pending at a time; unanswered requests become
+stale after two minutes and failures back off. **Pause updates**, removing the section,
+changing communities, or disabling Smart Sections stops future refresh requests. Old
+responses cannot overwrite a changed, paused, or removed section. Sections remain
+local to this device and do not sync across devices. Direct source adapters remain
+available for data that needs a dedicated integration.
 
 ## Optional features and limits
 
@@ -1143,3 +1260,5 @@ Confirm the deletion; pending or uncertain results remain in the workflow notice
 If permission changes during confirmation, Buzz explains why deletion could not
 start and keeps any editor draft.
 Owning the agent does not grant permission to edit or run its workflow.
+
+Global search is available from the centered Search Buzz field in the top bar.

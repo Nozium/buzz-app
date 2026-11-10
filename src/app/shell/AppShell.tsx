@@ -1,10 +1,11 @@
 import { ActivityNavigationProvider } from "./ActivityNavigation";
 import { PageNavigation } from "./PageNavigation";
+import { AppDock } from "./AppDock";
+import { RailNavigation } from "./RailNavigation";
 import { navigationOwner, orderPages, pagePlacement } from "./presentation";
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -99,7 +100,11 @@ function AppShellContent({
   workspace?: boolean;
   /** Centered modal frame below window chrome. */
   workspaceRef?: Ref<HTMLDivElement>;
-  sidebar?: (pages: ReactNode, creationAction: ReactNode) => ReactNode;
+  sidebar?: (
+    pages: ReactNode,
+    creationAction: ReactNode,
+    pinnedConversation: ReactNode,
+  ) => ReactNode;
   communities: Communities;
   invite?: (JoinRequest & { requestId: number }) | undefined;
   onInviteClose?: ((requestId: number) => void) | undefined;
@@ -126,54 +131,6 @@ function AppShellContent({
   creationInSidebar?: boolean;
   children: ReactNode;
 }) {
-  const header = useRef<HTMLElement>(null);
-  const historyRef = useRef<HTMLDivElement>(null);
-  const actionsRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const element = header.current;
-    const history = historyRef.current;
-    const actions = actionsRef.current;
-    const search = searchRef.current;
-    if (!element || !history || !actions || !search) return;
-    const measure = () => {
-      // Equal wings keep Search centered even when the native controls or launchers differ.
-      const wing = Math.max(history.offsetWidth, actions.offsetWidth);
-      const style = getComputedStyle(element);
-      const available =
-        element.clientWidth -
-        parseFloat(style.paddingLeft) -
-        parseFloat(style.paddingRight);
-      const searchStyle = getComputedStyle(search);
-      const controls =
-        history.offsetWidth +
-        actions.offsetWidth +
-        2 * parseFloat(style.columnGap);
-      element.dataset.searchFluid = String(
-        available < controls + parseFloat(searchStyle.maxWidth),
-      );
-      element.style.setProperty("--shell-header-wing", `${wing}px`);
-      element.dataset.searchWrapped = String(
-        available < controls + parseFloat(searchStyle.minWidth),
-      );
-    };
-    // Header wrapping resizes the workspace below it. Apply it outside resize
-    // delivery so timeline observers do not receive a second layout mid-cycle.
-    let frame: number | undefined;
-    const observer = new ResizeObserver(() => {
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        frame = undefined;
-        measure();
-      });
-    });
-    for (const target of [element, history, actions]) observer.observe(target);
-    measure();
-    return () => {
-      observer.disconnect();
-      if (frame !== undefined) cancelAnimationFrame(frame);
-    };
-  }, []);
   const fillsWorkspace = workspace || selected === "settings";
   const [creationContainer, setCreationContainer] =
     useState<HTMLDivElement | null>(null);
@@ -183,10 +140,9 @@ function AppShellContent({
   const connection = useRelayConnection(communities.relay);
   const sidebarScope = connection.scope ?? "disconnected";
   const owner = navigationOwner(pages, selected);
-  const channelsNavigation = owner === "buzz.channels/channels";
-  const hasNavigation =
-    channelsNavigation ||
-    pages.some((page) => page.key === selected && !!page.sidebar);
+  const hasNavigation = pages.some(
+    (page) => page.key === selected && !!page.sidebar,
+  );
   const [narrow, setNarrow] = useState(
     () => window.matchMedia("(max-width: 650px)").matches,
   );
@@ -198,7 +154,6 @@ function AppShellContent({
     return () => query.removeEventListener("change", update);
   }, []);
   const collapsibleSidebar =
-    channelsNavigation ||
     selected === "settings" ||
     pages.some(
       (page) => page.key === selected && (page.primary || !!page.sidebar),
@@ -208,6 +163,7 @@ function AppShellContent({
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const visibleSidebar =
     hasNavigation && (narrow ? navigationOpen : sidebarOpen);
+  const visibleRail = narrow ? navigationOpen : sidebarOpen;
   const creationInNavigation = !!creationAction && creationInSidebar;
   useEffect(
     () =>
@@ -218,7 +174,6 @@ function AppShellContent({
         order: 75,
         allowInEditable: true,
         when: () =>
-          hasNavigation &&
           !!creationAction &&
           !!creationContainer?.querySelector("button:not(:disabled)") &&
           (isApplePlatform(navigator.platform) ||
@@ -229,7 +184,7 @@ function AppShellContent({
           setCreationOpen(true);
         },
       }),
-    [searchServices, creationAction, creationContainer, hasNavigation],
+    [searchServices, creationAction, creationContainer],
   );
   const toggleLabel = narrow
     ? navigationOpen
@@ -247,6 +202,7 @@ function AppShellContent({
   // navigation element stable across those renders so React skips the whole
   // sidebar subtree instead of re-rendering every row on each click.
   const navigation = useMemo(() => {
+    const bestie = pages.find((page) => page.key === "buzz.bestie/bestie");
     const selectedPageHasSidebar = pages.some(
       (page) => page.key === selected && !!page.sidebar,
     );
@@ -263,7 +219,14 @@ function AppShellContent({
               previews
             />
           </nav>,
-          creationInNavigation ? <div ref={setCreationContainer} /> : null,
+          null,
+          bestie ? (
+            <PageNavigation
+              pages={[bestie]}
+              selected={selected}
+              onSelect={onSelect}
+            />
+          ) : null,
         )
       : null;
     return selectedPageHasSidebar ? (
@@ -273,12 +236,83 @@ function AppShellContent({
     ) : (
       content
     );
-  }, [pages, selected, sidebar, sidebarScope, onSelect, creationInNavigation]);
+  }, [pages, selected, sidebar, sidebarScope, onSelect]);
   const dockPages = orderPages(
-    pages.filter((page) => page.primary && pagePlacement(page) !== "sidebar"),
+    pages.filter((page) => page.primary && page.key === "buzz.inbox/inbox"),
     "dock",
   );
-  const selectedDockPage = dockPages.some((page) => page.key === owner);
+  const activityPage = selected === "buzz.inbox/inbox";
+  const search = (
+    <PageSearch
+      pages={pages}
+      onSelect={onSelect}
+      services={searchServices}
+      presentation="bar"
+    />
+  );
+  const dock = (
+    <AppDock
+      showPrimaryNavigation={
+        !(connection.viewer && connection.scope && searchServices?.navigation)
+      }
+      search={null}
+      open={visibleRail}
+      onDismiss={() => {
+        if (narrow) setNavigationOpen(false);
+        else setSidebarOpen(false);
+        navigationToggle.current?.focus();
+      }}
+      pages={dockPages}
+      selected={owner}
+      currentPage={selected}
+      onSelect={onSelect}
+      previews
+      community={null}
+      profile={null}
+      settings={null}
+    >
+      {connection.viewer && connection.scope && searchServices?.navigation ? (
+        <RailNavigation
+          key={connection.scope}
+          session={connection.session}
+          scope={{
+            viewer: connection.viewer,
+            communityOrigin: connection.scope.slice(
+              0,
+              -(connection.viewer.length + 1),
+            ),
+          }}
+          sidebarSections={searchServices.sidebarSections}
+          navigator={searchServices.navigation}
+          pages={pages}
+          selected={selected}
+          onSelect={onSelect}
+          creationAction={
+            creationInNavigation ? <div ref={setCreationContainer} /> : null
+          }
+          pinnedConversation={
+            pages.some((page) => page.key === "buzz.bestie/bestie") ? (
+              <PageNavigation
+                pages={pages.filter(
+                  (page) => page.key === "buzz.bestie/bestie",
+                )}
+                selected={selected}
+                onSelect={onSelect}
+              />
+            ) : undefined
+          }
+        />
+      ) : (
+        <PageNavigation
+          pages={pages.filter(
+            (page) => page.primary && page.key !== "buzz.inbox/inbox",
+          )}
+          selected={selected}
+          onSelect={onSelect}
+        />
+      )}
+    </AppDock>
+  );
   return (
     <div
       data-shell-tone={tone}
@@ -298,7 +332,6 @@ function AppShellContent({
         Skip to content
       </a>
       <header
-        ref={header}
         data-buzz-window-drag={
           macDesktop || hasIntegratedWindowControls() || undefined
         }
@@ -307,7 +340,6 @@ function AppShellContent({
         className={`shell-header ${macDesktop ? "shell-header-mac" : ""}`}
       >
         <div
-          ref={historyRef}
           className="shell-history"
           data-buzz-window-drag={
             macDesktop || hasIntegratedWindowControls() || undefined
@@ -315,7 +347,7 @@ function AppShellContent({
           data-tauri-drag-region={macDesktop ? undefined : true}
           {...titleBarDragProps}
         >
-          {hasNavigation && (collapsibleSidebar || narrow) && (
+          {
             <IconButton
               hint="familiar"
               ref={navigationToggle}
@@ -324,8 +356,8 @@ function AppShellContent({
               type="button"
               variant="ghost"
               aria-label={toggleLabel}
-              aria-expanded={visibleSidebar}
-              aria-controls="shell-navigation"
+              aria-expanded={visibleRail}
+              aria-controls="shell-rail"
               title={toggleLabel}
               onClick={() => {
                 if (narrow) setNavigationOpen((open) => !open);
@@ -333,42 +365,17 @@ function AppShellContent({
               }}
               icon={<SidebarIcon aria-hidden="true" size={16} />}
             />
-          )}
+          }
           {navigationControls}
         </div>
-        <div ref={searchRef} className="shell-menu-search">
-          <PageSearch
-            pages={pages}
-            onSelect={onSelect}
-            services={searchServices}
-          />
-        </div>
+        <div className="shell-search">{search}</div>
         <div
-          ref={actionsRef}
           className="shell-actions"
           data-tauri-drag-region={macDesktop ? undefined : true}
           {...titleBarDragProps}
         >
           <div className="shell-actions-fixed">
             {launchers}
-            <WindowControls />
-          </div>
-        </div>
-      </header>
-
-      <div className="shell-workspace">
-        <nav className="shell-side-dock" aria-label="Apps dock">
-          <div className="shell-dock-pages">
-            <PageNavigation
-              pages={dockPages}
-              selected={owner}
-              currentPage={selected}
-              onSelect={onSelect}
-              placement="dock"
-              previews
-            />
-          </div>
-          <div className="shell-community-switcher">
             <CommunityPicker
               communities={communities}
               invite={invite}
@@ -379,6 +386,7 @@ function AppShellContent({
               onOpenTarget={onOpenTarget}
               open={switcherOpen}
               onOpenChange={setSwitcherOpen}
+              side="bottom"
             />
             <ProfileButton
               communities={communities}
@@ -389,9 +397,20 @@ function AppShellContent({
               onSettings={(section) =>
                 onSelect("settings", section ? { section } : undefined)
               }
+              side="bottom"
             />
+            <WindowControls />
           </div>
-        </nav>
+        </div>
+      </header>
+
+      <div
+        className="shell-workspace"
+        data-detail-container=""
+        data-feed-layout={activityPage || undefined}
+        data-rail-open={visibleRail || undefined}
+      >
+        {dock}
         <div
           ref={workspaceRef}
           className="shell-dialog-frame"
@@ -401,7 +420,7 @@ function AppShellContent({
           className={`shell-body ${selected === "settings" ? "shell-body-settings" : ""}`}
         >
           <div className="relative flex min-h-0 min-w-0 flex-1">
-            <Panel as="div" joined>
+            <Panel as="div" joined flat>
               <div className="shell-content">
                 <div
                   id="shell-navigation"
@@ -430,7 +449,9 @@ function AppShellContent({
                     }
                   }}
                 >
-                  <div className="shell-navigation-content">{navigation}</div>
+                  <div className="shell-navigation-content">
+                    {hasNavigation ? navigation : null}
+                  </div>
                 </div>
                 <main
                   id="main-content"
@@ -441,14 +462,6 @@ function AppShellContent({
                     <PanelFrame scope={connection.scope} companion={companion}>
                       <div
                         id={`shell-page-${owner}`}
-                        {...(selectedDockPage
-                          ? {
-                              role: "tabpanel",
-                              "data-focus-inset": "",
-                              "aria-labelledby": `shell-page-${owner}-tab`,
-                              tabIndex: 0,
-                            }
-                          : {})}
                         className={
                           fillsWorkspace
                             ? "buzz-tabs-panel h-full min-h-0"

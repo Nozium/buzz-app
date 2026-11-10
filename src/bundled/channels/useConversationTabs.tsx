@@ -200,6 +200,24 @@ export function useConversationTabs({
     (entry: Opening) => mainPane && entryPane(mainEntries, entry) === "main",
     [mainPane, mainEntries],
   );
+  // Retained visits from the former split layout keep their content and
+  // dismissal records; only their placement changes to the shared sheet.
+  useLayoutEffect(() => {
+    if (mainPane) return;
+    const threads = tabState.tabs.filter((tab) => tabPane(tab) === "main");
+    const panels = entries.filter(
+      (entry) => entryPane(mainEntries, entry) === "main",
+    );
+    if (!threads.length && !panels.length) return;
+    const selected = tabState.mainSelected ?? tabState.selected;
+    const open = !!tabState.mainSelected || tabState.paneOpen;
+    for (const [index, tab] of threads.entries())
+      tabState.moveTab(tab.id, "side", index);
+    for (const entry of panels) tabState.moveEntry(panelTabId(entry), "side");
+    if (selected) tabState.select(selected);
+    tabState.selectMain(undefined);
+    tabState.setPaneOpen(open);
+  }, [mainPane, tabState, entries, mainEntries]);
   const opened = entries.find(
     (entry) => panelTabId(entry) === tabState.selected && !inMain(entry),
   );
@@ -808,6 +826,7 @@ export function useConversationTabs({
     const openChannel = openInChannel(tab, target);
     return {
       id: tab.id,
+      composer: true,
       label:
         tab.kind === "thread"
           ? threadLabel(tab, target?.name)

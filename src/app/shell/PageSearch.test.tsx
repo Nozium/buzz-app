@@ -294,7 +294,7 @@ it("selects the first typed result and keeps it as results change", async () => 
   expect(select).toHaveBeenCalledExactlyOnceWith("test/second");
 });
 
-it("shows the live search shortcut in the trigger and its hint, following a rebind", async () => {
+it("shows the live search shortcut in the icon's hint, following a rebind", async () => {
   Object.defineProperty(navigator, "platform", {
     configurable: true,
     value: "MacIntel",
@@ -322,7 +322,6 @@ it("shows the live search shortcut in the trigger and its hint, following a rebi
     await user.tab();
     const trigger = screen.getByRole("button", { name: "Search Buzz" });
     expect(trigger).toHaveFocus();
-    expect(within(trigger).getByText("⌘K")).toBeInTheDocument();
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
       "Search Buzz (⌘K)",
     );
@@ -330,7 +329,6 @@ it("shows the live search shortcut in the trigger and its hint, following a rebi
       bindings.set("global-search", { key: "p", mod: true, shift: true }),
     );
     expect(screen.getByRole("tooltip")).toHaveTextContent("Search Buzz (⇧⌘P)");
-    expect(within(trigger).getByText("⇧⌘P")).toBeInTheDocument();
     act(() => bindings.reset());
     expect(screen.getByRole("tooltip")).toHaveTextContent("Search Buzz (⌘K)");
   } finally {
