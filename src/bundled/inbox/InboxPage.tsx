@@ -510,14 +510,6 @@ function InboxList({
   );
   const selectedId =
     selected?.id ?? (selectedReaction ? selectedTarget?.reaction : undefined);
-  // What is on screen in the open conversation is observed: its cloud clears.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: saveFog only reads the latest stored state.
-  useEffect(() => {
-    const id = selected && fogId(selected);
-    const record = id ? fogState[id] : undefined;
-    if (showing && selected && id && record && hasCloud(selected, record))
-      saveFog(id, acknowledge(selected));
-  }, [showing, selected, fogState]);
   // A room reclassified as a Huddle belongs to its Huddle composer, not Inbox.
   const selectedRetired = list.channels.some(
     (channel) =>
@@ -1343,12 +1335,15 @@ function InboxList({
                               Unfog
                             </MenuItem>
                           ) : (
-                            <MenuItem
-                              disabled={pending || !canRead}
-                              onClick={() => fog(item)}
-                            >
-                              Fog
-                            </MenuItem>
+                            activity === "all" &&
+                            !unreadOnly && (
+                              <MenuItem
+                                disabled={pending || !canRead}
+                                onClick={() => fog(item)}
+                              >
+                                Fog
+                              </MenuItem>
+                            )
                           ))}
                         {fid && cloud && (
                           <MenuItem

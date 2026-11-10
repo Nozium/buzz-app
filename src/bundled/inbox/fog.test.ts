@@ -18,7 +18,7 @@ it("acknowledges through the captured reply only", () => {
     ["c", 30],
   ]);
   const record = acknowledge(row, "b");
-  expect(record).toEqual({ at: 20, ids: ["a", "b"] });
+  expect(record).toEqual({ at: 20, ids: ["b"] });
   expect(hasCloud(row, record)).toBe(true);
   expect(
     hasCloud(
@@ -67,4 +67,14 @@ it("ignores malformed saved data and caps entries", () => {
     state = withFog(state, `t${i}`, { at: i, ids: [] }).threads;
   expect(Object.keys(state)).toHaveLength(1000);
   expect(withFog(state, "t1004", undefined).threads.t1004).toBeUndefined();
+});
+
+it("clears a burst of more than 64 same-second messages but not a later arrival", () => {
+  const burst: [string, number][] = Array.from({ length: 65 }, (_, i) => [
+    `m${i}`,
+    20,
+  ]);
+  const record = acknowledge(item(burst));
+  expect(hasCloud(item(burst), record)).toBe(false);
+  expect(hasCloud(item([...burst, ["late", 20]]), record)).toBe(true);
 });

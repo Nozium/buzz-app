@@ -69,15 +69,17 @@ no new plugin API, no setting. Disabling `buzz.inbox` removes the page and every
 fog treatment (nothing is module-level; saved fog stays inert on the device), but
 turning Fog off while keeping Activity is an open operator decision.
 
-- **Qualifying rows:** Activity rows in All and Threads with Unread off that are a thread
+- **Qualifying rows:** Fog is offered only in the All tab with Unread off, on rows that are a thread
   (not a DM, a Solo top-level row, a lone mention or a reaction) and have a thread read step.
-  Under the Unread switch a read row leaves, so fog is not visible there.
+  Under the Unread switch a read row leaves, so fog is not visible there. Other tabs and Unread on do not offer
+  Fog; a row already fogged keeps its look, cloud, **Unfog** and **Dismiss cloud** wherever it appears.
 - **Fog** (row context menu, also the Menu key or Shift+F10) reads through the thread reply captured
   at that moment, through the same explicit read and Retry as Mark as read, and only that thread step.
   Fog is saved only after the read succeeds. Later replies are not swept in.
 - **Cloud:** a quiet rain-cloud beside the source when others posted after what was last acknowledged,
-  whether or not the host counts them unread. Your own messages never count. **Dismiss cloud** and opening the
-  row move that acknowledgement forward and never read anything. Opening keeps host behavior
+  whether or not the host counts them unread. Your own messages never count. **Dismiss cloud** and clicking the
+  row open move the acknowledgement forward to exactly what the row showed, and never read anything. Later
+  activity, including while the conversation is open or its pane is hidden, brings the cloud back. Opening keeps host behavior
   (the row still reads as an ordinary open does). **Unfog** removes the record.
 - **Look:** sender and preview text use the subtle text role; the unread dot, date, actions and focus ring
   are untouched, so host indicators and badges, mentions and notifications are unchanged.

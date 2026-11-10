@@ -5304,6 +5304,20 @@ it("Dismiss cloud never reads and keeps fog; opening clears the observed cloud a
   fireEvent.click(within(threadRow()).getByRole("button", { name: /^Open / }));
   await waitFor(() => expect(cloud()).toBeNull());
   expect(fogged()).toBe(true);
+  // Opening is a one-time acknowledgement: later activity is not swept in.
+  otherReply(h, 43);
+  await waitFor(() => expect(cloud()).toBeInTheDocument());
+});
+
+it("offers Fog only in All with Unread off", async () => {
+  await fogFixture();
+  const row = threadRow();
+  fireEvent.click(screen.getByRole("switch", { name: "Unread" }));
+  const again =
+    rows().find((item) => item.textContent?.includes("Later")) ?? row;
+  fireEvent.contextMenu(within(again).getByRole("button", { name: /^Open / }));
+  await screen.findAllByRole("menuitem", { name: /^Mark / });
+  expect(screen.queryByRole("menuitem", { name: "Fog" })).toBeNull();
 });
 
 it("Unfog restores the row; fog survives a restart but not another viewer's scope", async () => {
@@ -5338,4 +5352,32 @@ it("unmounting leaves no styling or listeners behind; stored fog stays inert", a
   expect(document.querySelector("[data-fog]")).toBeNull();
   expect(localStorage.length).toBe(saved);
   void h;
+});
+
+it("fog is keyed by viewer and relay: the same viewer on another relay sees none", async () => {
+  const h = await fogFixture();
+  await fogMenu("Fog");
+  await waitFor(() => expect(fogged()).toBe(true));
+  const scope = h.session.scope;
+  const key = `buzz-view.v1:${JSON.stringify([scope, "drizzle:inbox-fog"])}`;
+  const saved = localStorage.getItem(key);
+  expect(saved).not.toBeNull();
+  cleanup();
+  // The identical record under the same viewer but another relay's partition.
+  const viewer = scope.slice(scope.lastIndexOf(":") + 1);
+  localStorage.clear();
+  localStorage.setItem(
+    `buzz-view.v1:${JSON.stringify([`https://other-relay.test:${viewer}`, "drizzle:inbox-fog"])}`,
+    saved ?? "",
+  );
+  render(h.view);
+  await screen.findByText("A thread update");
+  await act(async () => {});
+  expect(fogged()).toBe(false);
+  cleanup();
+  // Control: the same record under this relay's own partition is honored.
+  localStorage.setItem(key, saved ?? "");
+  render(h.view);
+  await screen.findByText("A thread update");
+  await waitFor(() => expect(fogged()).toBe(true));
 });

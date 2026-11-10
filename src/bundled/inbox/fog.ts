@@ -7,7 +7,8 @@ export type FogState = Readonly<Record<string, FogRecord>>;
 
 export const fogKey = "drizzle:inbox-fog";
 const MAX_THREADS = 1000;
-const MAX_IDS = 64;
+// Only the newest second's messages are named; Inbox's evidence bound caps them.
+const MAX_IDS = 4096;
 
 /** The final thread read step of a qualified row, or undefined for DMs, Solo
  * timeline rows, mentions and anything else Fog does not cover. */
@@ -34,7 +35,8 @@ export function acknowledge(item: InboxItem, through?: string): FogRecord {
     (message) => limit === undefined || message.createdAt <= limit,
   );
   const at = Math.max(0, limit ?? 0, ...seen.map((m) => m.createdAt));
-  return { at, ids: seen.slice(-MAX_IDS).map((message) => message.id) };
+  const ids = seen.filter((m) => m.createdAt === at).map((m) => m.id);
+  return { at, ids };
 }
 
 /** Whether others posted anything the record has not acknowledged. Unread
