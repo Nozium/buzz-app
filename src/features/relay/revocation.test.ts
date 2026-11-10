@@ -958,6 +958,45 @@ it.each([
   },
 );
 
+it.each([
+  ["an ended sign-in", "auth-required: authentication required", 401],
+  ["lost community access", "restricted: authorization denied", 403],
+])(
+  "revisiting a channel refused for %s does not bring its rows or preview back",
+  async (_case, reason, status) => {
+    const disk = emptyDisk();
+    const h = setup({ prepared: true, persistence: disk });
+    h.emit([roster(relay, "a", [viewer.pubkey], 10)]);
+    await flush();
+    h.session.channels.ensure("a");
+    await vi.waitFor(() => expect(h.pending.length).toBeGreaterThan(0));
+    h.next().respond([
+      message(alice, "a", "shown", 11),
+      bounds(relay, "a", "head", { has_more: false, next_cursor: null }),
+    ]);
+    await flush();
+    for (let i = 0; i < 10 && h.pending.length; i++) {
+      for (const request of h.pending.splice(0)) request.respond([]);
+      await flush();
+    }
+    expect(h.session.channels.window("a").rows).toHaveLength(1);
+    h.session.channels.refresh?.("a");
+    await vi.waitFor(() => expect(h.pending.length).toBeGreaterThan(0));
+    for (const request of h.pending.splice(0))
+      request.fail(new ReadError("denied", reason, status));
+    await flush();
+    h.session.channels.ensure("b");
+    h.session.channels.ensure("a");
+    await flush();
+    expect(h.session.channels.window("a").rows).toEqual([]);
+    expect(
+      h.session.channels.list().channels.find((channel) => channel.id === "a")
+        ?.preview,
+    ).toBeUndefined();
+    expect(disk.remove).not.toHaveBeenCalled();
+  },
+);
+
 it("a first channel read refused by the community settles the window instead of loading forever", async () => {
   const disk = emptyDisk();
   const h = setup({ prepared: true, persistence: disk });

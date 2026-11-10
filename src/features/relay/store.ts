@@ -946,10 +946,13 @@ export function createChannelStore(
     // The community refused the account, not this channel. Its owner (the
     // relay service's deny) ends the session and decides what saved data
     // survives: it keeps it for an ended sign-in. Until then, stop showing
-    // this channel's rows, but keep its access and saved copy.
+    // this channel's rows and preview, but keep its access and saved copy.
     if (refusalOfError(error)) {
+      heads.delete(channelId);
+      tails.delete(channelId);
       const state = windows.get(channelId);
       if (state) closeWindow(state, error);
+      setList(list);
       return;
     }
     accessVersions.set(channelId, (accessVersions.get(channelId) ?? 0) + 1);
