@@ -23,11 +23,15 @@ inventory do not keep a pinned conversation.
 The page uses the ordinary conversation owners for history, drafts, sending,
 threads and unread state. Its conversation workspace reuses Messages’ tab state
 and tab host, with a retained main timeline/composer and a resizable side pane.
+The header also uses the DM’s shared plugin launchers and actions menu, including
+Huddle when available, channel details, and eligible plugin menu items.
 Threads follow the device’s thread placement preference and support the same
 move, rename, close and pane-collapse controls. Profile and plugin links open
 in the tab workspace. Thread visits bind to their originating DM. Restoring
 one after the Bestie or canonical DM changes retires incompatible thread visits
 and shows the current Bestie's chat; it never reads an old thread in the new DM.
+⌘F on the page searches this DM, and Search Buzz offers **Search conversation
+with** the Bestie, as they do in any other conversation.
 While that exact DM is promoted, Messages omits its
 ordinary row and clears any old device-local hidden-DM intent. Replacing or
 deleting the Bestie, disabling the plugin, changing communities, or losing the
@@ -109,17 +113,15 @@ off too. On adds the `buzz:bestie/checkin.hourly` Hourly upkeep section to the
 instructions and an hourly Attention timer, `watch/bestie-hourly-check-in`,
 that wakes Bestie in your DM with it. Each check-in reads what is new in
 that DM and in the private channels Bestie was added to, and reports only in
-the DM. On also turns on the agent's Attention,
-which the Watching tab shows. Off removes the section and the timer and leaves
-Attention on, since the agent's other watches may need it. The timer runs while
-Buzz is open and the Watching plugin is on: this plugin doesn't call
+the DM. The Watching tab shows the timer. Off removes the section and the
+timer. The timer runs while Buzz is open and the Watching plugin is on: this
+plugin doesn't call
 `controlAttention()`, so turning Watching off still turns Attention off for
 every agent. While the timer can't run, the row says it is paused, and a
 timer paused on its own in the Attention tab says to turn the switch off and on
 again to restart it. If the instructions fail to save after the timer did, On
-removes the timer again, and turns Attention back off if it turned it on; a
-timer still left without its section gets a **Remove** row. After a
-sleep it runs once, not once for each missed hour. Each
+removes the timer again; a timer still left without its section gets a
+**Remove** row. After a sleep it runs once, not once for each missed hour. Each
 check-in is a feature in `features.ts`, so another kind is one more entry.
 
 **Changing your Bestie.** Only your Bestie checks in: whenever the saved Bestie
