@@ -165,9 +165,11 @@ const DISCOVERY_LIMIT = 500;
  * of twice this, the relay's maximum, leaves room for strays; a filter that
  * reaches it proves only the channels whose creation arrived. */
 const CREATION_READ_CHANNELS = 250;
-/** Relay seconds after a channel's creation by which a replica holds its
- * creation receipt, so a background read that finds none is final. */
-const CREATION_SETTLE_SECONDS = 60;
+/** Backoff before a background creator-proof read retries after finding no
+ * receipt or failing: doubling from a minute to an hour, jittered up to half
+ * again so clients that missed together retry apart. */
+const CREATION_RETRY_MS = 60_000;
+const CREATION_RETRY_MAX_MS = 3_600_000;
 // Public channel metadata for name search, read a page at a time up to a
 // bound; matches resolve exactly.
 const PUBLIC_CHANNEL_PAGE = 500;
@@ -1499,21 +1501,28 @@ export function createChannelStore(
   }
   // A channel's creator and creation receipt never change, so background reads
   // are per channel, not per metadata version: every membership change
-  // republishes 39000 to each online member. A receipt is final, and so is its
-  // absence once the channel is CREATION_SETTLE_SECONDS old. An earlier miss
-  // may be replica lag, so the first version signed after `retryAt` reads once
-  // more. Strong resolution revisits proof.
-  type CreationRead = { complete: boolean; retryAt?: number };
+  // republishes 39000 to each online member. A receipt is final. A miss may be
+  // replica lag, so a later version retries once its backoff (`retryAt`,
+  // monotonic ms) passes. Strong resolution revisits proof.
+  type CreationRead = { complete: boolean; misses: number; retryAt?: number };
   const creationReads = new Map<string, CreationRead>();
-  /** Whether a background read may run for this metadata version. */
-  function retries(id: string, event: RelayEvent) {
+  /** Whether a background read may run now: none ran, or a miss backed off. */
+  function retries(id: string) {
     const read = creationReads.get(id);
     return (
-      !read ||
-      (read.complete &&
-        read.retryAt !== undefined &&
-        event.created_at >= read.retryAt)
+      !read || (read.retryAt !== undefined && performance.now() >= read.retryAt)
     );
+  }
+  function missed(read: CreationRead) {
+    read.complete = true;
+    read.misses++;
+    read.retryAt =
+      performance.now() +
+      Math.min(
+        CREATION_RETRY_MS * 2 ** (read.misses - 1),
+        CREATION_RETRY_MAX_MS,
+      ) *
+        (1 + Math.random() / 2);
   }
   async function readCreations(
     events: readonly RelayEvent[],
@@ -1532,14 +1541,12 @@ export function createChannelStore(
         discovery.metadataVersion(id)?.id !== event.id ||
         discovery.get(id)?.parentChannelId ||
         !identity.creator ||
-        (settings?.consistency !== "strong" && !retries(id, event))
+        (settings?.consistency !== "strong" && !retries(id))
       )
         return [];
-      const settledAt =
-        (identity.createdAt ?? -Infinity) + CREATION_SETTLE_SECONDS;
       const read: CreationRead = {
         complete: false,
-        ...(event.created_at < settledAt ? { retryAt: settledAt } : {}),
+        misses: creationReads.get(id)?.misses ?? 0,
       };
       creationReads.set(id, read);
       pending.set(id, read);
@@ -1609,8 +1616,8 @@ export function createChannelStore(
               creationReads.get(id) === read &&
               (!cut || proved.has(id))
             ) {
-              read.complete = true;
-              if (proved.has(id)) delete read.retryAt;
+              if (proved.has(id)) read.complete = true;
+              else missed(read);
             } else if (read && creationReads.get(id) === read)
               creationReads.delete(id);
           }
@@ -1620,10 +1627,14 @@ export function createChannelStore(
     })()
       .catch((error) => {
         // Unavailable proof leaves an ordinary channel. A later metadata refresh
-        // may retry; never turn a failed proof read into loss of channel access.
+        // may retry after backing off; never turn a failed proof read into loss
+        // of channel access. A cancelled read proved and cost nothing.
         for (const [id, read] of pending)
-          if (!read.complete && creationReads.get(id) === read)
-            creationReads.delete(id);
+          if (!read.complete && creationReads.get(id) === read) {
+            if (error instanceof Error && error.name === "AbortError")
+              creationReads.delete(id);
+            else missed(read);
+          }
         throw error;
       })
       .finally(() => controllers.delete(controller));

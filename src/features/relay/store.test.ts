@@ -1109,9 +1109,26 @@ describe("creator proof reads", () => {
       tags: [["h", channel], ...extra],
     });
 
+  /** Holds the monotonic clock at `at` ms, with no retry jitter. */
+  function clock() {
+    let at = 1_000;
+    const now = vi.spyOn(performance, "now").mockImplementation(() => at);
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    return {
+      advance(ms: number) {
+        at += ms;
+      },
+      restore() {
+        now.mockRestore();
+        random.mockRestore();
+      },
+    };
+  }
+
   it("reads a channel's creation once as membership changes republish its metadata", async () => {
     // Each membership change republishes 39000 to every online member. A read
     // per version, times members, times a run of adds, was a relay-wide burst.
+    const time = clock();
     const { owner, reads, receive, take } = liveSession();
     const members = [viewer.pubkey];
     const add = () => {
@@ -1126,7 +1143,10 @@ describe("creator proof reads", () => {
       await receive([roster(relay, "a", members), stream("a")]);
       take().fail(new Error("offline"));
       await flush();
-      // A failed read proved nothing, so the next version retries it.
+      // A failed read backs off rather than retrying on every version.
+      await add();
+      expect(reads()).toEqual([]);
+      time.advance(60_000);
       await add();
       const first = take();
       expect(first.filters).toMatchObject([
@@ -1138,6 +1158,8 @@ describe("creator proof reads", () => {
       first.respond([creation("a")]);
       await flush();
       for (let n = 0; n < 3; n++) await add();
+      time.advance(24 * 3_600_000);
+      await add();
       // Every version was applied, so each one was a candidate for a read.
       expect(owner.session.channels.list().channels[0]?.members).toHaveLength(
         members.length,
@@ -1145,39 +1167,54 @@ describe("creator proof reads", () => {
       expect(reads()).toEqual([]);
     } finally {
       owner.dispose();
+      time.restore();
     }
   });
 
-  it("retries a young channel's missing creation once, after replicas settle", async () => {
-    // A live 39000 can precede its creation on a read replica. That miss must
-    // not leave a Huddle classified as an ordinary channel.
+  it("retries a missing creation with backoff until it arrives", async () => {
+    // A live 39000 can precede its creation on a read replica, and a channel
+    // first seen long after creation can still meet a lagging replica. No
+    // miss is final, or a Huddle could stay classified as an ordinary channel.
     const parent = "00000000-0000-4000-8000-000000000001";
     const room = "00000000-0000-4000-8000-000000000002";
-    const born = 1_700_000_000;
     const about = huddleDescription(parent);
-    const version = (at: number) => [
-      roster(relay, room, [viewer.pubkey], at),
-      metadata(relay, room, "Huddle", at, [
-        ["P", alice.pubkey],
-        ["private"],
-        ["t", "stream"],
-        ["created_at", String(born)],
-        ["ttl", "3600"],
-        ["about", about],
-      ]),
-    ];
+    let at = 1_700_000_000;
+    const version = () => {
+      at += 1;
+      return [
+        roster(relay, room, [viewer.pubkey], at),
+        metadata(relay, room, "Huddle", at, [
+          ["P", alice.pubkey],
+          ["private"],
+          ["t", "stream"],
+          ["created_at", String(1_600_000_000)],
+          ["ttl", "3600"],
+          ["about", about],
+        ]),
+      ];
+    };
     const summary = () =>
       owner.session.channels.list().channels.find(({ id }) => id === room);
+    const time = clock();
     const { owner, reads, receive, take } = liveSession();
     try {
-      await receive(version(born));
+      await receive(version());
       take().respond([]);
       await flush();
       expect(summary()?.parentChannelId).toBeUndefined();
-      // Versions signed before the replicas settle do not read again.
-      await receive(version(born + 59));
+      time.advance(59_999);
+      await receive(version());
       expect(reads()).toEqual([]);
-      await receive(version(born + 60));
+      time.advance(1);
+      await receive(version());
+      take().respond([]);
+      await flush();
+      // The second miss doubles the backoff.
+      time.advance(119_999);
+      await receive(version());
+      expect(reads()).toEqual([]);
+      time.advance(1);
+      await receive(version());
       take().respond([
         creation(room, [
           ["visibility", "private"],
@@ -1190,31 +1227,12 @@ describe("creator proof reads", () => {
         huddle: true,
         parentChannelId: parent,
       });
-      await receive(version(born + 61));
+      time.advance(24 * 3_600_000);
+      await receive(version());
       expect(reads()).toEqual([]);
     } finally {
       owner.dispose();
-    }
-  });
-
-  it("treats a settled channel's missing creation as final", async () => {
-    const { owner, reads, receive, take } = liveSession();
-    const version = (at: number) => [
-      roster(relay, "a", [viewer.pubkey], at),
-      metadata(relay, "a", "a", at, [
-        ["t", "stream"],
-        ["P", alice.pubkey],
-        ["created_at", String(1_700_000_000 - 60)],
-      ]),
-    ];
-    try {
-      await receive(version(1_700_000_000));
-      take().respond([]);
-      await flush();
-      await receive(version(1_700_000_001));
-      expect(reads()).toEqual([]);
-    } finally {
-      owner.dispose();
+      time.restore();
     }
   });
 
