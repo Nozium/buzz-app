@@ -862,6 +862,60 @@ it.each([
   },
 );
 
+it.each(["authorization", "acquisition"] as const)(
+  "discovers a newly installed folder before pending Git %s finishes",
+  async (phase) => {
+    const f = fixture();
+    const configuration = f.get();
+    if (configuration.status !== "ready") throw new Error("Expected catalog");
+    const folder = {
+      ...f.plugin,
+      manifest: { ...f.plugin.manifest, id: "example.folder" },
+      updateSource: { root: "/plugins/folder", path: "." },
+    };
+    const checkFolder = vi.fn(async () => "folder-new");
+    Object.assign(f.imports, { checkFolder });
+    let release!: () => void;
+    const held = new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    });
+    if (phase === "authorization") f.authorize.mockReturnValueOnce(held);
+    else
+      f.checkGit.mockImplementationOnce(async () => {
+        await held;
+        return f.preview;
+      });
+    const updates = createPluginUpdates(f.manager, f.authorize);
+    const pending = updates.check();
+    let refresh: Promise<number | undefined> | undefined;
+    try {
+      await vi.waitFor(() =>
+        expect(
+          phase === "authorization" ? f.authorize : f.checkGit,
+        ).toHaveBeenCalledOnce(),
+      );
+      f.set({
+        ...configuration,
+        catalog: { ...configuration.catalog, plugins: [f.plugin, folder] },
+      });
+      refresh = updates.check();
+      await vi.waitFor(() =>
+        expect(
+          pluginUpdateAvailable(
+            sharedPluginUpdateChecks(f.manager.imports).snapshot(),
+            folder,
+          ),
+        ).toBe(true),
+      );
+      expect(checkFolder).toHaveBeenCalledExactlyOnceWith(folder.manifest.id);
+    } finally {
+      release();
+      await Promise.all([pending, refresh]);
+      updates.dispose();
+    }
+  },
+);
+
 it("retains the latest explicit check failure after discovering an update and clears it after recovery", async () => {
   const f = fixture();
   const updates = createPluginUpdates(f.manager, f.authorize);

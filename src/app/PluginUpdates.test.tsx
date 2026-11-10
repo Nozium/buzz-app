@@ -935,3 +935,69 @@ it("keeps the connection's return for a hidden window, and checks again once it 
     visibility.mockRestore();
   }
 });
+
+it("discovers saved-folder updates on its hourly cadence while offline without reading Git", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(0);
+  const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  try {
+    const f = fixture();
+    const configuration = f.state().configuration;
+    if (configuration.status !== "ready") throw new Error("Expected catalog");
+    const folder = {
+      ...f.plugin,
+      manifest: { ...f.plugin.manifest, id: "example.folder" },
+      updateSource: { root: "/plugins/folder", path: "." },
+    };
+    const checkFolder = vi.fn(async () => "folder-new");
+    Object.assign(f.imports, { checkFolder });
+    f.emit({
+      configuration: {
+        ...configuration,
+        catalog: { ...configuration.catalog, plugins: [f.plugin, folder] },
+      },
+    });
+    f.mount();
+    await waitFor(() =>
+      expect(
+        pluginUpdateAvailable(
+          sharedPluginUpdateChecks(f.manager.imports).snapshot(),
+          folder,
+        ),
+      ).toBe(true),
+    );
+    expect(checkFolder).toHaveBeenCalledExactlyOnceWith(folder.manifest.id);
+    expect(f.imports.checkGit).not.toHaveBeenCalled();
+    vi.setSystemTime(3_600_000);
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(checkFolder).toHaveBeenCalledTimes(2);
+    expect(f.imports.checkGit).not.toHaveBeenCalled();
+    online.mockReturnValue(true);
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(f.imports.checkGit).toHaveBeenCalledOnce();
+    expect(checkFolder).toHaveBeenCalledTimes(2);
+  } finally {
+    online.mockRestore();
+  }
+});
+
+it("lets an explicit Check again try Git even when the browser reports offline", async () => {
+  const f = fixture();
+  f.imports.checkGit.mockRejectedValueOnce(OFFLINE);
+  f.mount();
+  const again = await screen.findByRole("button", { name: "Check again" });
+  const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  try {
+    fireEvent.click(again);
+    await waitFor(() => expect(f.imports.checkGit).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByText("Couldn’t check for updates.")).toBeNull(),
+    );
+  } finally {
+    online.mockRestore();
+  }
+});

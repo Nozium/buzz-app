@@ -1072,7 +1072,7 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
 - On desktop, plugins can support update checks and set them on or off by default.
   Use **Check for updates automatically** in the plugin's actions menu to change
   this choice. Buzz saves your choice across updates and restarts. Plugins without
-  update support keep their existing manual import flow. Buzz checks saved folder sources and eligible Git sources silently at startup and once per hour while the app is visible. Checks do not
+  update support keep their existing manual import flow. Buzz checks saved folder sources and eligible Git sources silently at startup and once per hour while the app is visible. Saved-folder checks work offline; automatic Git checks wait for a connection. Checks do not
   install or reload plugins. A notice
   offers **Update and reload**, or **Review permissions** when access increases.
   Click the notice body to open that plugin’s update checkbox in Manage plugins.

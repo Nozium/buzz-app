@@ -96,6 +96,7 @@ export function createPluginUpdates(
   authorizeGit: (
     repository: string,
   ) => Promise<{ repository: string; token: string } | null>,
+  online: () => boolean = () => true,
 ) {
   let updates: readonly PluginUpdate[] = [];
   let closed = false;
@@ -189,8 +190,61 @@ export function createPluginUpdates(
       ]),
     );
   }
+  function updateChecks() {
+    const checks = sharedPluginUpdateChecks(plugins.imports);
+    if (observedChecks !== checks) {
+      unsubscribeChecks();
+      observedChecks = checks;
+      unsubscribeChecks = checks.subscribe(prune);
+    }
+    return checks;
+  }
+  function checkFolders(force: boolean) {
+    const { configuration } = plugins.snapshot();
+    if (closed || !plugins.imports || configuration.status !== "ready") return;
+    const checks = updateChecks();
+    const now = Date.now();
+    for (const id of checked.keys())
+      if (
+        !configuration.catalog.plugins.some(
+          (plugin) => plugin.manifest.id === id,
+        )
+      )
+        checked.delete(id);
+    for (const plugin of configuration.catalog.plugins) {
+      const id = plugin.manifest.id;
+      const folder =
+        plugin.source === "external" &&
+        plugin.updateSource &&
+        "root" in plugin.updateSource &&
+        !managedBy(configuration.managed, id);
+      if (!folder) {
+        if (!pluginUpdateSource(plugins, id)) checked.delete(id);
+        continue;
+      }
+      const identity = JSON.stringify([plugin.revision, plugin.updateSource]);
+      const previous = checked.get(id);
+      if (
+        !force &&
+        previous?.identity === identity &&
+        now - previous.at < 3_600_000
+      )
+        continue;
+      checked.set(id, { identity, at: now });
+      const eligible = () => {
+        const live = installed(id);
+        return (
+          !closed &&
+          live?.revision === plugin.revision &&
+          JSON.stringify(live.updateSource) ===
+            JSON.stringify(plugin.updateSource)
+        );
+      };
+      void checks.check(plugin, authorizeGit, eligible);
+    }
+  }
   async function run(force: boolean) {
-    if (closed || !plugins.imports) return;
+    if (closed || !plugins.imports || (!force && !online())) return;
     const { configuration } = plugins.snapshot();
     if (configuration.status !== "ready") return;
     const now = Date.now();
@@ -204,28 +258,15 @@ export function createPluginUpdates(
       return;
     lastCheck = now;
     lastSources = sources;
-    const checks = sharedPluginUpdateChecks(plugins.imports);
-    if (observedChecks !== checks) {
-      unsubscribeChecks();
-      observedChecks = checks;
-      unsubscribeChecks = checks.subscribe(prune);
-    }
+    const checks = updateChecks();
     // Reserve generations before acquiring a batch: siblings may reuse the
     // same repository snapshot after a newer explicit check has completed.
-    const batch = configuration.catalog.plugins.map((plugin) => ({
-      plugin,
-      source: pluginUpdateSource(plugins, plugin.manifest.id),
-      observe: checks.observe(plugin),
-    }));
-    // Start folder probes before an awaited Git authorization or acquisition.
-    batch.sort((a, b) => Number(!!a.source) - Number(!!b.source));
-    for (const id of checked.keys())
-      if (
-        !configuration.catalog.plugins.some(
-          (plugin) => plugin.manifest.id === id,
-        )
-      )
-        checked.delete(id);
+    const batch = configuration.catalog.plugins.flatMap((plugin) => {
+      const source = pluginUpdateSource(plugins, plugin.manifest.id);
+      return source
+        ? [{ plugin, source, observe: checks.observe(plugin) }]
+        : [];
+    });
     const repositories = new Map<string, Promise<ImportPreview | null>>();
     const discover = (source: GitUpdateSource) => {
       const key = JSON.stringify([source.repository, source.reference]);
@@ -264,19 +305,7 @@ export function createPluginUpdates(
     for (const { plugin, source, observe } of batch) {
       if (closed) return;
       const id = plugin.manifest.id;
-      const folder =
-        plugin.source === "external" &&
-        plugin.updateSource &&
-        "root" in plugin.updateSource &&
-        !managedBy(configuration.managed, id);
-      if (!source && !folder) {
-        checked.delete(id);
-        continue;
-      }
-      const identity = JSON.stringify([
-        plugin.revision,
-        source ?? plugin.updateSource,
-      ]);
+      const identity = JSON.stringify([plugin.revision, source]);
       const previous = checked.get(id);
       if (
         !force &&
@@ -285,21 +314,6 @@ export function createPluginUpdates(
       )
         continue;
       checked.set(id, { identity, at: now });
-      if (!source) {
-        if (folder) {
-          const eligible = () => {
-            const live = installed(id);
-            return (
-              !closed &&
-              live?.revision === plugin.revision &&
-              JSON.stringify(live.updateSource) ===
-                JSON.stringify(plugin.updateSource)
-            );
-          };
-          void checks.check(plugin, authorizeGit, eligible);
-        }
-        continue;
-      }
       const update: PluginUpdate = {
         id,
         source,
@@ -355,6 +369,7 @@ export function createPluginUpdates(
       publish([...updates]);
     },
     check(force = false): Promise<number | undefined> {
+      checkFolders(force);
       retry ||= !!pending && (force || sourceIdentity() !== lastSources);
       forceNext ||= force;
       pending ??= (async () => {
@@ -370,7 +385,13 @@ export function createPluginUpdates(
           plugins.snapshot().configuration.status !== "ready"
         )
           return;
-        return Math.max(0, (lastCheck ?? Date.now()) + 3_600_000 - Date.now());
+        const at = Math.min(
+          Date.now(),
+          ...[...checked]
+            .filter(([id]) => online() || !pluginUpdateSource(plugins, id))
+            .map(([, value]) => value.at),
+        );
+        return Math.max(0, at + 3_600_000 - Date.now());
       })().finally(() => {
         pending = undefined;
       });
