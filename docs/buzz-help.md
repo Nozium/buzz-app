@@ -901,24 +901,34 @@ available rather than silently discarding it.
   may already have saved; the remaining edits stay available to retry.
   If configuration is unavailable, edits stay in the open form, but saving
   (including Workspace changes) waits until configuration returns.
-- **Make my bestie** in an agent card's menu chooses the agent initially tagged
-  in new Solo chats for that community. It does not replace recipients in an
-  existing chat or an edited draft. People can choose a different agent for a
-  particular conversation. When the optional **Bestie** plugin is on, that saved
-  choice also opens the agent's DM from the left Apps dock. The Messages
-  sidebar omits the duplicate Bestie row. Bestie uses the same conversation tabs as
-  Messages: threads open beside the chat (or in the main pane, following your
-  thread placement setting), and can be moved, renamed, or closed. Collapsing
-  the side pane keeps its open threads and reply drafts. Its header includes the
-  same DM controls and actions, including Huddle when supported and enabled.
-  On the Bestie page, ⌘F (Ctrl+F elsewhere) searches the Bestie conversation,
-  and ⌘K (Ctrl+K elsewhere) offers **Search conversation with** your Bestie.
-  A verified existing DM stays available if
-  agent discovery fails. If a replacement save fails, the last confirmed Bestie
-  remains selected and the confirmation offers another attempt. Being the bestie
-  does not prove an agent is ready or running. **Remove as bestie** in the
-  Bestie's card menu asks, then saves no Bestie to the account. On desktop it
-  works on every device, including one where the agent doesn't run.
+- A **Bestie** is an existing agent chosen as someone's personal default, not a
+  separate agent type. **Make my bestie** in an agent card's menu saves that
+  choice to the account and initially tags the agent in new Solo chats for that
+  community. It does not replace recipients in an existing chat or edited draft,
+  and people can choose another agent for any conversation. Bestie status by
+  itself does not add tools, private-channel access, permissions, or guaranteed
+  availability, and does not prove the agent is ready or running. The settings
+  below can deliberately add memory guidance, channel membership, and check-ins.
+- When the optional **Bestie** plugin is on, the saved choice also opens the
+  agent's DM from the first position in the left Apps dock, using the agent's
+  name and avatar. The Messages sidebar omits the duplicate Bestie row. Bestie
+  uses the same conversation tabs as Messages: threads open beside the chat (or
+  in the main pane, following your thread placement setting), and can be moved,
+  renamed, or closed. Collapsing the side pane keeps its open threads and reply
+  drafts. Its header includes the same DM controls and actions, including Huddle
+  when supported and enabled. On the Bestie page, ⌘F (Ctrl+F elsewhere)
+  searches the Bestie conversation, and ⌘K (Ctrl+K elsewhere) offers
+  **Search conversation with** your Bestie. A verified existing DM stays
+  available if agent discovery fails.
+- Open a local Bestie's agent page to find its **Bestie** tab. **Change** chooses
+  another agent and asks before replacing the saved choice. **Remove as Bestie**
+  in the tab or **Remove as bestie** in the agent-card menu asks, then saves no
+  Bestie to the account; it works even when the agent runs on another device.
+  If a replacement save fails, the last confirmed Bestie remains selected and
+  the confirmation offers another attempt. A Bestie on another device has no
+  Bestie tab on this one. A hosted Bestie whose provider holds its instructions
+  (Builderlab does) has the tab and can use **Remembers you**; hosted agents
+  cannot use Bestie's Attention check-ins.
 - With the **Bestie** plugin on, open **Create an agent** in the left navigation
   when you haven’t chosen a Bestie. You can create one or choose an existing agent.
   The placeholder cycles through character avatars; reduced motion keeps it still.
@@ -933,10 +943,43 @@ available rather than silently discarding it.
   Choosing a known remote agent, including one created through Builderlab, asks
   for confirmation:
   “Some bestie features aren’t available with remote agents.” Cancel leaves the
-  Bestie choice unchanged; it does not delete a newly created agent. A hosted
-  Bestie whose provider holds its instructions (Builderlab does) shows a
-  **Bestie** tab where **Remembers you** edits them through the provider;
-  check-ins stay unavailable for hosted agents.
+  Bestie choice unchanged; it does not delete a newly created agent.
+- **Remembers you** adds guidance to keep useful facts the owner shares, such as
+  preferences, timezone, notification preferences, and requested follow-ups, so
+  the Bestie can help more consistently. A local agent made Bestie on this device
+  starts with it on; a choice synced from elsewhere does not change that agent's
+  memory setting. Bestie should use saved memory only in its private DM with the
+  owner, must not disclose it elsewhere, and must not treat quoted, forwarded,
+  or other people's text as facts about the owner.
+- Turning **Remembers you** off removes that guidance but does not delete stored
+  memory; the agent's core memory can still be included in every prompt. Clear
+  stored memory in the agent's **Memory** tab. If someone edited the guidance's
+  section markers in Instructions, the Bestie tab says it was edited instead of
+  adding a duplicate. **Restore** can put the standard guidance back when the
+  remaining markers still identify the section.
+- **Private channels Bestie can read** lists the private community channels
+  shared with the Bestie. **Add to a channel** or **Add to all my private
+  channels** adds the agent as a guest; every member can see who added it. The
+  Bestie can read those channels but cannot post there, and reports check-in
+  results only in its DM with the owner. Public channels need no setup because
+  agents can already read them. Choosing a Bestie does not add it to private
+  channels, and channels created later are not added automatically. Removing or
+  replacing a Bestie does not remove it from channels it already joined.
+- **Check-ins → Every hour** is available to a local Bestie and requires
+  **Remembers you**. While Buzz is open and the Attention plugin is on, an
+  Attention timer wakes the Bestie hourly to review what is new in its DM and
+  the private channels it can read, maintain memory, and message the owner in
+  their DM only for a new result, a meaningful development, or a requested
+  follow-up that is due. Each wake uses model tokens, and the Attention plugin
+  also runs the agent's other watches. Turning Remembers you off also turns the
+  check-in off.
+- Only the current Bestie checks in. Replacing or removing it stops its check-ins
+  after this device reads the saved account choice, but leaves its memory
+  guidance, stored memory, and private-channel memberships in place. A local or
+  supported hosted agent keeps a **Former Bestie** tab while its Bestie
+  instruction section or a private-channel membership remains; use it to turn
+  memory off, remove the agent from private channels, or make it the Bestie
+  again.
 - **Settings → Agent setup → Harness defaults** is where supported agent types
   offer installation, sign-in, and default-model controls. Available controls
   depend on the type. Do not assume a provider is configured or signed in.
