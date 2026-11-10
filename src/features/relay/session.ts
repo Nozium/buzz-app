@@ -122,8 +122,8 @@ import { browserThreadFollows } from "./thread-follows";
 import { createMessages } from "./messages";
 import { retryRead } from "./read-retry";
 import { messageAuthor } from "./fold";
-import { createThreadView } from "./threads";
-import { ByteLru } from "./budget";
+import { createThreadView, type ThreadResume } from "./threads";
+import { ByteLru, listByteSize } from "./budget";
 import { createRelayProfiler } from "./profiling";
 import { liveRecoveryStatus } from "./live-recovery";
 import {
@@ -311,6 +311,9 @@ export function createRelaySession(
   const refreshers = new Set<() => Promise<void>>();
   const views = new Map<() => void, (clear?: boolean) => void>();
   const threads = new Set<ReturnType<typeof createThreadView>>();
+  /** Recently closed threads, so reopening one shows it at once. Memory only;
+   * dropped with any access change. */
+  const resumes = new ByteLru<ThreadResume>(32, 8 * 1024 * 1024);
   const writer = transport?.writer;
   const clock = new MessageClock();
   const uploadAttachment = transport?.uploadAttachment;
@@ -489,6 +492,7 @@ export function createRelaySession(
         .flatMap(([id, { event }]) => (!visible(event) ? [id] : []));
       // Purge before notifying: callbacks must not be able to reseed denied data.
       for (const id of revoked) recent.delete(id);
+      resumes.clear();
       channels.purgeAccess((events) => events.filter(visibility(events)));
       writes?.purgeConfirmed(visible);
       emoji.clear();
@@ -2836,6 +2840,9 @@ export function createRelaySession(
         priority: options?.priority,
         admit: options?.exact ? (events) => accept(events, false) : undefined,
         seed: recent.peek(messageId)?.event ?? retainedEvent(messageId),
+        resume: options?.exact
+          ? undefined
+          : resumes.get(`${channelId}:${messageId}`),
         local: localViews,
         clock,
         canAccess: () => !closed && canAccess(channelId),
@@ -2851,6 +2858,17 @@ export function createRelaySession(
       const unsubscribe = localViews?.subscribe(thread.localChanged);
       const unsubscribeOwner = profiles.queries.subscribe(thread.ownersChanged);
       const dispose = () => {
+        // Exact views neither use nor replace an ordinary thread's resume.
+        if (!options?.exact) {
+          const key = `${channelId}:${messageId}`;
+          const resume =
+            !closed && !cacheClearing && canAccess(channelId)
+              ? thread.resume()
+              : undefined;
+          if (typeof resume === "object")
+            resumes.set(key, resume, listByteSize(resume.events));
+          else if (!resume) resumes.delete(key);
+        }
         thread.view.dispose();
         unsubscribe?.();
         unsubscribeOwner();
@@ -3964,6 +3982,7 @@ export function createRelaySession(
         for (const clear of views.values()) clear(true);
         for (const view of artifactSyncs) view.restart();
         recent.clear();
+        resumes.clear();
         unread.clear();
         inboxFeed.clear();
         requests.invalidate();
@@ -3986,6 +4005,7 @@ export function createRelaySession(
     dispose() {
       stopSoloGroups();
       closed = true;
+      resumes.clear();
       stopLiveRecovery();
       recovery?.dispose();
       repositories.clearHomes();

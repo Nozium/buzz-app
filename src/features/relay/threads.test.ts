@@ -4,6 +4,7 @@ import type { ChannelMessage } from "./contracts";
 import { shareMessageRows } from "./row-identity";
 import { createThreadView, threadReference } from "./threads";
 import { byteSize } from "./budget";
+import { ReadError } from "./errors";
 import { foldMessages } from "./fold";
 import type { RelayReader } from "./reader";
 import type { OutgoingEvent } from "./outbox";
@@ -345,6 +346,142 @@ it("seeds a thread root and observed replies synchronously from retained session
   expect(view.snapshot().replies.map((row) => row.id)).toEqual([
     observedReply.id,
   ]);
+});
+
+/** A thread opened while the stream is up, as a settled view's resume needs. */
+function live() {
+  const h = setup();
+  h.traffic.established();
+  h.traffic.receive([root]);
+  return { ...h, view: h.session.thread("a", root.id) };
+}
+it("reopens a closed thread at once from its last read and repairs it in the background", async () => {
+  const h = live();
+  const first = reply("first", 10);
+  const loaded = h.view.refresh();
+  h.next().respond([root, first]);
+  await loaded;
+  h.view.dispose();
+
+  const view = h.session.thread("a", root.id);
+  expect(view.snapshot()).toMatchObject({
+    status: "ready",
+    direction: "forward",
+  });
+  expect(view.snapshot().root?.id).toBe(root.id);
+  expect(view.snapshot().replies.map((row) => row.id)).toEqual([first.id]);
+  const later = reply("later", 11);
+  const repair = view.refresh();
+  const read = h.next();
+  expect(view.snapshot().status).toBe("ready");
+  read.respond([root, first, later]);
+  await repair;
+  expect(view.snapshot()).toMatchObject({ status: "ready" });
+  expect(view.snapshot().replies.map((row) => row.id)).toEqual([
+    first.id,
+    later.id,
+  ]);
+  // Only the first refresh after reopening is a background repair.
+  const next = view.refresh();
+  const again = h.next();
+  expect(view.snapshot().status).toBe("loading");
+  again.respond([root, first, later]);
+  await next;
+});
+
+it("reopens a thread from scratch after a cache clear, a close mid-read or an exact view", async () => {
+  const h = live();
+  const first = reply("first", 10);
+  const load = async (view: typeof h.view) => {
+    const loaded = view.refresh();
+    h.next().respond([root, first]);
+    await loaded;
+  };
+  await load(h.view);
+  h.view.dispose();
+  // An exact view of the root ignores the resume and leaves it in place.
+  const exact = h.session.thread("a", root.id, { exact: true });
+  expect(exact.snapshot().status).toBe("idle");
+  exact.dispose();
+  const resumed = h.session.thread("a", root.id);
+  expect(resumed.snapshot().status).toBe("ready");
+  resumed.dispose();
+
+  await h.clearCache();
+  h.traffic.receive([root]);
+  const cleared = h.session.thread("a", root.id);
+  expect(cleared.snapshot().status).toBe("idle");
+  await load(cleared);
+  // Closed while a read runs, it keeps an earlier resume; here there is none.
+  const pending = cleared.refresh();
+  const read = h.next();
+  cleared.dispose();
+  expect(read.signal?.aborted).toBe(true);
+  await pending;
+  expect(h.session.thread("a", root.id).snapshot().status).toBe("idle");
+});
+
+it("keeps only what a reopened thread's repair reads again", async () => {
+  const h = live();
+  const first = reply("first", 10);
+  const gone = reply("deleted while closed", 11);
+  const loaded = h.view.refresh();
+  h.next().respond([root, first, gone]);
+  await loaded;
+  h.view.dispose();
+  // The relay omits a deleted row, and its deletion with it.
+  const view = h.session.thread("a", root.id);
+  expect(view.snapshot().replies.map((row) => row.id)).toEqual([
+    first.id,
+    gone.id,
+  ]);
+  const repair = view.refresh();
+  h.next().respond([root, first]);
+  await repair;
+  expect(view.snapshot().replies.map((row) => row.id)).toEqual([first.id]);
+});
+
+it("keeps a reply selected during a reopened thread's repair", async () => {
+  const h = live();
+  const first = reply("first", 10);
+  const loaded = h.view.refresh();
+  h.next().respond([root, first]);
+  await loaded;
+  h.view.dispose();
+  const view = h.session.thread("a", root.id);
+  const repair = view.refresh();
+  const window = h.next();
+  const selecting = view.retarget(first.id, new AbortController().signal);
+  h.next().respond([first]);
+  await flush();
+  h.next().respond([]);
+  expect(await selecting).toBe("selected");
+  // Newer replies pushed it past the repair's range; it was still read.
+  window.respond([root]);
+  await repair;
+  expect(view.snapshot().replies.map((row) => row.id)).toEqual([first.id]);
+});
+
+it("keeps a resume when its reopened view closes mid-read, and drops every resume on lost access", async () => {
+  const h = live();
+  const loaded = h.view.refresh();
+  h.next().respond([root, reply("first", 10)]);
+  await loaded;
+  h.view.dispose();
+  // StrictMode, or a quick switch away, closes a view while its repair runs.
+  const quick = h.session.thread("a", root.id);
+  const pending = quick.refresh();
+  const read = h.next();
+  quick.dispose();
+  expect(read.signal?.aborted).toBe(true);
+  await pending;
+  const view = h.session.thread("a", root.id);
+  expect(view.snapshot().status).toBe("ready");
+  const denied = view.refresh();
+  h.next().fail(new ReadError("denied", "Relay read failed (403)"));
+  await denied;
+  view.dispose();
+  expect(h.session.thread("a", root.id).snapshot().status).toBe("idle");
 });
 
 it("resolves canonical marked ancestry, never arbitrary references or a lone root", () => {

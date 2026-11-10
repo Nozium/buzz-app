@@ -49,6 +49,17 @@ export type ThreadSnapshot = Readonly<{
   target?: ChannelMessage | undefined;
   targetStatus?: "loading" | "ready" | "unavailable" | "error" | undefined;
 }>;
+/** A closed ordinary thread's verified evidence and traversal. A view opened
+ * from it shows those rows at once and repairs them in the background. */
+export type ThreadResume = Readonly<{
+  rootId: string;
+  events: readonly RelayEvent[];
+  cursor: ThreadCursor | undefined;
+  mode: "older" | "legacy";
+  pages: number;
+  canLoadMore: boolean;
+  limited: boolean;
+}>;
 export type ThreadRetarget =
   | "selected"
   | "different"
@@ -88,6 +99,7 @@ export function createThreadView({
   targetReader: sourceTargetReader = sourceReader,
   admitTarget,
   seed,
+  resume,
   local,
   canAccess,
   canRefresh = canAccess,
@@ -110,6 +122,8 @@ export function createThreadView({
   targetReader?: RelayReader;
   admitTarget?: (events: readonly RelayEvent[]) => readonly RelayEvent[];
   seed: RelayEvent | undefined;
+  /** Ignored by exact views and by a view of a reply. */
+  resume?: ThreadResume | undefined;
   local: LocalEvents | undefined;
   canAccess(): boolean;
   /** Cached membership can display saved rows but cannot authorize a network retry. */
@@ -196,6 +210,11 @@ export function createThreadView({
   let again: false | "refresh" | "established" = false;
   /** An older page requested during a background repair, which stays ready. */
   let older = false;
+  /** Resumed events no refresh has read again. The relay omits deleted rows
+   * and a closed view missed the stream, so until a refresh succeeds these are
+   * shown but not evidence: it keeps only what it reads, as a fresh view would,
+   * and repairs in the background. */
+  let provisional: ReadonlySet<string> | undefined;
   let snapshot: ThreadSnapshot = Object.freeze({
     status: "idle",
     root: undefined,
@@ -390,6 +409,27 @@ export function createThreadView({
     if (seed.id === rootId) remote = [seed];
     publish();
   }
+  // Resumed rows were verified when read; visibility is checked again now.
+  if (resume && !exact && resume.rootId === messageId && canAccess()) {
+    const events = visible(resume.events);
+    if (
+      (!rootId || rootId === resume.rootId) &&
+      events.some((event) => event.id === resume.rootId) &&
+      retain(union(remote, events))
+    ) {
+      rootId = resume.rootId;
+      cursor = resume.cursor;
+      mode = resume.mode;
+      pages = resume.pages;
+      provisional = new Set(events.map((event) => event.id));
+      publish({
+        status: "ready",
+        direction: mode === "older" ? "older" : "forward",
+        canLoadMore: resume.canLoadMore,
+        limited: resume.limited,
+      });
+    }
+  }
   function purge(clear = false) {
     // A purged view no longer holds what the stream delivered before the drop.
     liveAtDrop = false;
@@ -505,6 +545,11 @@ export function createThreadView({
     const combined = union(remote, related(accepted, id));
     if (!retain(combined)) return "error";
     stage([]);
+    // Read just now: evidence a running repair must keep, not resumed display.
+    if (provisional) {
+      const read = new Set(accepted.map((event) => event.id));
+      provisional = new Set([...provisional].filter((id) => !read.has(id)));
+    }
     if (
       expectedRoot &&
       !foldMessages(channelId, relayAuthor, combined, {
@@ -575,6 +620,8 @@ export function createThreadView({
       return;
     }
     if (!replace && (!snapshot.canLoadMore || snapshot.limited)) return;
+    const unproven = replace ? provisional : undefined;
+    const background = established || !!unproven;
     const owned = new AbortController();
     controller = owned;
     const startedAt = now();
@@ -595,7 +642,7 @@ export function createThreadView({
     if (exact && replace && targetStatus !== "ready") targetStatus = "loading";
     // A stream establishment (a reconnect, or a minute renewal) repairs a ready
     // view in the background: it stays ready unless the repair changes it.
-    if (!established || snapshot.status !== "ready")
+    if (!background || snapshot.status !== "ready")
       publishStatus({
         status: "loading",
         error: undefined,
@@ -671,7 +718,11 @@ export function createThreadView({
       // A strict refresh re-reads from the newest end. Live replay covers
       // minutes, not a long disconnect, so keep paging until a reply kept
       // across the drop is reached.
-      const kept = replace ? (held ?? unverified()) : new Set<string>();
+      const kept = new Set(
+        replace
+          ? [...(held ?? unverified())].filter((id) => !unproven?.has(id))
+          : [],
+      );
       let reached = !kept.size;
       let more = false;
       // Where the loop passed the range the reader had, so a fill that never
@@ -812,13 +863,18 @@ export function createThreadView({
       if (
         !retain(
           union(
-            unreached ? remote.filter((event) => !kept.has(event.id)) : remote,
+            remote.filter(
+              (event) =>
+                !(unreached && kept.has(event.id)) &&
+                !(unproven && provisional?.has(event.id)),
+            ),
             fetched,
           ),
         )
       )
         return;
       rootUnavailable = false;
+      if (unproven) provisional = undefined;
       cursor = nextCursor;
       pages = nextPages;
       if (replace) readAt = startedAt;
@@ -869,6 +925,32 @@ export function createThreadView({
     events: () => [...remote, ...staged, ...selectionStaged],
     receive,
     purge,
+    /** What a later view of this thread may start from: only a settled,
+     * ordinary view of a root, read while the stream was up. `reading` while
+     * a read runs: it settles nothing, so an earlier resume still stands. */
+    resume(): ThreadResume | "reading" | undefined {
+      if (controller) return "reading";
+      if (
+        disposed ||
+        exact ||
+        rootId !== messageId ||
+        rootUnavailable ||
+        dropped ||
+        mode === "probe" ||
+        snapshot.status !== "ready" ||
+        !snapshot.root
+      )
+        return undefined;
+      return Object.freeze({
+        rootId,
+        events: remote,
+        cursor,
+        mode,
+        pages,
+        canLoadMore: snapshot.canLoadMore,
+        limited: snapshot.limited,
+      });
+    },
     /** The stream dropped: the replies held now are what its establishment
      * refresh must reach. */
     stale() {

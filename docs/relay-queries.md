@@ -242,6 +242,18 @@ edit/reaction removes that overlay. Unknown or denied auxiliary targets remain
 invisible; active thread target evidence survives shared-cache eviction but still
 passes the existing recursive access check.
 
+Closing an ordinary view of a root keeps its verified events and traversal in a
+memory-only resume (32 threads / 8 MiB, least recently used first) when its last
+read settled while the stream was up; closing it during a read leaves an earlier
+resume in place. The next ordinary view of that root starts `ready` from it, after
+the existing access and visibility checks, so the panel shows it without the
+loader. Resumed events are display only: the closed view missed the stream, and
+the relay omits deleted rows with their deletions. The first refresh repairs in the
+background, as an establishment repair does, with the same reads a refresh makes,
+and keeps only the resumed events it reads again, as a fresh view would. Exact
+views neither use nor replace a resume. Any access change, cache clear or session
+disposal drops every resume.
+
 Threads share the 64 owned-handle ceiling. Each retains at most 2,000 events / 4 MiB;
 overflow clears display evidence and exposes an explicit recoverable limit rather
 than silently evicting a tombstone. Cache clear, access loss and session disposal
