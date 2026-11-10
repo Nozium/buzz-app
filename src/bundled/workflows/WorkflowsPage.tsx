@@ -9,6 +9,7 @@ import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
 import type { WorkflowDefinition } from "../../features/workflows/types";
 import { useChannelList, useRelayConnection } from "../../features/relay/react";
+import { useRecoverableRead } from "../../features/relay/RecoveryNotice";
 import {
   ArrowsClockwiseIcon,
   LightningIcon,
@@ -80,6 +81,13 @@ export function WorkflowCommunity({
 }) {
   const capability = session.workflows;
   const channels = useChannelList(session.channels);
+  // A connectivity failure belongs to the app's one recovery notice, which
+  // retries the channel list; only other failures show Retry channels.
+  const { quiet: channelsQuiet } = useRecoverableRead(
+    session.recovery,
+    channels,
+    () => session.channels.refreshList?.(),
+  );
   const eligible = channels.channels.filter(
     (item) => !item.huddle && !item.metadataPending,
   );
@@ -244,10 +252,10 @@ export function WorkflowCommunity({
               }
             />
             <div className="workflows-body">
-              {channels.status === "loading" && !eligible.length && (
-                <p role="status">Reading channels…</p>
-              )}
-              {channels.status === "error" && (
+              {(channels.status === "loading" ||
+                (channelsQuiet && channels.status === "error")) &&
+                !eligible.length && <p role="status">Reading channels…</p>}
+              {channels.status === "error" && !channelsQuiet && (
                 <div className="workflow-page-state">
                   <p role="alert" className="text-danger">
                     {channels.error ?? "Channels could not be read."}
@@ -340,6 +348,7 @@ export function WorkflowCommunity({
             onSaveReadback={setSaveReadback}
             onDelete={deleteWorkflow}
             viewer={viewer}
+            recovery={session.recovery}
             onClose={() => openChannel("")}
           />
         </WorkflowMentionMembers.Provider>
