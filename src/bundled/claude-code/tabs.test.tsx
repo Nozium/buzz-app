@@ -56,7 +56,13 @@ const nativeKey = vi.hoisted(() => {
     if (!/^sk-ant-[A-Za-z0-9_-]+$/.test(value.trim()))
       throw "That is not an Anthropic API key. Create one at console.anthropic.com and paste it here.";
   };
-  return { saved: true, saves: [] as string[], check, save: check };
+  return {
+    saved: true,
+    saves: [] as string[],
+    check,
+    save: check,
+    refuseClear: "",
+  };
 });
 vi.mock("@tauri-apps/api/core", () => ({
   isTauri: () => desktop.tauri,
@@ -70,7 +76,10 @@ vi.mock("@tauri-apps/api/core", () => ({
       await nativeKey.save(value);
       nativeKey.saved = true;
     }
-    if (command === "claude_api_key_clear") nativeKey.saved = false;
+    if (command === "claude_api_key_clear") {
+      if (nativeKey.refuseClear) throw nativeKey.refuseClear;
+      nativeKey.saved = false;
+    }
     return null;
   },
 }));
@@ -213,6 +222,7 @@ function applied({
   let type: AgentType<Config> | undefined;
   nativeKey.saved = keySaved;
   nativeKey.saves = [];
+  nativeKey.refuseClear = "";
   nativeKey.save = nativeKey.check;
   const home = mkdtempSync(join(tmpdir(), "claude-tabs-"));
   homes.push(home);
@@ -1067,6 +1077,20 @@ it("removes the key and asks for one again", async () => {
   });
   // Removing leaves the dialog open, asking for a key.
   expect(onClose).not.toHaveBeenCalled();
+});
+
+it("keeps the key and says why when removing it fails", async () => {
+  const { type } = installed();
+  nativeKey.refuseClear = "Keychain access was denied. Allow access and retry";
+  const Setup = providerSetup(type);
+  render(<Setup onClose={vi.fn()} />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Remove key" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Keychain access was denied. Allow access and retry",
+  );
+  expect(nativeKey.saved).toBe(true);
+  expect(screen.getByRole("button", { name: "Remove key" })).toBeEnabled();
 });
 
 it("saves the key with Enter without submitting the form it sits in", async () => {
