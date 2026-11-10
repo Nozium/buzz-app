@@ -82,6 +82,8 @@ export function provideRelay(
   let controller: AbortController | undefined;
   let connecting = false;
   let clearing: Promise<void> | undefined;
+  /** A person's Try again is asking the sign-in server again. */
+  let asking = false;
   let deadline: ReturnType<typeof setTimeout> | undefined;
   let store = createRelaySession(null, { identityNames });
   let snapshot: RelaySnapshot = Object.freeze({
@@ -408,12 +410,16 @@ export function provideRelay(
       else store.session.recovery?.retryAll();
     },
     tryAgain() {
-      if (disposed) return;
+      // A second press (or a route retrying its relay too) while the first
+      // still asks joins it.
+      if (disposed || asking) return;
       const relay = snapshot.origin ?? resume?.scope;
+      asking = true;
       void Promise.resolve(relay && askAgain?.(relay))
         // Asking again is best effort: the retry still runs.
         .catch(() => {})
         .finally(() => {
+          asking = false;
           if (disposed) return;
           if (snapshot.status === "ready" && !snapshot.cached)
             store.session.recovery?.retryAll();
