@@ -732,7 +732,11 @@ function MessageRowContent({
                 fallback={name}
                 size={avatarSize}
                 shape={avatarShape}
-                statusBadge={presence === "unknown" ? undefined : presence}
+                statusBadge={
+                  presence === "unknown" || avatarShape === "squircle"
+                    ? undefined
+                    : presence
+                }
               />
               {presence !== "unknown" && (
                 <span className="sr-only select-none" id={presenceId}>
@@ -758,7 +762,11 @@ function MessageRowContent({
         fallback={name}
         size={avatarSize}
         shape={avatarShape}
-        statusBadge={presence === "unknown" ? undefined : presence}
+        statusBadge={
+          presence === "unknown" || avatarShape === "squircle"
+            ? undefined
+            : presence
+        }
       />
     </span>
   );
@@ -1017,6 +1025,8 @@ function MessageRowContent({
     );
   };
   const reactionsInBubble =
+    // Prototype: a flat row puts reactions after its media, as a list does.
+    !(flat && attachmentGroups.length > 0) &&
     !attachmentOnly &&
     !cardsOnly &&
     !row.huddle &&
