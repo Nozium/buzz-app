@@ -87,6 +87,8 @@ pub enum BrowserAction {
 struct BrowserSession {
     instance: String,
     host: Webview,
+    // Dropped before the guest: it ends the guest's fullscreen and observation.
+    _fullscreen: platform::Fullscreen,
     guest: WebView,
     // WKWebView's UI and navigation delegate references are weak.
     _permissions: platform::Permissions,
@@ -96,6 +98,37 @@ struct BrowserSession {
     approvals: Rc<RefCell<Approvals>>,
     // WebKit requires suspend and resume calls in pairs.
     media_suspended: Cell<bool>,
+    presentation: Presentation,
+}
+
+/// The latest presentation the host asked for while WebKit owned a fullscreen
+/// guest, to apply when WebKit gives the guest back.
+#[derive(Default)]
+struct Presentation(Cell<Option<(BrowserBounds, bool)>>);
+
+impl Presentation {
+    /// What to apply now: nothing while fullscreen, where the request waits.
+    fn request(
+        &self,
+        fullscreen: bool,
+        bounds: BrowserBounds,
+        visible: bool,
+    ) -> Option<(BrowserBounds, bool)> {
+        if fullscreen {
+            self.0.set(Some((bounds, visible)));
+            return None;
+        }
+        self.0.set(None);
+        Some((bounds, visible))
+    }
+
+    fn holding(&self) -> bool {
+        self.0.get().is_some()
+    }
+
+    fn after_fullscreen(&self) -> Option<(BrowserBounds, bool)> {
+        self.0.take()
+    }
 }
 
 impl BrowserSession {
@@ -127,6 +160,11 @@ impl BrowserSession {
     }
 
     fn set_media_suspended(&self, suspended: bool) -> Result<(), String> {
+        if suspended {
+            // Only detach suspends: no view shows the page any more, so it must
+            // not stay fullscreen. A suspend for another reason must not do this.
+            platform::leave_fullscreen(&self.guest);
+        }
         if self.media_suspended.get() == suspended {
             return Ok(());
         }
@@ -138,10 +176,13 @@ impl BrowserSession {
     fn set_bounds(&self, bounds: BrowserBounds, visible: bool) -> Result<(), String> {
         // A fullscreen page has left the panel: entering fullscreen hides the main
         // window, and hiding or placing the guest would blank the fullscreen
-        // window. The host syncs it again once it is back in the panel.
-        if platform::fullscreen(&self.guest) {
+        // window. The latest request applies once WebKit gives the page back.
+        let Some((bounds, visible)) =
+            self.presentation
+                .request(platform::fullscreen(&self.guest), bounds, visible)
+        else {
             return Ok(());
-        }
+        };
         self.guest
             .set_visible(false)
             .map_err(|error| error.to_string())?;
@@ -181,6 +222,33 @@ fn with_browser<T>(
             .find(|browser| browser.instance == session_id)
             .ok_or_else(|| "Browser session is closed or replaced".to_string())?;
         operation(browser)
+    })
+}
+
+/// Applies what the host asked for while the guest was fullscreen, such as a
+/// hide from a view that closed meanwhile. Returns false to be asked again
+/// when the guest cannot be placed yet.
+fn present_after_fullscreen(instance: &str) -> bool {
+    BROWSERS.with(|browsers| {
+        let Ok(browsers) = browsers.try_borrow() else {
+            return false;
+        };
+        let Some(browser) = browsers.iter().find(|browser| browser.instance == instance) else {
+            return true;
+        };
+        if !browser.presentation.holding() {
+            return true;
+        }
+        // WebKit can report the exit before it puts the guest back in the panel.
+        if !platform::in_host_window(&browser.guest, &browser.host) {
+            return false;
+        }
+        if let Some((bounds, visible)) = browser.presentation.after_fullscreen() {
+            if let Err(error) = browser.set_bounds(bounds, visible) {
+                browser.snapshot.borrow_mut().error = Some(error);
+            }
+        }
+        true
     })
 }
 
@@ -402,9 +470,14 @@ fn build_contents(
     let guest = platform::build_guest(builder, &host.window())?;
     let permissions = platform::deny_permissions(&guest)?;
     let navigation = platform::observe_navigation(&guest)?;
+    let instance = uuid::Uuid::new_v4().to_string();
+    let exited = instance.clone();
+    let fullscreen =
+        platform::observe_fullscreen(&guest, move || present_after_fullscreen(&exited))?;
     let browser = BrowserSession {
-        instance: uuid::Uuid::new_v4().to_string(),
+        instance,
         host,
+        _fullscreen: fullscreen,
         guest,
         _permissions: permissions,
         navigation,
@@ -412,6 +485,7 @@ fn build_contents(
         policy,
         approvals,
         media_suspended: Cell::new(false),
+        presentation: Presentation::default(),
     };
     platform::resize_guest(&browser.guest, &browser.host, bounds)?;
     if !defer_navigation {
@@ -586,7 +660,36 @@ pub async fn browser_status(app: AppHandle, session_id: String) -> Result<Browse
 
 #[cfg(test)]
 mod storage_tests {
-    use super::storage_identifier;
+    use super::{storage_identifier, BrowserBounds, Presentation};
+
+    fn bounds(x: f64) -> BrowserBounds {
+        BrowserBounds {
+            x,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        }
+    }
+
+    #[test]
+    fn fullscreen_holds_the_latest_presentation_until_it_ends() {
+        let presentation = Presentation::default();
+        assert_eq!(presentation.request(true, bounds(1.0), false), None);
+        assert_eq!(presentation.request(true, bounds(2.0), true), None);
+        assert_eq!(presentation.after_fullscreen(), Some((bounds(2.0), true)));
+        assert_eq!(presentation.after_fullscreen(), None);
+    }
+
+    #[test]
+    fn a_presentation_applied_after_fullscreen_replaces_the_held_one() {
+        let presentation = Presentation::default();
+        assert_eq!(presentation.request(true, bounds(1.0), false), None);
+        assert_eq!(
+            presentation.request(false, bounds(2.0), true),
+            Some((bounds(2.0), true))
+        );
+        assert_eq!(presentation.after_fullscreen(), None);
+    }
 
     #[test]
     fn names_map_to_stable_distinct_stores() {

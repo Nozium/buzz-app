@@ -3,7 +3,7 @@ use wry::{WebView, WebViewBuilder};
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use std::cell::RefCell;
+    use std::{cell::RefCell, ffi::c_void};
 
     use block2::Block;
     use objc2::{
@@ -269,11 +269,164 @@ mod macos {
     /// Whether WebKit has moved the guest into its own fullscreen window (or is
     /// moving it in or out). WebKit owns its frame and visibility then.
     pub fn fullscreen(guest: &WebView) -> bool {
-        let view = guest.webview();
-        // `fullscreenState` is macOS 13.3+; older WebKit reports no state.
+        in_fullscreen(&guest.webview())
+    }
+
+    fn in_fullscreen(view: &WKWebView) -> bool {
+        // `fullscreenState` is macOS 13.0+; older WebKit reports no state.
         view.respondsToSelector(sel!(fullscreenState))
             && unsafe { view.fullscreenState() }
                 != objc2_web_kit::WKFullscreenState::NotInFullscreen
+    }
+
+    /// Asks WebKit to return a fullscreen guest to its window. The exit finishes
+    /// later and is reported to the fullscreen observer.
+    pub fn leave_fullscreen(guest: &WebView) {
+        exit_fullscreen(&guest.webview());
+    }
+
+    fn exit_fullscreen(view: &WKWebView) {
+        // Every macOS with `fullscreenState` has this (12.0+).
+        if in_fullscreen(view) {
+            unsafe { view.closeAllMediaPresentationsWithCompletionHandler(None) };
+        }
+    }
+
+    pub struct FullscreenIvars {
+        view: Retained<WKWebView>,
+        // Returns false while the guest is not yet back where it can be placed.
+        exited: Box<dyn Fn() -> bool>,
+        retries: std::cell::Cell<u8>,
+    }
+
+    // About two seconds for WebKit to put the guest back after its exit.
+    const FULLSCREEN_RETRIES: u8 = 40;
+
+    define_class!(
+        // WebKit reports fullscreen changes only through key-value observing.
+        #[unsafe(super(NSObject))]
+        #[name = "BuzzBrowserFullscreenObserver"]
+        #[thread_kind = MainThreadOnly]
+        #[ivars = FullscreenIvars]
+        pub struct FullscreenObserver;
+
+        impl FullscreenObserver {
+            #[unsafe(method(observeValueForKeyPath:ofObject:change:context:))]
+            fn observe_value(
+                &self,
+                _key_path: Option<&NSString>,
+                _object: Option<&AnyObject>,
+                _change: Option<&AnyObject>,
+                _context: *mut c_void,
+            ) {
+                // WebKit can report a change from inside a call that holds the
+                // session list, such as dropping the guest; answer from the run loop.
+                let _: () = unsafe {
+                    msg_send![
+                        self,
+                        performSelectorOnMainThread: sel!(reconcileFullscreen:),
+                        withObject: Option::<&AnyObject>::None,
+                        waitUntilDone: false
+                    ]
+                };
+            }
+
+            #[unsafe(method(reconcileFullscreen:))]
+            fn reconcile(&self, _sender: Option<&AnyObject>) {
+                let ivars = self.ivars();
+                if in_fullscreen(&ivars.view) {
+                    ivars.retries.set(0);
+                    return;
+                }
+                if (ivars.exited)() {
+                    ivars.retries.set(0);
+                    return;
+                }
+                let retries = ivars.retries.get();
+                if retries >= FULLSCREEN_RETRIES {
+                    ivars.retries.set(0);
+                    return;
+                }
+                ivars.retries.set(retries + 1);
+                let _: () = unsafe {
+                    msg_send![
+                        self,
+                        performSelector: sel!(reconcileFullscreen:),
+                        withObject: Option::<&AnyObject>::None,
+                        afterDelay: 0.05f64
+                    ]
+                };
+            }
+        }
+
+        unsafe impl NSObjectProtocol for FullscreenObserver {}
+    );
+
+    const FULLSCREEN_STATE: &str = "fullscreenState";
+
+    /// Observes the guest until dropped. WebKit does not retain its observers.
+    pub struct Fullscreen(Option<Retained<FullscreenObserver>>);
+
+    impl Drop for Fullscreen {
+        fn drop(&mut self) {
+            if let Some(observer) = self.0.take() {
+                // A closed guest must not leave WebKit's fullscreen window behind.
+                // The exit finishes after the guest is gone and may put the view
+                // back into the main window, so hide it first.
+                let view = &observer.ivars().view;
+                if in_fullscreen(view) {
+                    view.setHidden(true);
+                    exit_fullscreen(view);
+                }
+                let key = NSString::from_str(FULLSCREEN_STATE);
+                let _: () = unsafe {
+                    msg_send![&*observer.ivars().view, removeObserver: &*observer, forKeyPath: &*key]
+                };
+            }
+        }
+    }
+
+    /// Calls `exited` each time WebKit gives a fullscreen guest back to its
+    /// window, and again shortly while it returns false.
+    pub fn observe_fullscreen(
+        guest: &WebView,
+        exited: impl Fn() -> bool + 'static,
+    ) -> Result<Fullscreen, String> {
+        let marker = MainThreadMarker::new()
+            .ok_or("Browser fullscreen must be observed on the UI thread")?;
+        let view = guest.webview();
+        if !view.respondsToSelector(sel!(fullscreenState)) {
+            return Ok(Fullscreen(None));
+        }
+        let allocated = FullscreenObserver::alloc(marker).set_ivars(FullscreenIvars {
+            view: Retained::into_super(view),
+            exited: Box::new(exited),
+            retries: std::cell::Cell::new(0),
+        });
+        let observer: Retained<FullscreenObserver> = unsafe { msg_send![super(allocated), init] };
+        let key = NSString::from_str(FULLSCREEN_STATE);
+        let _: () = unsafe {
+            msg_send![
+                &*observer.ivars().view,
+                addObserver: &*observer,
+                forKeyPath: &*key,
+                options: 0usize,
+                context: std::ptr::null_mut::<c_void>()
+            ]
+        };
+        Ok(Fullscreen(Some(observer)))
+    }
+
+    /// Whether the guest is in the host's window, rather than WebKit's
+    /// fullscreen window or none.
+    pub fn in_host_window(guest: &WebView, host: &tauri::Webview) -> bool {
+        let Ok(host) = host.window().ns_window() else {
+            return false;
+        };
+        guest
+            .webview()
+            .window()
+            .is_some_and(|window| Retained::as_ptr(&window).cast::<c_void>() == host.cast_const())
     }
 
     pub fn focused(guest: &WebView) -> bool {
@@ -471,8 +624,9 @@ pub(super) fn resize_guest(
 
 #[cfg(target_os = "macos")]
 pub(super) use macos::{
-    back, current_url, deny_permissions, focused, forward, fullscreen, install_builderlab_cookie,
-    load, loading, observe_navigation, set_media_suspended,
+    back, current_url, deny_permissions, focused, forward, fullscreen, in_host_window,
+    install_builderlab_cookie, leave_fullscreen, load, loading, observe_fullscreen,
+    observe_navigation, set_media_suspended, Fullscreen,
 };
 #[cfg(target_os = "macos")]
 pub(super) type Permissions = objc2::rc::Retained<macos::PermissionDelegate>;
@@ -506,6 +660,25 @@ pub(super) fn load(
 #[cfg(not(target_os = "macos"))]
 pub(super) fn fullscreen(_guest: &WebView) -> bool {
     false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn leave_fullscreen(_guest: &WebView) {}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) struct Fullscreen;
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn observe_fullscreen(
+    _guest: &WebView,
+    _exited: impl Fn() -> bool + 'static,
+) -> Result<Fullscreen, String> {
+    Ok(Fullscreen)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn in_host_window(_guest: &WebView, _host: &tauri::Webview) -> bool {
+    true
 }
 
 #[cfg(not(target_os = "macos"))]
