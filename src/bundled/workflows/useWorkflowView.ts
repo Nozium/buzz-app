@@ -42,7 +42,10 @@ export function useWorkflowView<T>(
   );
   const shown =
     snapshot && quiet && snapshot.status === "error"
-      ? { ...snapshot, status: "loading" as const, error: undefined }
+      ? (({ error: _failure, ...rest }) => ({
+          ...rest,
+          status: "loading" as const,
+        }))(snapshot)
       : snapshot;
   return { snapshot: shown, refresh: store.refresh };
 }
