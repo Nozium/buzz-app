@@ -1493,10 +1493,11 @@ function ChannelWorkspace({
     // The close commit gets one focus handoff, never a deferred request that
     // can override a later, unrelated tab selection.
     returnFocus.current = undefined;
-    if (pending.trigger.closest('[inert], [hidden], [aria-hidden="true"]'))
-      return;
-    if (!document.querySelector('dialog[open], [aria-modal="true"]'))
-      pending.trigger.focus({ preventScroll: true });
+    if (document.querySelector('dialog[open], [aria-modal="true"]')) return;
+    const cover = pending.trigger.closest("[inert]");
+    if (cover) focusDock(cover.parentElement);
+    else if (pending.trigger.closest('[hidden], [aria-hidden="true"]')) return;
+    else pending.trigger.focus({ preventScroll: true });
   });
   const {
     open,
