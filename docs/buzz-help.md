@@ -221,8 +221,8 @@ mention anyone. Explicit agent watches on that room can still receive them.
   reached, that app keeps its sign-in until it restarts.
 - If a community doesn't accept the account you signed in with, its prompt
   names the server and offers **Switch account**: Buzz signs out of that server
-  only and opens its sign-in again, which asks for credentials so you can choose
-  another account. Other servers stay signed in. It also
+  only and opens its sign-in again, which asks the browser to sign in again
+  rather than reuse that account, so you can choose another one. Other servers stay signed in. It also
   names the other communities that require that server's sign-in, whose access
   may change with the account; ones that don't require it are unaffected. If
   you cancel the sign-in during a switch, you stay signed out of that server and

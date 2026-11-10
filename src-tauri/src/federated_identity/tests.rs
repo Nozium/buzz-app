@@ -539,6 +539,26 @@ async fn an_explicit_sign_out_asks_for_credentials_until_a_sign_in_completes_eve
 }
 
 #[tokio::test]
+async fn a_restored_session_clears_a_sign_out_mark() {
+    let root = tempfile::tempdir().unwrap();
+    let marker = root.path().join("account.signed-out");
+    std::fs::write(&marker, b"").unwrap();
+    let (base, server) = adapter(vec![
+        serde_json::json!({"expires_at":"2099-01-01T00:00:00Z","email":"a@example.com"}),
+    ])
+    .await;
+    let store = Arc::new(Memory::default());
+    // Another Buzz copy with this profile signed in since this one signed out.
+    *store.raw.lock().unwrap() = Some(record().raw.clone());
+    let owner = marked(store, base, &marker);
+    assert!(asks_for_credentials(&owner));
+    assert!(owner.restore().await.status == Status::SignedIn);
+    assert!(!asks_for_credentials(&owner));
+    assert!(!marker.exists());
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn expiry_and_close_leave_the_next_sign_in_to_the_browsers_session() {
     let root = tempfile::tempdir().unwrap();
     let marker = root.path().join("account.signed-out");

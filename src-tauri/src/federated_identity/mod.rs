@@ -123,8 +123,8 @@ struct State {
     retirements: u64,
     /// Set by an explicit sign-out and kept on disk (`Inner::signed_out`):
     /// the next sign-in asks for credentials instead of finishing on the
-    /// browser's session as the account just signed out. A completed sign-in
-    /// clears it. Expiry, refusals and close never set it.
+    /// browser's session as the account just signed out. Any installed
+    /// session clears it. Expiry, refusals and close never set it.
     force_login: bool,
 }
 impl State {
@@ -508,7 +508,10 @@ impl FederatedIdentity {
         self.signal(change);
     }
     /// Make `session` current and watch for its expiry. The caller publishes.
+    /// An installed session, signed in here or restored from another copy,
+    /// is the account chosen, so it clears an explicit sign-out's mark.
     fn install_session(&self, state: &mut State, session: Arc<Session>) {
+        self.mark_signed_out(state, false);
         state.snapshot.status = Status::SignedIn;
         state.snapshot.revision = session.record.revision.clone();
         state.snapshot.email = session.record.email.clone();
@@ -1234,7 +1237,6 @@ impl FederatedIdentity {
                     state.callback = callback;
                 }
                 self.install_session(&mut state, session.clone());
-                self.mark_signed_out(&mut state, false);
                 self.publish(&state);
                 true
             } else {
