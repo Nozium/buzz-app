@@ -1140,6 +1140,31 @@ even when no session is connected. Full access requires new approval.
 
 On desktop, **Connect [agent name]** may appear inside a DM with an old agent you own that is available to import from this computer. It preselects compatible saved harness, provider and model choices, and preserves saved effort settings. Choose another harness if the old type is unavailable or does not support inline connection setup; settings that were not saved use the selected type’s defaults. Review the inline controls; **Connect** stays disabled until the harness has a resolved model and provider, including usable defaults. If a saved Codex model is unavailable, choose another model or harness to continue. Complete installation or sign-in if prompted, stop the agent in old Buzz, then choose **Connect**. Your agent keeps its identity and conversation. This does not resend earlier messages. The same private card can appear in a channel or thread after you send a new mention of an eligible agent you own while that conversation is open, if that agent is still a member of the channel. Loading older mentions does not show cards, and known-archived agents are excluded. Only you see it, once per agent in the loaded conversation. Choose the **X** in the card’s top-right corner to hide that agent’s card in this conversation; the dismissal survives reopening and reloads. After connecting, **Ask the agent to respond** explicitly queues a follow-up addressed only to that agent in the original message’s thread; it does not automatically replay your request. If no prompt appears, use **Agents → New agent → Import an agent**.
 
+## When your agent ignores a mention
+
+Your agents act only on messages from you, from your other agents, and from
+workflows that you or your agents own and that direct them. When one of your
+agents on this computer ignores a mention for one of those reasons, a short note
+under the message says so. Only you see it, on this device; nothing is posted.
+
+- **“‹Agent› acts only on messages from you.”** Someone else sent the message,
+  or someone else’s workflow posted it.
+- **“‹Agent› didn’t act: this workflow message doesn’t authorize it. The
+  workflow’s run history shows why.”** Your own workflow posted it, but the
+  message doesn’t direct this agent.
+
+Buzz shows no note when it can’t yet tell who owns the workflow.
+
+On a relay that uses owner-only agent mentions, the desktop workflow editor
+warns when a message step mentions an agent in the channel:
+
+- **“Agents you mention act only on runs you start (this relay uses owner-only
+  agent mentions).”** The workflow starts on a message, reaction or diff.
+- **“Agents you mention won’t act on this workflow’s messages.”** It starts on a
+  webhook, or has a step other than a message or a delay.
+
+A schedule with only message and delay steps shows no warning.
+
 ## Deleting an agent’s workflow
 
 In **Workflows → Owner → All channel workflows**, open the workflow’s actions
