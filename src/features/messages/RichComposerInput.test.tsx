@@ -44,7 +44,11 @@ vi.mock("../relay/message-content", async (importOriginal) => {
 composerDOMFixture();
 afterEach(cleanup);
 
-function mount(initial?: MentionDraft, emoji: readonly CustomEmoji[] = []) {
+function mount(
+  initial?: MentionDraft,
+  emoji: readonly CustomEmoji[] = [],
+  media = (url: string): string | undefined => url,
+) {
   const ref = createRef<ComposerInputElement>();
   let draft = initial ?? mentionDraft("");
   let commits = 0;
@@ -57,7 +61,7 @@ function mount(initial?: MentionDraft, emoji: readonly CustomEmoji[] = []) {
   const channelListeners = new Set<() => void>();
   const library = { status: "ready", identities: [], definitions: [] };
   const source = {
-    media: (url: string) => url,
+    media,
     profiles: {
       snapshot: () => profiles,
       subscribe: (listener: () => void) => {
@@ -170,6 +174,18 @@ it("decorates only the shortcodes a send would tag", () => {
   const h = mount(mentionDraft("nice:party: at 19:25Z: then :party:"), [
     { shortcode: "party", url: "https://a.test/party.png" },
   ]);
+  expect(h.chips().map(([source]) => source)).toEqual([":party:"]);
+});
+
+it("hides an undisplayable shortcode without previewing the one a send would skip", () => {
+  const h = mount(
+    mentionDraft(":bad:party: :party:"),
+    [
+      { shortcode: "bad", url: "https://a.test/bad.png" },
+      { shortcode: "party", url: "https://a.test/party.png" },
+    ],
+    (url) => (url.endsWith("bad.png") ? undefined : url),
+  );
   expect(h.chips().map(([source]) => source)).toEqual([":party:"]);
 });
 

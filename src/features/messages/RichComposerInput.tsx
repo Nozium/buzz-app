@@ -350,8 +350,12 @@ export function RichComposerInput({
       };
     for (const reference of referenced.current.references)
       add(reference.start, reference.end, undefined, true);
-    for (const { start, end } of emojiMatches(context.text, renderableEmoji))
-      add(start, end);
+    // Match as a send does, then hide winners without an image.
+    for (const { emoji: entry, start, end } of emojiMatches(
+      context.text,
+      emoji,
+    ))
+      if (renderableEmoji.includes(entry)) add(start, end);
     for (const [start, { end }] of gifPreviews)
       if (!ranges.some((range) => start < range.end && end > range.start))
         ranges.push({ start, end });
