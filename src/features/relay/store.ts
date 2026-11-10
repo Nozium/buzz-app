@@ -1494,8 +1494,10 @@ export function createChannelStore(
       await profiles;
     }
   }
-  // Background reads deduplicate metadata versions; strong resolution revisits proof.
-  type CreationRead = { version: string; complete: boolean };
+  // A channel's creator and creation receipt never change, so a background
+  // read runs once per channel, not per metadata version: every membership
+  // change republishes 39000 to each online member. Strong resolution revisits proof.
+  type CreationRead = { complete: boolean };
   const creationReads = new Map<string, CreationRead>();
   async function readCreations(
     events: readonly RelayEvent[],
@@ -1514,11 +1516,10 @@ export function createChannelStore(
         discovery.metadataVersion(id)?.id !== event.id ||
         discovery.get(id)?.parentChannelId ||
         !identity.creator ||
-        (settings?.consistency !== "strong" &&
-          creationReads.get(id)?.version === event.id)
+        (settings?.consistency !== "strong" && creationReads.has(id))
       )
         return [];
-      const read = { version: event.id, complete: false };
+      const read = { complete: false };
       creationReads.set(id, read);
       pending.set(id, read);
       return [{ id, creator: identity.creator }];

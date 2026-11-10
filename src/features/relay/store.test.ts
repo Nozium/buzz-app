@@ -989,8 +989,12 @@ it.each([
 );
 
 describe("creator proof reads", () => {
-  const stream = (channel: string, creator = alice.pubkey) =>
-    metadata(relay, channel, channel, 1_700_000_000, [
+  const stream = (
+    channel: string,
+    creator = alice.pubkey,
+    createdAt = 1_700_000_000,
+  ) =>
+    metadata(relay, channel, channel, createdAt, [
       ["t", "stream"],
       ["P", creator],
     ]);
@@ -1063,6 +1067,64 @@ describe("creator proof reads", () => {
       }
     } finally {
       store.dispose();
+    }
+  });
+
+  it("reads a channel's creation once as membership changes republish its metadata", async () => {
+    // Each membership change republishes 39000 to every online member. A read
+    // per version, times members, times a run of adds, was a relay-wide burst.
+    const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
+    let live!: LiveCallbacks;
+    const owner = createRelaySession({
+      ...wire.transport,
+      subscribe(callbacks) {
+        live = callbacks;
+        return { update() {}, retry() {}, dispose() {} };
+      },
+    });
+    const reads = () =>
+      wire.pending.filter((entry) =>
+        entry.filters.some((filter) => filter.kinds?.includes(9007)),
+      );
+    const members = [viewer.pubkey];
+    const add = async () => {
+      members.push(keypair().pubkey);
+      const at = 1_700_000_000 + members.length;
+      live.receive([
+        roster(relay, "a", members, at),
+        stream("a", alice.pubkey, at),
+      ]);
+      await flush();
+    };
+    try {
+      live.receive([roster(relay, "a", members), stream("a")]);
+      await flush();
+      const [failed] = reads();
+      assert.exists(failed);
+      wire.pending.splice(wire.pending.indexOf(failed), 1);
+      failed.fail(new Error("offline"));
+      await flush();
+      // A failed read proved nothing, so the next version retries it.
+      await add();
+      const [first] = reads();
+      assert.exists(first);
+      expect(first.filters).toMatchObject([
+        { kinds: [9007], authors: [alice.pubkey], "#h": ["a"] },
+      ]);
+      // A version arriving while that read is in flight shares it.
+      await add();
+      expect(reads()).toEqual([first]);
+      wire.pending.splice(wire.pending.indexOf(first), 1);
+      first.respond([]);
+      await flush();
+      for (let n = 0; n < 3; n++) await add();
+      // Every version was applied, so each one was a candidate for a read.
+      expect(owner.session.channels.list().channels[0]?.members).toHaveLength(
+        members.length,
+      );
+      expect(reads()).toEqual([]);
+    } finally {
+      owner.dispose();
     }
   });
 
