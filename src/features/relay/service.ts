@@ -82,8 +82,8 @@ export function provideRelay(
   let controller: AbortController | undefined;
   let connecting = false;
   let clearing: Promise<void> | undefined;
-  /** A person's Try again is asking the sign-in server again. */
-  let asking = false;
+  /** What the next connection attempt asks first: a person's Try again. */
+  let asking: (() => Promise<void>) | undefined;
   let deadline: ReturnType<typeof setTimeout> | undefined;
   let store = createRelaySession(null, { identityNames });
   let snapshot: RelaySnapshot = Object.freeze({
@@ -263,6 +263,10 @@ export function provideRelay(
       };
     },
     retry() {
+      // A person's Try again asks the sign-in server within this attempt.
+      // While one runs, a press joins it.
+      const ask = asking;
+      asking = undefined;
       if (disposed || !connect || connecting || clearing) return;
       const retained = snapshot.cached;
       if (!retained) reset();
@@ -302,6 +306,8 @@ export function provideRelay(
       }, 8_000);
       deadline = timer;
       void Promise.resolve()
+        // Asking again is best effort: the attempt still connects.
+        .then(() => ask?.().catch(() => {}))
         .then(() => connect(signal))
         .then(async (transport) => {
           clearTimeout(timer);
@@ -410,21 +416,22 @@ export function provideRelay(
       else store.session.recovery?.retryAll();
     },
     tryAgain() {
-      // A second press (or a route retrying its relay too) while the first
-      // still asks joins it.
-      if (disposed || asking) return;
+      if (disposed) return;
       const relay = snapshot.origin ?? resume?.scope;
-      asking = true;
-      void Promise.resolve(relay && askAgain?.(relay))
-        // Asking again is best effort: the retry still runs.
-        .catch(() => {})
-        .finally(() => {
-          asking = false;
-          if (disposed) return;
-          if (snapshot.status === "ready" && !snapshot.cached)
-            store.session.recovery?.retryAll();
-          else service.retry();
-        });
+      const ask = relay && askAgain ? () => askAgain(relay) : undefined;
+      if (snapshot.status === "ready" && !snapshot.cached) {
+        // Nothing reconnects: retry each failed read and the live socket.
+        void Promise.resolve(ask?.())
+          .catch(() => {})
+          .finally(() => {
+            if (!disposed) store.session.recovery?.retryAll();
+          });
+        return;
+      }
+      // Reconnect at once, so callers see the attempt under way; it asks
+      // first.
+      asking = ask;
+      service.retry();
     },
     disconnect() {
       if (disposed) return;

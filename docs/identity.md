@@ -1297,8 +1297,9 @@ NIP-FA issuer refusals (`refused()` in `assertion.rs`, including
 `authorization-denied`) are cached for the session revision, viewer and
 community, so automatic retries (reconnects, focus, network changes) repeat them
 without asking the issuer. A user's own retry asks again: the relay service's
-`tryAgain()` (every **Try again**, **Retry connection** and **Check again**
-button, including the live socket's sign-in error in the sidebar) and each
+`tryAgain()` (every community-connection retry button, including the live
+socket's sign-in error in the sidebar; Settings' **Check again** uses
+`recheck` instead) and each
 join-dialog **Continue** call `federated_identity_ask_again`, which forgets
 that community's cached refusals, before retrying. Automatic paths call
 `retry()` and never ask. A restart or a new session revision also asks again.

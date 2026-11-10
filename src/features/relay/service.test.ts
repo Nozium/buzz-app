@@ -179,8 +179,10 @@ it("makes Try again ask the issuer again for a refused connection before reconne
   expect(askAgain).not.toHaveBeenCalled();
   for (const listener of [...listeners]) listener("access");
   await flush();
-  // A second press while the first still asks joins it.
   data.tryAgain();
+  // The attempt starts at once, so a route retried next sees it under way.
+  expect(data.snapshot().status).toBe("connecting");
+  // A second press while it runs joins it.
   data.tryAgain();
   await flush();
   expect(order).toEqual([
