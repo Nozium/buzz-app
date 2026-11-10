@@ -15,6 +15,8 @@ import {
 import type { ChannelSummary, Profile } from "../../features/relay/contracts";
 import type { EventData } from "../../features/relay/events";
 import type { RelaySession } from "../../features/relay/session";
+import { rosterRecovering } from "../../features/relay/live-recovery";
+import { useRecoveryOwns } from "../../features/relay/RecoveryNotice";
 import {
   useChannelList,
   useProfileGeneration,
@@ -219,6 +221,11 @@ export function SearchResults({
 } & SearchInputProps) {
   const resolveName = useIdentityNames(session.names);
   const list = useChannelList(session.channels);
+  // The joined list loads when the palette opens. Recovery retries it and the
+  // app's one notice reports it, so it shows no error or Retry of its own.
+  const rosterRecovers = useRecoveryOwns(session, (live) =>
+    rosterRecovering(live.roster),
+  );
   const parsed = useMemo(() => parseSearchOperators(query.trim()), [query]);
   // `in:@` names a person too, so it shares the author picker.
   const authorPrompt = operatorMatches(
@@ -1786,7 +1793,7 @@ export function SearchResults({
         {list.status === "loading" && query.trim() && !list.channels.length && (
           <p>Loading joined conversations…</p>
         )}
-        {list.status === "error" && (
+        {list.status === "error" && !rosterRecovers && (
           <div>
             <p>Couldn’t load all joined conversations.</p>
             <Button
