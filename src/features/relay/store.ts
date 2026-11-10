@@ -921,14 +921,37 @@ export function createChannelStore(
       if (!discovery?.authorized(id) && unchangedPreview(id, version))
         denyChannel(id, new Error("Conversation is unavailable"));
   }
+  /** Ends a window's reads and leaves it showing only the refusal. */
+  function closeWindow(state: WindowState, error: unknown) {
+    state.generation++;
+    state.controller?.abort();
+    state.noticeRead?.controller.abort();
+    state.events = [];
+    state.notices.clear();
+    state.noticeCursor = undefined;
+    state.floor = undefined;
+    state.traffic.clear();
+    setWindow(state, {
+      status: "error",
+      rows: EMPTY_ROWS,
+      error: describe(error),
+      loadingOlder: false,
+      refreshing: undefined,
+    });
+  }
   function denyChannel(channelId: string, error: unknown) {
     // A chat still starting is not there to deny yet; only a refused or
     // missing create ends it (see channelWrites.start).
     if (discovery?.isPending(channelId)) return;
     // The community refused the account, not this channel. Its owner (the
-    // relay service's deny) ends the session, and keeps saved data for an
-    // ended sign-in; removing this channel here would lose it.
-    if (refusalOfError(error)) return;
+    // relay service's deny) ends the session and decides what saved data
+    // survives: it keeps it for an ended sign-in. Until then, stop showing
+    // this channel's rows, but keep its access and saved copy.
+    if (refusalOfError(error)) {
+      const state = windows.get(channelId);
+      if (state) closeWindow(state, error);
+      return;
+    }
     accessVersions.set(channelId, (accessVersions.get(channelId) ?? 0) + 1);
     discovery?.deny(channelId);
     allowed?.delete(channelId);
@@ -936,22 +959,7 @@ export function createChannelStore(
       heads.delete(channelId);
       tails.delete(channelId);
       const state = windows.get(channelId);
-      if (state) {
-        state.generation++;
-        state.controller?.abort();
-        state.noticeRead?.controller.abort();
-        state.events = [];
-        state.notices.clear();
-        state.noticeCursor = undefined;
-        state.floor = undefined;
-        state.traffic.clear();
-        setWindow(state, {
-          status: "error",
-          rows: EMPTY_ROWS,
-          error: describe(error),
-          loadingOlder: false,
-        });
-      }
+      if (state) closeWindow(state, error);
       setList(
         {
           ...list,

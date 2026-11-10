@@ -928,19 +928,66 @@ it.each([
   ["an ended sign-in", "auth-required: authentication required", 401],
   ["lost community access", "restricted: authorization denied", 403],
 ])(
-  "a channel read refused for %s leaves saved data to the community owner",
+  "a channel read refused for %s hides the channel's rows but leaves saved data to the community owner",
   async (_case, reason, status) => {
     const disk = emptyDisk();
-    const h = setup({ prepared: true, persistence: disk });
+    const h = setup({ persistence: disk });
     h.emit([roster(relay, "a", [viewer.pubkey], 10)]);
-    await flush();
     h.session.channels.ensure("a");
+    h.next().respond([
+      message(alice, "a", "shown", 11),
+      bounds(relay, "a", "head", { has_more: false, next_cursor: null }),
+    ]);
+    await flush();
+    expect(h.session.channels.window("a").rows).toHaveLength(1);
+    // A revalidation of the rows on screen meets the refusal.
+    h.session.channels.refresh?.("a");
     await vi.waitFor(() => expect(h.pending.length).toBeGreaterThan(0));
     for (const request of h.pending.splice(0))
       request.fail(new ReadError("denied", reason, status));
     await flush();
+    expect(h.session.channels.window("a")).toMatchObject({
+      status: "error",
+      rows: [],
+      loadingOlder: false,
+    });
+    expect(h.session.channels.window("a").refreshing).toBeUndefined();
+    expect(h.pending).toEqual([]);
     expect(disk.remove).not.toHaveBeenCalled();
     expect(disk.clear).not.toHaveBeenCalled();
+  },
+);
+
+it("a first channel read refused by the community settles the window instead of loading forever", async () => {
+  const disk = emptyDisk();
+  const h = setup({ prepared: true, persistence: disk });
+  h.emit([roster(relay, "a", [viewer.pubkey], 10)]);
+  await flush();
+  h.session.channels.ensure("a");
+  await vi.waitFor(() => expect(h.pending.length).toBeGreaterThan(0));
+  for (const request of h.pending.splice(0))
+    request.fail(
+      new ReadError("denied", "auth-required: authentication required", 401),
+    );
+  await flush();
+  expect(h.session.channels.window("a").status).toBe("error");
+  expect(disk.remove).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["the community", "auth-required: authentication required", 401, 0],
+  ["that channel alone", "restricted: not a channel member", 403, 1],
+])(
+  "a single-channel session read refused by %s leaves the channel's saved copy to the right owner",
+  async (_case, reason, status, removals) => {
+    const disk = emptyDisk();
+    const h = setup({ persistence: disk });
+    h.emit([roster(relay, "a", [viewer.pubkey], 10)]);
+    const read = h.session.read([{ kinds: [9], "#h": ["a"], limit: 20 }]);
+    h.next().fail(new ReadError("denied", reason, status));
+    await expect(read).rejects.toThrow(reason);
+    await flush();
+    expect(disk.remove).toHaveBeenCalledTimes(removals);
   },
 );
 
@@ -952,7 +999,9 @@ it("a channel read refused for that channel alone still forgets its saved copy",
   h.session.channels.ensure("a");
   await vi.waitFor(() => expect(h.pending.length).toBeGreaterThan(0));
   for (const request of h.pending.splice(0))
-    request.fail(new ReadError("denied", "restricted: not a member", 403));
+    request.fail(
+      new ReadError("denied", "restricted: not a channel member", 403),
+    );
   await flush();
   await vi.waitFor(() => expect(disk.remove).toHaveBeenCalledWith("a"));
 });
@@ -964,7 +1013,7 @@ it.each([
     401,
     0,
   ],
-  ["a directory denial clears", "restricted: not a member", 403, 1],
+  ["a directory denial clears", "restricted: not a channel member", 403, 1],
 ])(
   "%s saved data when the first channel directory read is refused",
   async (_case, reason, status, clears) => {
