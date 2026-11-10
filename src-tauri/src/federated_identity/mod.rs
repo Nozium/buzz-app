@@ -121,6 +121,21 @@ struct State {
     /// the same lock as the change itself: derived agent credentials minted
     /// or stored under an older value are retired.
     retirements: u64,
+    /// Set by an explicit sign-out and kept on disk (`Inner::signed_out`):
+    /// the next sign-in asks for credentials instead of finishing on the
+    /// browser's session as the account just signed out. A completed sign-in
+    /// clears it. Expiry, refusals and close never set it.
+    force_login: bool,
+}
+impl State {
+    /// What a sign-in asks of the identity provider: the caller's `start`,
+    /// with credentials after an explicit sign-out (`force_login`).
+    fn asking(&self, start: LoginStart) -> LoginStart {
+        LoginStart {
+            force_login: start.force_login || self.force_login,
+            ..start
+        }
+    }
 }
 struct Inner {
     config: Option<Config>,
@@ -150,6 +165,8 @@ struct Inner {
     derived: Mutex<Vec<FederatedIdentity>>,
     /// What each added server gets, as compiled peers get it at startup.
     on_peer: Mutex<Vec<OnPeer>>,
+    /// Where `State::force_login` is kept, so a restart still asks.
+    signed_out: Option<std::path::PathBuf>,
     /// Each detached logout `revoke` started, so tests can wait for it.
     #[cfg(test)]
     revocations: Mutex<Vec<tauri::async_runtime::JoinHandle<()>>>,
@@ -217,6 +234,7 @@ impl FederatedIdentity {
             profile: profile.into(),
             record: Some(root.join(format!("{account}.customers"))),
         });
+        let signed_out = Some(root.join(format!("{account}.signed-out")));
         let store = Arc::new(store::SecureStore {
             account: account.clone(),
             root,
@@ -229,6 +247,7 @@ impl FederatedIdentity {
             store,
             peers,
             customers,
+            signed_out,
         ))
     }
     #[cfg(test)]
@@ -238,7 +257,7 @@ impl FederatedIdentity {
         account: String,
         store: Arc<dyn Store>,
     ) -> Self {
-        Self::build(config, fingerprint, account, store, Vec::new(), None)
+        Self::build(config, fingerprint, account, store, Vec::new(), None, None)
     }
     fn build(
         config: Option<Config>,
@@ -247,7 +266,9 @@ impl FederatedIdentity {
         store: Arc<dyn Store>,
         peers: Vec<FederatedIdentity>,
         customers: Option<Customers>,
+        signed_out: Option<std::path::PathBuf>,
     ) -> Self {
+        let force_login = signed_out.as_deref().is_some_and(std::path::Path::exists);
         let snapshot = Snapshot {
             status: if config.is_some() {
                 Status::Restoring
@@ -288,6 +309,7 @@ impl FederatedIdentity {
                 callback: None,
                 renewal: None,
                 account: None,
+                force_login,
             }),
             operation: AsyncMutex::new(()),
             changes,
@@ -302,6 +324,7 @@ impl FederatedIdentity {
             customers,
             derived: Mutex::default(),
             on_peer: Mutex::default(),
+            signed_out,
             #[cfg(test)]
             revocations: Mutex::default(),
         }));
@@ -952,7 +975,7 @@ impl FederatedIdentity {
             attempt
         };
         let observed = self.restore_locked(attempt).await;
-        let (revision, cancel, renewing) = {
+        let (revision, cancel, renewing, start) = {
             let mut state = self.state();
             if state.closed
                 || state.snapshot.revision != observed
@@ -962,12 +985,13 @@ impl FederatedIdentity {
             {
                 return Ok(state.snapshot.clone());
             }
+            let start = state.asking(start);
             if state.session.is_some() {
                 // Signing in again keeps the current session live until the
                 // new one is installed; ending that session ends this attempt.
                 let cancel = state.cancellation.child_token();
                 state.renewal = Some(cancel.clone());
-                (state.snapshot.revision.clone(), cancel, true)
+                (state.snapshot.revision.clone(), cancel, true, start)
             } else {
                 // Admission and retirement are atomic with cancellation/sign-out.
                 self.retire_state(&mut state, Status::SigningIn, None);
@@ -975,6 +999,7 @@ impl FederatedIdentity {
                     state.snapshot.revision.clone(),
                     state.cancellation.clone(),
                     false,
+                    start,
                 )
             }
         };
@@ -1209,6 +1234,7 @@ impl FederatedIdentity {
                     state.callback = callback;
                 }
                 self.install_session(&mut state, session.clone());
+                self.mark_signed_out(&mut state, false);
                 self.publish(&state);
                 true
             } else {
@@ -1269,10 +1295,37 @@ impl FederatedIdentity {
             state.restore_attempt += 1;
             state.account = None;
             state.retirements += 1;
+            self.mark_signed_out(&mut state, true);
             (session, state.snapshot.revision.clone())
         };
         self.signal(SessionChange::SignedOut);
         Some((session, revision))
+    }
+    /// Sets `State::force_login` and keeps it on disk, in the state lock, so
+    /// the file follows the order of sign-outs and installs. A tiny local
+    /// write, like `Customers::remember` in the `derived` lock. Always written
+    /// or removed, since other Buzz copies with this profile share the file.
+    /// A failed write still asks for credentials until this run ends; a failed
+    /// removal asks once more after a restart. Neither changes the session.
+    fn mark_signed_out(&self, state: &mut State, signed_out: bool) {
+        state.force_login = signed_out;
+        let Some(path) = &self.0.signed_out else {
+            return;
+        };
+        let written = if signed_out {
+            path.parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::File::create(path))
+                .and_then(|file| file.sync_all())
+        } else {
+            match std::fs::remove_file(path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                removed => removed,
+            }
+        };
+        if written.is_err() {
+            eprintln!("The sign-in server's sign-out mark could not be saved");
+        }
     }
     async fn finish_sign_out(
         &self,
@@ -1383,7 +1436,9 @@ pub(crate) struct LoginStart {
     /// a restart, which usually follows sign-up, must not.
     signup: bool,
     /// Credentials over the browser's session, which would otherwise finish
-    /// the sign-in as the account Use a different account just left.
+    /// the sign-in as the account Use a different account just left. After
+    /// an explicit sign-out the server asks for them whatever the caller
+    /// passes (`State::force_login`).
     force_login: bool,
 }
 

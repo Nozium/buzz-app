@@ -105,6 +105,7 @@ fn each_community_routes_by_host_to_its_own_server() {
         Arc::new(Memory::default()),
         vec![public.clone()],
         None,
+        None,
     );
     let id = |relay: &str| {
         first
@@ -183,6 +184,7 @@ pub(super) fn customers_listed_in(
             profile: "default".into(),
             record,
         }),
+        None,
     )
 }
 
@@ -385,6 +387,7 @@ async fn signing_out_of_one_server_keeps_the_others_session() {
             store.clone(),
             peers,
             None,
+            None,
         );
         {
             let mut state = server.state();
@@ -465,6 +468,97 @@ fn the_login_start_asks_only_for_the_sign_up_screen_and_forced_login_it_was_give
             format!("{start}{hints}")
         );
     }
+}
+
+/// A server at the adapter `base` that keeps its sign-out mark at `marker`,
+/// as a launch opens it (`FederatedIdentity::open`). Sign-out revokes at
+/// `UNREACHABLE`, never at Builderlab.
+fn marked(store: Arc<Memory>, base: String, marker: &std::path::Path) -> FederatedIdentity {
+    let mut config = host(Arc::new(Memory::default())).0.config.clone().unwrap();
+    config.adapter_base = base;
+    config.identity_origin = UNREACHABLE.into();
+    FederatedIdentity::build(
+        Some(config),
+        "fingerprint".into(),
+        "account".into(),
+        store,
+        Vec::new(),
+        None,
+        Some(marker.into()),
+    )
+}
+/// Whether this server's next sign-in asks for credentials when its caller
+/// doesn't.
+fn asks_for_credentials(server: &FederatedIdentity) -> bool {
+    server.state().asking(LoginStart::default()).force_login
+}
+
+#[tokio::test]
+async fn an_explicit_sign_out_asks_for_credentials_until_a_sign_in_completes_even_after_a_restart()
+{
+    let root = tempfile::tempdir().unwrap();
+    let marker = root.path().join("account.signed-out");
+    let (base, server) = adapter(vec![
+        serde_json::json!({"session_token":"fixture-session-token","expires_at":"2099-01-01T00:00:00Z"}),
+        serde_json::json!({"expires_at":"2099-01-01T00:00:00Z","email":"b@example.com"}),
+    ])
+    .await;
+    let store = Arc::new(Memory::default());
+    let owner = marked(store.clone(), base.clone(), &marker);
+    assert!(!asks_for_credentials(&owner));
+    let session = record();
+    *store.raw.lock().unwrap() = Some(session.raw.clone());
+    {
+        let mut state = owner.state();
+        state.restored = true;
+        owner.install_session(&mut state, session);
+    }
+    assert!(owner.sign_out(None).await.status == Status::SignedOut);
+    assert!(asks_for_credentials(&owner));
+    assert!(marker.exists());
+    // The caller's own hints stay.
+    let asked = owner.state().asking(LoginStart {
+        signup: true,
+        force_login: false,
+    });
+    assert!(asked.signup && asked.force_login);
+
+    // Sign out, quit, launch: still asks.
+    let restarted = marked(store.clone(), base.clone(), &marker);
+    assert!(asks_for_credentials(&restarted));
+    let revision = restarted.snapshot().revision;
+    restarted
+        .finish_login("code", "secret", &revision, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(restarted.snapshot().status == Status::SignedIn);
+    assert!(!asks_for_credentials(&restarted));
+    assert!(!marker.exists());
+    assert!(!asks_for_credentials(&marked(store, base, &marker)));
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn expiry_and_close_leave_the_next_sign_in_to_the_browsers_session() {
+    let root = tempfile::tempdir().unwrap();
+    let marker = root.path().join("account.signed-out");
+    let store = Arc::new(Memory::default());
+    let owner = marked(store.clone(), UNREACHABLE.into(), &marker);
+    let mut expired = record();
+    let session = Arc::get_mut(&mut expired).unwrap();
+    session.record.expires_at = "2000-01-01T00:00:00Z".into();
+    session.raw = Zeroizing::new(serde_json::to_vec(&session.record).unwrap());
+    *store.raw.lock().unwrap() = Some(expired.raw.clone());
+    {
+        let mut state = owner.state();
+        state.restored = true;
+        owner.install_session(&mut state, expired);
+    }
+    assert!(owner.restore().await.status == Status::ReauthenticationRequired);
+    assert!(!asks_for_credentials(&owner));
+    owner.close();
+    assert!(!asks_for_credentials(&owner));
+    assert!(!marker.exists());
 }
 
 #[tokio::test]
