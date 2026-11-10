@@ -95,6 +95,7 @@ import { OwnedContribution } from "../plugins/OwnedContribution";
 import type { Updates } from "../features/updates/updates";
 import { UpdateSettings } from "../features/updates/UpdateSettings";
 import { CommunityDepartureSettings } from "./CommunityDepartureSettings";
+import { ManageCommunitiesSettings } from "./ManageCommunitiesSettings";
 import {
   developerMode,
   settingsSections,
@@ -1390,6 +1391,13 @@ export function Settings({
             active={selected === "notifications"}
           />
         </div>
+        {selected === "manage-communities" && (
+          <ManageCommunitiesSettings
+            key={client.viewer}
+            communities={communities}
+            onPending={onDeparturePending}
+          />
+        )}
         <div hidden={selected !== "appearance"}>
           <AppearanceSettings
             appearance={appearance}
