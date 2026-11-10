@@ -182,7 +182,8 @@ The workflow first refuses, before building, unless:
 
 - the tag is exactly `vX.Y.Z` or `vX.Y.Z-beta.N` (no leading zeros, `N` ≥ 1);
 - an active tag ruleset restricts `refs/tags/v*` (see [setup](#stable-release-setup));
-- the tag points at the run's commit, and that commit is in `main` history.
+- the tag points at the run's commit, and that commit is in `main` history;
+- a run started by hand runs from `main`, so the tag must be main's head.
 
 To release, an admin tags a commit in `main` history and pushes the tag with
 Git. Do not create the tag from the GitHub Releases page: that creates the
@@ -193,6 +194,23 @@ git fetch origin main
 git tag -a v1.0.0 -m 'Buzz 1.0.0' <commit-sha>
 git push origin refs/tags/v1.0.0
 ```
+
+Until the macOS signing role trusts `refs/tags/v*` (see
+[setup](#stable-release-setup)), a tag run fails at macOS signing. Instead,
+tag main's current head and run the workflow from `main` with that tag, before
+anything else merges:
+
+```sh
+git fetch origin main
+git tag -a v1.0.0-beta.2 -m 'Buzz 1.0.0-beta.2' origin/main
+git push origin refs/tags/v1.0.0-beta.2
+gh workflow run desktop-stable.yml --repo block/buzz-app --ref main \
+  -f tag=v1.0.0-beta.2
+```
+
+The dispatched run makes the same checks, and its commit is main's head, so it
+fails unless the tag is exactly that commit; if main moved first, cut the next
+version. Cancel the tag's own run, which cannot sign.
 
 If a platform job fails, use **Re-run all jobs**, as for previews. A published
 tag is never moved or reused; cut a new version instead. After tagging a stable
@@ -259,7 +277,7 @@ A repository admin sets these up once, before the first stable tag:
 - **Signing.** Stable builds use the [signing secrets](#signing) previews use.
   The macOS signing role must trust this repository's tag runs as well as
   `main`: confirm its OIDC trust policy accepts `refs/tags/v*` before the
-  first stable tag.
+  first stable tag. Until it does, run releases from `main` as described above.
 
 ## Release tags
 

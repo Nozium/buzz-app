@@ -57,8 +57,25 @@ function run(dir, command, env) {
 }
 
 test("stable tags build from main history with the tag's version, never preview tags", (t) => {
-  const { on, jobs } = workflow("desktop-stable.yml");
-  assert.deepEqual(on, { push: { tags: ["v[0-9]*", "!v*-preview.*"] } });
+  const { on, jobs, concurrency } = workflow("desktop-stable.yml");
+  assert.deepEqual(on, {
+    push: { tags: ["v[0-9]*", "!v*-preview.*"] },
+    workflow_dispatch: {
+      inputs: {
+        tag: {
+          description:
+            "Release tag (vX.Y.Z or vX.Y.Z-beta.N) at main's current head",
+          required: true,
+          type: "string",
+        },
+      },
+    },
+  });
+  // A dispatched run of a tag queues behind that tag's own push run.
+  assert.equal(
+    concurrency.group,
+    "desktop-stable-${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}",
+  );
   assert.equal(jobs.source.if, "github.repository == 'block/buzz-app'");
   assert.equal(jobs.desktop.uses, "./.github/workflows/desktop-build.yml");
   assert.deepEqual(jobs.desktop.needs, "source");
@@ -70,7 +87,11 @@ test("stable tags build from main history with the tag's version, never preview 
     contents: "write",
     "id-token": "write",
   });
-  const check = jobs.source.steps[0].run;
+  const [{ run: check, env }] = jobs.source.steps;
+  assert.equal(env.TAG, `\${{ inputs.tag || github.ref_name }}`);
+  assert.equal(env.SOURCE_SHA, `\${{ github.sha }}`);
+  assert.equal(env.SOURCE_REF, `\${{ github.ref }}`);
+  assert.equal(env.EVENT, `\${{ github.event_name }}`);
   // The live desktop-v* ruleset, and the v* one the setup docs describe.
   const desktopRuleset = {
     id: 6,
@@ -95,7 +116,13 @@ test("stable tags build from main history with the tag's version, never preview 
   };
   const source = (
     tag,
-    { tagged = sha, base = sha, ruleset = stableRuleset } = {},
+    {
+      tagged = sha,
+      base = sha,
+      ruleset = stableRuleset,
+      event = "push",
+      ref = `refs/tags/${tag}`,
+    } = {},
   ) => {
     const dir = temp(t);
     fakeGh(
@@ -115,6 +142,8 @@ esac
     const output = join(dir, "output");
     writeFileSync(output, "");
     const result = run(dir, `set -e\n${check}`, {
+      EVENT: event,
+      SOURCE_REF: ref,
       TAG: tag,
       SOURCE_SHA: sha,
       TAGGED: tagged,
@@ -202,6 +231,39 @@ esac
     source("v1.0.0", { base: "d".repeat(40) }).stdout,
     /is not in main history/,
   );
+  // Dispatched from main, the run's commit is main's head: the tag must be it.
+  const dispatched = { event: "workflow_dispatch", ref: "refs/heads/main" };
+  for (const [tag, version] of [
+    ["v1.0.0", "1.0.0"],
+    ["v1.2.3-beta.4", "1.2.3-beta.4"],
+  ]) {
+    const result = source(tag, dispatched);
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    assert.equal(result.output, `version=${version}\n`);
+  }
+  assert.match(
+    source("v1.0.0", { ...dispatched, tagged: "c".repeat(40) }).stdout,
+    /v1\.0\.0 is at c+, not a+/,
+  );
+  assert.match(
+    source("v1.0.0", {
+      ...dispatched,
+      ruleset: { ...stableRuleset, enforcement: "evaluate" },
+    }).stdout,
+    /No active tag ruleset restricts/,
+  );
+  // Never from another branch or a tag ref, nor a preview or malformed tag.
+  for (const ref of ["refs/heads/feature", "refs/tags/v1.0.0"]) {
+    const result = source("v1.0.0", { event: "workflow_dispatch", ref });
+    assert.notEqual(result.status, 0, ref);
+    assert.match(result.stdout, /Run this from main, not /, ref);
+    assert.deepEqual(result.calls, [], ref);
+  }
+  for (const tag of ["v1.0.0-preview.2.1", "1.0.0", "main"]) {
+    const result = source(tag, dispatched);
+    assert.notEqual(result.status, 0, tag);
+    assert.deepEqual(result.calls, [], tag);
+  }
 });
 
 test("stable feed promotion is a manual, approved dispatch from main", (t) => {
@@ -326,7 +388,7 @@ exit 1
   }
 });
 
-test("macOS builds run only from main for previews and from the version's own tag for releases", () => {
+test("macOS builds run only from main for previews, and from main or the version's own tag for releases", () => {
   const step = workflow("desktop-build.yml").jobs.build.steps.find(
     ({ name }) =>
       name === "Require the release source and signing configuration",
@@ -352,14 +414,17 @@ test("macOS builds run only from main for previews and from the version's own ta
     ["refs/heads/main", ""],
     ["refs/tags/v1.0.0", "1.0.0"],
     ["refs/tags/v1.2.3-beta.4", "1.2.3-beta.4"],
+    // desktop-stable.yml's dispatch, once it checked the tag is main's head.
+    ["refs/heads/main", "1.0.0"],
+    ["refs/heads/main", "1.2.3-beta.4"],
   ]) {
     const result = guard(ref, version);
     assert.equal(result.status, 0, `${ref} ${version}: ${result.stdout}`);
   }
   for (const [ref, version, expected] of [
-    // A release version never builds from main, nor main's preview from a tag.
-    ["refs/heads/main", "1.0.0", "refs/tags/v1.0.0"],
+    // A preview never builds from a tag, nor a release from another branch.
     ["refs/tags/v1.0.0", "", "refs/heads/main"],
+    ["refs/heads/feature", "1.0.0", "refs/tags/v1.0.0"],
     // The tag must be the version's own.
     ["refs/tags/v1.0.1", "1.0.0", "refs/tags/v1.0.0"],
     ["refs/tags/v1.0.0-beta.1", "1.0.0", "refs/tags/v1.0.0"],

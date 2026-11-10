@@ -116,6 +116,10 @@ test("all-platform releases preserve candidate isolation and read-only installer
       selected(job, { release_version: "1.0.0" }, "refs/tags/v1.0.0"),
       true,
     );
+    assert.equal(
+      selected(job, { release_version: "1.0.0" }, "refs/heads/main"),
+      true,
+    );
     assert.equal(selected(job, {}, "refs/heads/main", "fork/buzz-app"), false);
   }
   for (const job of [jobs.build, jobs.updater_signatures])
@@ -124,7 +128,8 @@ test("all-platform releases preserve candidate isolation and read-only installer
   for (const [inputs, ref] of [
     [{}, "refs/heads/feature"],
     [{}, "refs/tags/v1.0.0"],
-    [{ release_version: "1.0.0" }, "refs/heads/main"],
+    [{ release_version: "" }, "refs/tags/v"],
+    [{ release_version: "1.0.0" }, "refs/heads/feature"],
     [{ release_version: "1.0.0" }, "refs/tags/v1.0.1"],
   ])
     assert.equal(selected(jobs.updater_signatures, inputs, ref), false);
