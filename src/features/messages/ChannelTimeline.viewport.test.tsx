@@ -1,5 +1,5 @@
 import { MessageEditScope, useMessageEditScope } from "./MessageEditScope";
-import { cloneElement } from "react";
+import { cloneElement, type ReactNode } from "react";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import {
@@ -1547,6 +1547,7 @@ function fillFixture({
   window: patch = {} as Partial<ChannelWindow>,
   cachedOnly = false,
   recovering = false,
+  intro = undefined as ReactNode,
 } = {}) {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
@@ -1618,6 +1619,7 @@ function fillFixture({
       scope="fill"
       queries={queries}
       window={window}
+      intro={intro}
       onOpenLink={() => false}
     />
   );
@@ -1653,6 +1655,27 @@ it("a settled reader at the bottom fills a screen with nothing to scroll", () =>
   const h = fillFixture();
   try {
     expect(h.loadOlder).toHaveBeenCalledExactlyOnceWith("alpha");
+  } finally {
+    h.dispose();
+  }
+});
+
+it("fills past a pending intro and shows it only when verified history reaches its start", () => {
+  const h = fillFixture({
+    intro: <article aria-label="Local introduction">Welcome</article>,
+  });
+  try {
+    expect(h.loadOlder).toHaveBeenCalledExactlyOnceWith("alpha");
+    expect(
+      screen.queryByRole("article", { name: "Local introduction" }),
+    ).toBeNull();
+    h.land({ hasMore: false });
+    expect(
+      screen.getByRole("article", { name: "Local introduction" }),
+    ).toBeVisible();
+    expect(screen.getByText("Latest public message")).toBeVisible();
+    expect(screen.getByText("Older 1")).toBeVisible();
+    expect(h.loadOlder).toHaveBeenCalledOnce();
   } finally {
     h.dispose();
   }
