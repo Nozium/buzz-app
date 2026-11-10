@@ -236,6 +236,8 @@ export function Welcome({
   const known = useRef<readonly string[] | undefined>(undefined);
   // Backup status belongs to this signed-in account and is cleared on the landing.
   const [backups, setBackups] = useState<readonly string[]>();
+  // The backup lookup failed, so a backup may hold the linked key.
+  const [backupUnknown, setBackupUnknown] = useState(false);
   // The community list that lets Join a community offer Create a community
   // (`checkCreation`), and whether its page is shown; both cleared on the landing.
   const [creatable, setCreatable] = useState<CommunityList>();
@@ -464,6 +466,7 @@ export function Welcome({
   // The linked key is backed up: Welcome back offers a restore, and an
   // import of it skips another backup.
   const backedUp = !!linked && !!backups?.includes(linked);
+  const restorable = backedUp || (!!linked && backupUnknown);
   /**
    * Sign-in leads to the account check, which picks the lane: a linked key
    * pauses on Welcome back, otherwise setup goes on by itself. The backed-up-key
@@ -511,9 +514,10 @@ export function Welcome({
             },
           ]
         : []),
-      checkBackup(current, (keys) => {
+      checkBackup(current, (keys, failed) => {
         checkedBackups = keys;
         setBackups(keys);
+        setBackupUnknown(!!failed);
       }),
       {
         label: "Preparing your identity…",
@@ -765,6 +769,7 @@ export function Welcome({
     setLinked(undefined);
     setOwned(undefined);
     setBackups(undefined);
+    setBackupUnknown(false);
     setCreatable(undefined);
     setCreating(false);
     reads.current = undefined;
@@ -1035,10 +1040,11 @@ export function Welcome({
             <WelcomeBack
               email={auth.account?.email}
               npub={npubEncode(linked)}
+              onDevice={viewer === linked}
               onRestore={
                 viewer === linked
                   ? () => void setup.start(finish())
-                  : backedUp
+                  : restorable
                     ? () => {
                         void current.recovery.beginRecovery();
                         pause("key-restore");
@@ -1091,7 +1097,9 @@ export function Welcome({
         return linked ? (
           <KeyLost
             owned={owned}
-            onBack={() => back("welcome-back", backedUp ? "restore" : "import")}
+            onBack={() =>
+              back("welcome-back", restorable ? "restore" : "import")
+            }
             onStartOver={() => {
               setLinked(undefined);
               setOwned(undefined);
