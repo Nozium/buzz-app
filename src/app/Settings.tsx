@@ -62,6 +62,7 @@ import { canRetryPlugin, type PluginManager } from "../plugins/manager";
 import type { Catalog, PluginInfo } from "../plugins/types";
 import type { Communities, Membership } from "../features/communities/service";
 import { PluginImport } from "./PluginImport";
+import { PluginUpdateFailure } from "./PluginUpdates";
 import { AgentPluginRequests } from "./AgentPluginRequests";
 import {
   ManagedPluginUpdate,
@@ -81,7 +82,7 @@ import { bundledReadmes } from "../bundled/readmes";
 import { bundledIcons } from "../bundled/icons";
 import type { Identity } from "../features/identity/service";
 import { ProfileSettings } from "./ProfileSettings";
-import { IdentitySettings, keyActivity } from "./IdentitySettings";
+import { IdentitySettings } from "./IdentitySettings";
 import { SecuritySettings } from "./SecuritySettings";
 import type { FederatedIdentity } from "../features/federated-identity/service";
 import { CommunityLocalSettings } from "./CommunityLocalSettings";
@@ -761,6 +762,7 @@ export function Settings({
     decisions?.subscribe ?? noAccessSubscription,
     decisions?.providers ?? noDecisionProviders,
   );
+  const identityCards = contributed.filter((card) => card.identityRow);
   const client = useSyncExternalStore(
     communities.subscribe,
     communities.snapshot,
@@ -1350,6 +1352,17 @@ export function Settings({
                       {failure}
                     </p>
                   )}
+                  <PluginUpdateFailure
+                    pluginId={id}
+                    className={styles.pluginRowStatus}
+                    returnFocus={() =>
+                      Array.from(
+                        pluginSection.current?.querySelectorAll<HTMLElement>(
+                          "[data-plugin-id]",
+                        ) ?? [],
+                      ).find((row) => row.dataset.pluginId === id)
+                    }
+                  />
                 </PluginListEntry>
               );
             })}
@@ -1358,15 +1371,10 @@ export function Settings({
       </PluginListEntry>
     );
   };
-  // A new connection's session reads activity again.
+  // The current community supplies the profile shown on the identity card.
   const relay = useSyncExternalStore(
     communities.relay.subscribe,
     communities.relay.snapshot,
-  );
-  const relaySession = relay.status === "ready" ? relay.session : undefined;
-  const lastActive = useCallback(
-    (pubkey: string) => keyActivity(relaySession, pubkey),
-    [relaySession],
   );
   const authorizePluginGit = useCallback(
     async (repository: string) => {
@@ -1447,6 +1455,7 @@ export function Settings({
                   return (
                     <Card
                       active={active}
+                      navigation={navigation}
                       {...(!card.group && selectedCommunity
                         ? { community: selectedCommunity }
                         : {})}
@@ -1502,10 +1511,43 @@ export function Settings({
             federatedIdentity={federatedIdentity}
             memberships={client.memberships}
             builderlabIdentity={builderlabIdentity}
-            lastActive={lastActive}
+            openBuilderlab={
+              openSection &&
+              contributed.some((card) => card.key === "block.builderlab/login")
+                ? () => openSection("block.builderlab/login")
+                : undefined
+            }
+            profileSession={
+              relay.viewer === client.viewer &&
+              (relay.status === "ready" || relay.cached)
+                ? relay.session
+                : undefined
+            }
+            community={selectedCommunity}
+            accountRows={
+              identityCards.length
+                ? identityCards.map(
+                    (card) =>
+                      card.identityRow && (
+                        <OwnedContribution
+                          key={card.key}
+                          entry={card}
+                          registry={cards}
+                        >
+                          {(entry, active) => {
+                            const Row = entry.identityRow;
+                            return Row ? <Row active={active} /> : null;
+                          }}
+                        </OwnedContribution>
+                      ),
+                  )
+                : undefined
+            }
           />
         )}
-        {selected === "security" && <SecuritySettings />}
+        {selected === "security" && (
+          <SecuritySettings viewer={identity ? client.viewer : undefined} />
+        )}
         {developerMode && (
           <div hidden={selected !== "developer"}>
             <DeveloperSettings relay={communities.relay} />

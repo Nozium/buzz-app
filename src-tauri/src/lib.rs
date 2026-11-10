@@ -12,6 +12,9 @@ use oauth_callback::OAuthCallbackHost;
 #[cfg(test)]
 mod browser_permissions_tests;
 mod pairing;
+mod qr;
+#[cfg(unix)]
+mod quit_signal;
 use browser::{
     browser_action, browser_attach, browser_detach, browser_navigate, browser_set_bounds,
     browser_set_media_suspended, browser_status,
@@ -680,6 +683,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
     tauri::generate_handler![
         credential_service::credential_pair_answer,
         credential_service::credential_pairing_communities,
+        credential_service::credential_pair_prompt,
         credential_service::credential_pairings_list,
         credential_service::credential_pairing_revoke,
         window_state::onboarding_preserve_window,
@@ -698,6 +702,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         pairing::pairing_confirm,
         pairing::pairing_deny,
         pairing::pairing_cancel,
+        qr::qr_code,
         identity_restore,
         identity_import,
         identity_legacy_available,
@@ -710,6 +715,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         identity_sign_builderlab_binding,
         federated_identity::federated_identity_snapshot,
         federated_identity::federated_identity_servers,
+        federated_identity::federated_identity_requires,
         federated_identity::federated_identity_sign_in,
         federated_identity::federated_identity_cancel_sign_in,
         federated_identity::federated_identity_sign_out,
@@ -967,7 +973,10 @@ pub fn run() {
                     })?;
                 }
             }
+            #[cfg(unix)]
+            quit_signal::install(app.handle());
             relay::set_user_agent(&app.package_info().version);
+            relay::watch_refusals(app.handle().clone());
             app.state::<federated_identity::FederatedIdentity>()
                 .watch(app.handle().clone());
             if let Some(window) = app.get_webview_window("main") {
@@ -1217,6 +1226,9 @@ pub fn run() {
                 webview.state::<HostProcesses>().stop_all();
                 webview.state::<HostMcpServers>().stop_all();
                 webview.state::<app_agents::AppAgentHost>().page_load();
+                if let Some(credentials) = webview.try_state::<credential_service::CredentialService>() {
+                    credentials.page_load();
+                }
             }
             browser::page_load(webview, payload);
         })
@@ -1315,19 +1327,23 @@ mod tests {
     async fn a_url_download_holds_the_import_slot_until_it_settles() {
         let imports = super::Imports::default();
         let (release, gate) = tokio::sync::oneshot::channel::<Vec<u8>>();
+        let (started, downloading) = tokio::sync::oneshot::channel();
         let first = tokio::spawn(super::import_url(
             imports.clone(),
             "https://plugins.example.org/a.json".into(),
             "ab".repeat(32),
-            async move { gate.await.map_err(|e| e.to_string()) },
+            // The download runs inside the slot, so its start shows the slot
+            // is held. Polling the slot instead could take it at the moment the
+            // download tried to, and the download would then fail as busy.
+            async move {
+                let _ = started.send(());
+                gate.await.map_err(|e| e.to_string())
+            },
         ));
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while imports.0.try_lock().is_ok() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("the download never took the import slot");
+        tokio::time::timeout(std::time::Duration::from_secs(5), downloading)
+            .await
+            .expect("the download never took the import slot")
+            .expect("the import ended without starting its download");
         let second = super::prepare_import(imports.clone(), || Ok(None)).await;
         assert_eq!(
             second.err().as_deref(),

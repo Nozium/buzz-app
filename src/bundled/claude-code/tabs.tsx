@@ -198,7 +198,7 @@ function ClaudeSignIn({
         }}
       >
         {missing
-          ? "Install Claude"
+          ? "Install integration"
           : outdated
             ? "Update Claude"
             : signedOut
@@ -207,7 +207,7 @@ function ClaudeSignIn({
       </Button>
       <Dialog
         open={open}
-        title="Set up Claude"
+        title={missing || outdated ? "Claude integration" : "Set up Claude"}
         onOpenChange={(next) => {
           setOpen(next);
           if (!next) void setup.cancel();
@@ -248,7 +248,7 @@ function ClaudeSetupPanel({
     !status || state.checking
       ? "Checking Claude…"
       : status.state === "missing"
-        ? "Claude is not installed."
+        ? "The Claude integration isn't installed yet."
         : status.state === "outdated"
           ? `Claude ${status.version} is older than Buzz needs.`
           : status.state === "signed-out"
@@ -259,7 +259,7 @@ function ClaudeSetupPanel({
   // One button per slot, so focus stays put as Install becomes Check again.
   const action =
     status?.state === "missing"
-      ? ({ step: "install", label: "Install Claude" } as const)
+      ? ({ step: "install", label: "Install integration" } as const)
       : status?.state === "outdated"
         ? ({ step: "install", label: "Update Claude" } as const)
         : undefined;
@@ -311,10 +311,9 @@ function ClaudeSetupPanel({
       </div>
       {status?.state === "missing" && (
         <p className="m-0 text-body-sm text-subtle">
-          Downloads Buzz's own copy of Claude (about 250 MB) from
-          downloads.claude.ai and keeps it on the latest release. It does not
-          change the <code>claude</code> in your terminal, and uses the same
-          settings.
+          Downloads Buzz's own copy of Claude (about 250 MB) and keeps it on the
+          latest release. Your own installation of Claude will be unaffected,
+          and uses the same settings.
         </p>
       )}
       {state.output && (
@@ -559,26 +558,12 @@ export function createTabs({
     );
   }
 
-  /** New agent's Harness, Model and Thinking. While Claude needs its key,
-   * a row in their place opens Set up Claude, which also opens on its own
-   * when the person picks Claude; turning it down returns them to the
-   * harness they left. The agent waits for the key. */
-  function CreateConfiguration({
-    harnessControl,
-    onReadyChange,
-    onDecline,
-    agent,
-    ...props
-  }: AgentCreateProps<Config> & {
-    harnessControl: ReactNode;
-    onReadyChange?: (ready: boolean) => void;
-    onDecline?: () => void;
-  }) {
+  /** Whether a new or edited agent waits for this computer's credentials.
+   * An agent being edited may run on an execution target, which brings its
+   * own: only one that runs here needs them. One whose place can't be told
+   * is taken to run here. */
+  function useCredentials(agent: AgentCreateProps<Config>["agent"]) {
     const state = useSetupCatalog();
-    const notify = useToastNotification();
-    // An agent being edited may run on an execution target, which brings its
-    // own credentials: only an agent that runs here needs this computer's.
-    // One whose place can't be told is taken to run here.
     const execution = useRemote(agent);
     const resolving = !!agent && !execution;
     const local = !agent || (!!execution && execution.remote !== true);
@@ -586,77 +571,68 @@ export function createTabs({
       local &&
       state.status?.state === "signed-out" &&
       state.running !== "install";
-    // Only missing credentials hold creation: an agent made before Claude is
-    // installed waits for the download, as it did with the Model row alone.
-    const ready = !!state.status && !signedOut && !resolving;
-    useEffect(() => onReadyChange?.(ready), [onReadyChange, ready]);
-    const [asking, setAsking] = useState(false);
-    // Once per arrival: after a key is saved, a later sign-out asks in the row.
-    const asked = useRef(false);
-    useEffect(() => {
-      if (!signedOut || !onDecline || asked.current) return;
-      asked.current = true;
-      setAsking(true);
-    }, [signedOut, onDecline]);
-    // Credentials that arrive any way close the ask for good, and an ask
-    // they answer says so: a saved key, or an interactive sign-in.
-    const askingNow = useRef(false);
-    askingNow.current = asking;
+    return { state, resolving, signedOut };
+  }
+
+  /** Beside Harness while Claude has no credentials, as Builderlab's Sign in
+   * is: opens Set up Claude. Credentials close it and say so; closing it
+   * stops a sign-in it started. */
+  function CreateAction({
+    agent,
+    disabled,
+  }: {
+    agent?: AgentCreateProps<Config>["agent"];
+    disabled: boolean;
+  }) {
+    const { state, signedOut } = useCredentials(agent);
+    const notify = useToastNotification();
+    // Passive Back may have hidden the action while its provider kept working.
+    const [open, setOpen] = useState(
+      () => signedOut && state.running === "sign-in",
+    );
+    const openNow = useRef(open);
+    openNow.current = open;
     const notifyNow = useRef(notify);
     notifyNow.current = notify;
     useEffect(() => {
-      if (signedOut) return;
-      if (askingNow.current)
-        notifyNow.current(
-          "Claude is set up",
-          "success",
-          openSetup && { label: "Manage in Settings", onClick: openSetup },
-        );
-      setAsking(false);
+      if (signedOut || !openNow.current) return;
+      setOpen(false);
+      notifyNow.current(
+        "Claude is set up",
+        "success",
+        openSetup && { label: "Manage in Settings", onClick: openSetup },
+      );
     }, [signedOut]);
     const signingIn = state.running === "sign-in";
     return (
       <>
-        <SettingsGroup>
-          {harnessControl}
-          {signedOut ? (
-            <PreferenceRow
-              title={`Claude ${setup.auth.needs}`}
-              trailing={
-                <Button
-                  size="sm"
-                  variant="prominent"
-                  disabled={props.disabled}
-                  onClick={() => setAsking(true)}
-                >
-                  {setup.auth.attentionLabel}
-                </Button>
-              }
-            />
-          ) : (
-            <>
-              <PreferenceRow
-                title="Model"
-                trailing={<CreateModel {...props} />}
-              />
-              <PreferenceRow
-                title="Thinking"
-                trailing={
-                  <CreateThinking {...(agent && { agent })} {...props} />
-                }
-              />
-            </>
-          )}
-        </SettingsGroup>
+        {signedOut && (
+          <Button
+            size="sm"
+            variant="subtle"
+            shape="capsule"
+            disabled={disabled}
+            aria-label={setup.auth.attentionLabel}
+            title={setup.auth.attentionLabel}
+            onClick={() => setOpen(true)}
+          >
+            {setup.auth.signIn ? "Sign in" : "Add key"}
+          </Button>
+        )}
         <Dialog
-          open={asking && signedOut}
+          open={open && signedOut}
           title="Set up Claude"
+          actions={
+            signingIn && (
+              <Button variant="ghost" onClick={() => void setup.cancel()}>
+                Cancel
+              </Button>
+            )
+          }
           onOpenChange={(next) => {
-            if (next) return;
-            setAsking(false);
-            // Only the person closes it this way: credentials close it
-            // through `signedOut`. Closing without them turns Claude down.
-            onDecline?.();
+            setOpen(next);
+            if (!next && setup.snapshot().running === "sign-in")
+              void setup.cancel();
           }}
         >
           <div className="grid gap-3">
@@ -668,17 +644,62 @@ export function createTabs({
                 <Button
                   size="sm"
                   variant="prominent"
-                  disabled={props.disabled || !!state.running}
+                  disabled={disabled || !!state.running}
                   onClick={() => void setup.run("sign-in")}
                 >
                   Sign in
                 </Button>
               </div>
             )}
-            <SignIn setup={setup} disabled={props.disabled} />
+            <SignIn setup={setup} disabled={disabled} />
           </div>
         </Dialog>
       </>
+    );
+  }
+
+  /** New agent's Harness, Model and Thinking. While Claude has no
+   * credentials, Model and Thinking wait, disabled, for CreateAction's
+   * setup beside Harness, and so does the agent. */
+  function CreateConfiguration({
+    harnessControl,
+    onReadyChange,
+    agent,
+    ...props
+  }: AgentCreateProps<Config> & {
+    harnessControl: ReactNode;
+    onReadyChange?: (ready: boolean) => void;
+  }) {
+    const { state, resolving, signedOut } = useCredentials(agent);
+    // Only missing credentials hold creation: an agent made before Claude is
+    // installed waits for the download, as it did with the Model row alone.
+    const ready = !!state.status && !signedOut && !resolving;
+    useEffect(() => onReadyChange?.(ready), [onReadyChange, ready]);
+    return (
+      <SettingsGroup>
+        {harnessControl}
+        <PreferenceRow
+          title="Model"
+          trailing={
+            signedOut ? (
+              <Select
+                label="Model"
+                variant="compact"
+                value=""
+                groups={options([["", "Default"]])}
+                disabled
+                onValueChange={() => {}}
+              />
+            ) : (
+              <CreateModel {...props} />
+            )
+          }
+        />
+        <PreferenceRow
+          title="Thinking"
+          trailing={<CreateThinking {...(agent && { agent })} {...props} />}
+        />
+      </SettingsGroup>
     );
   }
 
@@ -772,7 +793,7 @@ export function createTabs({
       !status || state.checking
         ? "Checking Claude…"
         : status.state === "missing"
-          ? "Claude is not installed."
+          ? "The Claude integration isn't installed yet."
           : status.state === "outdated"
             ? `Claude ${status.version} is older than Buzz needs.`
             : status.state === "signed-out"
@@ -782,7 +803,7 @@ export function createTabs({
                 : undefined;
     const action =
       status?.state === "missing"
-        ? ({ step: "install", label: "Install Claude" } as const)
+        ? ({ step: "install", label: "Install integration" } as const)
         : status?.state === "outdated"
           ? ({ step: "install", label: "Update Claude" } as const)
           : status?.state === "signed-out" && setup.auth.signIn
@@ -828,10 +849,9 @@ export function createTabs({
           )}
           {status?.state === "missing" && !state.running && (
             <p className="m-0 text-body-sm text-subtle">
-              Downloads Buzz's own copy of Claude (about 250 MB) from
-              downloads.claude.ai and keeps it on the latest release. It does
-              not change the <code>claude</code> in your terminal, and uses the
-              same settings.
+              Downloads Buzz's own copy of Claude (about 250 MB) and keeps it on
+              the latest release. Your own installation of Claude will be
+              unaffected, and uses the same settings.
             </p>
           )}
           {state.output && state.running !== "install" && (
@@ -1347,6 +1367,7 @@ export function createTabs({
   return {
     CreateModel,
     CreateConfiguration,
+    CreateAction,
     CreateThinking,
     Create,
     ProviderDialogBody,
