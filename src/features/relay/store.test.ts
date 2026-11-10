@@ -1,4 +1,5 @@
 import { assert, describe, expect, it, vi } from "vitest";
+import { huddleDescription } from "../huddle/lifecycle";
 import { ReadError } from "./errors";
 import { createRelaySession } from "./session";
 import type { LiveCallbacks } from "./live";
@@ -1070,9 +1071,8 @@ describe("creator proof reads", () => {
     }
   });
 
-  it("reads a channel's creation once as membership changes republish its metadata", async () => {
-    // Each membership change republishes 39000 to every online member. A read
-    // per version, times members, times a run of adds, was a relay-wide burst.
+  /** A session fed live, with the creator-proof reads it has pending. */
+  function liveSession() {
     const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
     let live!: LiveCallbacks;
     const owner = createRelaySession({
@@ -1086,42 +1086,132 @@ describe("creator proof reads", () => {
       wire.pending.filter((entry) =>
         entry.filters.some((filter) => filter.kinds?.includes(9007)),
       );
+    return {
+      owner,
+      reads,
+      receive: async (events: RelayEvent[]) => {
+        live.receive(events);
+        await flush();
+      },
+      take() {
+        const [read] = reads();
+        assert.exists(read);
+        wire.pending.splice(wire.pending.indexOf(read), 1);
+        return read;
+      },
+    };
+  }
+  const creation = (channel: string, extra: string[][] = []) =>
+    signed(alice, {
+      kind: 9007,
+      created_at: 1_700_000_000,
+      content: "",
+      tags: [["h", channel], ...extra],
+    });
+
+  it("reads a channel's creation once as membership changes republish its metadata", async () => {
+    // Each membership change republishes 39000 to every online member. A read
+    // per version, times members, times a run of adds, was a relay-wide burst.
+    const { owner, reads, receive, take } = liveSession();
     const members = [viewer.pubkey];
-    const add = async () => {
+    const add = () => {
       members.push(keypair().pubkey);
       const at = 1_700_000_000 + members.length;
-      live.receive([
+      return receive([
         roster(relay, "a", members, at),
         stream("a", alice.pubkey, at),
       ]);
-      await flush();
     };
     try {
-      live.receive([roster(relay, "a", members), stream("a")]);
-      await flush();
-      const [failed] = reads();
-      assert.exists(failed);
-      wire.pending.splice(wire.pending.indexOf(failed), 1);
-      failed.fail(new Error("offline"));
+      await receive([roster(relay, "a", members), stream("a")]);
+      take().fail(new Error("offline"));
       await flush();
       // A failed read proved nothing, so the next version retries it.
       await add();
-      const [first] = reads();
-      assert.exists(first);
+      const first = take();
       expect(first.filters).toMatchObject([
         { kinds: [9007], authors: [alice.pubkey], "#h": ["a"] },
       ]);
       // A version arriving while that read is in flight shares it.
       await add();
-      expect(reads()).toEqual([first]);
-      wire.pending.splice(wire.pending.indexOf(first), 1);
-      first.respond([]);
+      expect(reads()).toEqual([]);
+      first.respond([creation("a")]);
       await flush();
       for (let n = 0; n < 3; n++) await add();
       // Every version was applied, so each one was a candidate for a read.
       expect(owner.session.channels.list().channels[0]?.members).toHaveLength(
         members.length,
       );
+      expect(reads()).toEqual([]);
+    } finally {
+      owner.dispose();
+    }
+  });
+
+  it("retries a young channel's missing creation once, after replicas settle", async () => {
+    // A live 39000 can precede its creation on a read replica. That miss must
+    // not leave a Huddle classified as an ordinary channel.
+    const parent = "00000000-0000-4000-8000-000000000001";
+    const room = "00000000-0000-4000-8000-000000000002";
+    const born = 1_700_000_000;
+    const about = huddleDescription(parent);
+    const version = (at: number) => [
+      roster(relay, room, [viewer.pubkey], at),
+      metadata(relay, room, "Huddle", at, [
+        ["P", alice.pubkey],
+        ["private"],
+        ["t", "stream"],
+        ["created_at", String(born)],
+        ["ttl", "3600"],
+        ["about", about],
+      ]),
+    ];
+    const summary = () =>
+      owner.session.channels.list().channels.find(({ id }) => id === room);
+    const { owner, reads, receive, take } = liveSession();
+    try {
+      await receive(version(born));
+      take().respond([]);
+      await flush();
+      expect(summary()?.parentChannelId).toBeUndefined();
+      // Versions signed before the replicas settle do not read again.
+      await receive(version(born + 59));
+      expect(reads()).toEqual([]);
+      await receive(version(born + 60));
+      take().respond([
+        creation(room, [
+          ["visibility", "private"],
+          ["channel_type", "stream"],
+          ["about", about],
+        ]),
+      ]);
+      await flush();
+      expect(summary()).toMatchObject({
+        huddle: true,
+        parentChannelId: parent,
+      });
+      await receive(version(born + 61));
+      expect(reads()).toEqual([]);
+    } finally {
+      owner.dispose();
+    }
+  });
+
+  it("treats a settled channel's missing creation as final", async () => {
+    const { owner, reads, receive, take } = liveSession();
+    const version = (at: number) => [
+      roster(relay, "a", [viewer.pubkey], at),
+      metadata(relay, "a", "a", at, [
+        ["t", "stream"],
+        ["P", alice.pubkey],
+        ["created_at", String(1_700_000_000 - 60)],
+      ]),
+    ];
+    try {
+      await receive(version(1_700_000_000));
+      take().respond([]);
+      await flush();
+      await receive(version(1_700_000_001));
       expect(reads()).toEqual([]);
     } finally {
       owner.dispose();
