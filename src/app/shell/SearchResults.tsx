@@ -194,7 +194,8 @@ export function SearchResults({
   usageScope,
   sidebarScope,
   views,
-  offline,
+  offline: offlineNotice,
+  savedOnly: savedConversationsOnly = false,
 }: {
   session: RelaySession;
   /** Tabs that switch this search to other views of it. */
@@ -218,7 +219,11 @@ export function SearchResults({
   /** Why only saved conversations are searched. The relay's message, people
    * and open-channel lookups wait for the connection instead of failing. */
   offline?: ReactNode;
+  /** Only saved conversations are searched, with nothing to say about it: the
+   * app's connection notice is the one report of the disconnect. */
+  savedOnly?: boolean | undefined;
 } & SearchInputProps) {
+  const offline = !!offlineNotice || savedConversationsOnly;
   const resolveName = useIdentityNames(session.names);
   const list = useChannelList(session.channels);
   // The joined list loads when the palette opens. Recovery retries it and the
@@ -1774,7 +1779,7 @@ export function SearchResults({
         )
       }
       isAction={isSearchAction}
-      footer={offline}
+      footer={offlineNotice}
     >
       {dateOperator === "on" && (
         <Calendar
