@@ -46,6 +46,7 @@ import { ExistingDiscussion } from "./ExistingDiscussion";
 
 const draftKey = "direct-message:new-draft";
 const channelViewKey = "direct-message:channel";
+const teamViewKey = "direct-message:team-for";
 type Kind = "solo" | "team";
 const recoveryKey = "direct-message:new";
 
@@ -55,6 +56,7 @@ type Pending = {
   recipients: string;
   draft: MentionDraft;
   attachments: readonly (readonly string[])[];
+  channelTarget?: string | undefined;
 };
 const keyFor = (people: readonly Recipient[]) =>
   people
@@ -92,7 +94,10 @@ function validRecipients(saved: unknown, viewer?: string) {
 }
 // Earlier development builds wrote a separate pointer. Keep it confirmation-only;
 // its absence from the journal must never authorize a replacement message.
-function savedLegacy(scope: string, viewer?: string) {
+function savedLegacy(
+  scope: string,
+  viewer?: string,
+): (Pending & { people: Recipient[] }) | undefined {
   const value = readView<Partial<Pending> | null>(
     scope,
     "direct-message:pending",
@@ -124,12 +129,19 @@ function recovered(operations: readonly OutgoingEvent[], viewer?: string) {
   const value = JSON.parse(item.recovery.value);
   const people = validRecipients(value.people, viewer);
   const channelId = item.event.tags.find(([name]) => name === "h")?.[1];
-  if (item.event.kind !== 9 || !channelId || !people.length)
+  const channelTarget = value.channelTarget;
+  if (
+    item.event.kind !== 9 ||
+    !channelId ||
+    (channelTarget !== undefined && channelTarget !== channelId) ||
+    (!people.length && !channelTarget)
+  )
     throw new Error("The saved new message could not be restored.");
   return {
     id: item.event.id,
     channelId,
-    recipients: keyFor(people),
+    recipients: channelTarget ? `channel:${channelTarget}` : keyFor(people),
+    channelTarget,
     draft: mentionDraft(value.draft),
     attachments: item.event.tags.filter(([name]) => name === "imeta"),
     people,
@@ -210,7 +222,10 @@ export function NewMessage({
     return typeof saved === "string" ? saved : undefined;
   });
   // A lone agent starts a Solo chat unless Team was picked for it.
-  const [teamFor, setTeamFor] = useState<string>();
+  const [teamFor, setTeamFor] = useState(() => {
+    const saved = readView<unknown>(scope, teamViewKey, null);
+    return typeof saved === "string" ? saved : undefined;
+  });
   // Recipients keep the facts they were chosen with; their labels follow the
   // current verification and otherwise the current profile name, falling back
   // to those facts.
@@ -332,6 +347,8 @@ export function NewMessage({
     prepared.current = undefined;
     draftEdited(undefined);
     setRecipients([]);
+    setChannelId(undefined);
+    setTeamFor(undefined);
     setRestoredDraft(mentionDraft(""));
     setDraftRevision((revision) => revision + 1);
   }, [session, scope, draftEdited]);
@@ -359,6 +376,7 @@ export function NewMessage({
           recovered(outbox?.snapshot() ?? [], session.viewer) ??
           initialLegacy.current;
         if (saved) {
+          setChannelId(saved.channelTarget);
           const editable =
             session.directMessages.delivery(saved.id) === "failed";
           setRecipients(
@@ -444,68 +462,16 @@ export function NewMessage({
     setError("");
     setUploadFailed(false);
   }
-  /** A new top-level message in a channel, which starts its thread. */
-  async function post(
-    channel: ChannelSummary,
-    draft: MentionDraft,
-    files?: AttachmentDraft,
-  ) {
-    const content = composerMarkdown(draft);
-    if (
-      attempt.current ||
-      !ready ||
-      (!content.trim() && !files?.snapshot().length)
-    )
-      return;
-    const controller = new AbortController();
-    attempt.current = controller;
-    setBusy(
-      files?.snapshot().some((file) => !file.uploaded)
-        ? "uploading"
-        : "sending",
-    );
-    setError("");
-    setUploadFailed(false);
-    let preparingFiles = !!files;
-    try {
-      const uploaded = files
-        ? await files.prepareForSend(controller.signal)
-        : [];
-      controller.signal.throwIfAborted();
-      preparingFiles = false;
-      setBusy("sending");
-      const messageId = session.messages.send(
-        channel.id,
-        content,
-        draft.recipients.map((person) => person.pubkey),
-        uploaded,
-      );
-      clearView(scope, draftKey, "direct-message:recipients", channelViewKey);
-      setChannelId(undefined);
-      retire();
-      onStarted(channel.id, messageId);
-    } catch (reason) {
-      if (!controller.signal.aborted && preparingFiles) setUploadFailed(true);
-      else if (!controller.signal.aborted)
-        setError(
-          reason instanceof Error
-            ? reason.message
-            : "Could not send your message. Try again.",
-        );
-    } finally {
-      if (!controller.signal.aborted) setBusy(undefined);
-      if (attempt.current === controller) attempt.current = null;
-    }
-  }
   async function send(draft: MentionDraft, files?: AttachmentDraft) {
-    if (target) return post(target, draft, files);
+    const posting =
+      target?.id ?? (!recipients.length ? pending?.channelTarget : undefined);
     const content = composerMarkdown(draft);
     if (
       attempt.current ||
       !ready ||
-      !recipients.length ||
+      (!posting && !recipients.length) ||
       (!content.trim() && !files?.snapshot().length && !pending) ||
-      !session.directMessages.available
+      (!posting && !session.directMessages.available)
     )
       return;
     const controller = new AbortController();
@@ -517,7 +483,7 @@ export function NewMessage({
     );
     setError("");
     setUploadFailed(false);
-    const key = keyFor(recipients);
+    const key = posting ? `channel:${posting}` : keyFor(recipients);
     let current: Pending | undefined = pending;
     let preparingFiles = !!files;
     try {
@@ -535,7 +501,11 @@ export function NewMessage({
         uploaded,
         uploaded[0]?.url,
       ).tags;
-      if (current && session.directMessages.delivery(current.id) === "failed")
+      if (
+        !posting &&
+        current &&
+        session.directMessages.delivery(current.id) === "failed"
+      )
         validateAgents();
       if (
         current &&
@@ -550,7 +520,11 @@ export function NewMessage({
           throw new Error(
             "Retry the earlier message to confirm its delivery before editing.",
           );
-        validateAgents();
+        if (posting && !target)
+          throw new Error(
+            "This channel is no longer available for a new message.",
+          );
+        if (!posting) validateAgents();
         await outbox?.dismiss(current.id);
         controller.signal.throwIfAborted();
         current = undefined;
@@ -558,18 +532,25 @@ export function NewMessage({
         writeView(scope, "direct-message:pending", null);
       }
       if (!current) {
-        validateAgents();
-        onPreparing?.(recipients.map((person) => person.pubkey));
+        if (posting && !target)
+          throw new Error(
+            "This channel is no longer available for a new message.",
+          );
+        if (!posting) {
+          validateAgents();
+          onPreparing?.(recipients.map((person) => person.pubkey));
+        }
         const id =
-          prepared.current?.key === key
+          posting ??
+          (prepared.current?.key === key
             ? prepared.current.id
             : await session.directMessages.open(
                 recipients.map((person) => person.pubkey),
                 controller.signal,
-              );
+              ));
         controller.signal.throwIfAborted();
         prepared.current = { key, id };
-        validateAgents();
+        if (!posting) validateAgents();
         const messageId = session.messages.send(
           id,
           content,
@@ -580,12 +561,14 @@ export function NewMessage({
             value: JSON.stringify({
               people: recipients.map(recipientView),
               draft,
+              channelTarget: posting,
             }),
           },
         );
         current = {
           id: messageId,
           channelId: id,
+          channelTarget: posting,
           recipients: key,
           draft,
           attachments,
@@ -604,6 +587,8 @@ export function NewMessage({
         draftKey,
         "direct-message:pending",
         "direct-message:recipients",
+        channelViewKey,
+        teamViewKey,
       );
       await outbox?.acknowledge(current.id);
       if (controller.signal.aborted) return;
@@ -671,9 +656,9 @@ export function NewMessage({
       ? lone.pubkey
       : undefined;
   const kind: Kind | null =
-    loneAgent && teamFor !== loneAgent
+    ready && !pending && loneAgent && teamFor !== loneAgent
       ? "solo"
-      : target || recipients.length
+      : target || recipients.length || pending
         ? "team"
         : null;
   const soloAgent = kind === "solo" ? loneAgent : undefined;
@@ -712,7 +697,9 @@ export function NewMessage({
           ]}
           onValueChange={(next) => {
             if (!loneAgent) return;
-            setTeamFor(next === "team" ? loneAgent : undefined);
+            const choice = next === "team" ? loneAgent : undefined;
+            setTeamFor(choice);
+            writeView(scope, teamViewKey, choice ?? null);
           }}
         />
       </div>

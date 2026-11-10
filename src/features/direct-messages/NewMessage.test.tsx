@@ -43,6 +43,7 @@ import { NewMessage } from "./NewMessage";
 import type { ComposerInputElement } from "../messages/composer-dom";
 import { createAgentChoices } from "../agents/choices";
 import type { LocalAgentsSnapshot } from "../agents/local";
+import type { ComponentProps } from "react";
 
 composerDOMFixture();
 
@@ -227,9 +228,14 @@ function setup() {
   const mount = (
     visit?: PageNavigation,
     layout: "page" | "composer" = "page",
+    options: Pick<
+      ComponentProps<typeof NewMessage>,
+      "renderSolo" | "allowChannels"
+    > = {},
   ) =>
     render(
       <NewMessage
+        {...options}
         layout={layout}
         channels={channels.channels}
         host={
@@ -275,6 +281,71 @@ function setup() {
 const recipient = () =>
   screen.getByRole("combobox", { name: "Message recipients" });
 const send = () => screen.getByRole("button", { name: "Send message" });
+
+it("retains channel delivery recovery when saved-draft cleanup fails", async () => {
+  const t = setup();
+  t.channels.channels = [
+    { id: channel, name: "Design", channelType: "stream" },
+  ];
+  localStorage.setItem(
+    `buzz-view.v1:${JSON.stringify([scope, "direct-message:channel"])}`,
+    JSON.stringify(channel),
+  );
+  t.directMessages.delivery.mockReturnValue("accepted");
+  const removeItem = Storage.prototype.removeItem;
+  const draftStorageKey = `buzz-view.v1:${JSON.stringify([scope, "direct-message:new-draft"])}`;
+  const remove = vi
+    .spyOn(Storage.prototype, "removeItem")
+    .mockImplementation(function (this: Storage, key) {
+      if (key === draftStorageKey) throw new Error("Cannot clear draft");
+      removeItem.call(this, key);
+    });
+  const view = t.mount(undefined, "composer", { allowChannels: true });
+  try {
+    await act(() => t.outbox.ready());
+    await t.user.type(screen.getByRole("textbox"), "A channel message");
+    await waitFor(() => expect(send()).toBeEnabled());
+    await t.user.click(send());
+    await screen.findByRole("alert");
+    view.unmount();
+    t.mount(undefined, "composer", { allowChannels: true });
+    await screen.findByRole("button", { name: "Retry send" });
+  } finally {
+    remove.mockRestore();
+  }
+  await t.user.click(screen.getByRole("button", { name: "Retry send" }));
+  await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
+  expect(t.messages.send).toHaveBeenCalledOnce();
+  expect(t.directMessages.open).not.toHaveBeenCalled();
+});
+
+it("keeps a selected agent Team draft and pending DM in Team across remounts", async () => {
+  const t = setup();
+  const options = { renderSolo: () => <div>Solo composer</div> };
+  let view = t.mount(undefined, "page", options);
+  await t.user.click(
+    await screen.findByRole("option", { name: "Person 2, Agent" }),
+  );
+  await t.user.click(screen.getByRole("tab", { name: /^Team$/ }));
+  await t.user.type(screen.getByRole("textbox"), "Keep this DM draft");
+  view.unmount();
+  view = t.mount(undefined, "page", options);
+  await waitFor(() =>
+    expect(screen.queryByText("Solo composer")).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("textbox")).toHaveTextContent("Keep this DM draft");
+  t.directMessages.delivery.mockReturnValue(undefined);
+  t.directMessages.delivered.mockRejectedValueOnce(
+    new Error("Delivery uncertain"),
+  );
+  await t.user.click(send());
+  await screen.findByRole("alert");
+  view.unmount();
+  t.mount(undefined, "page", options);
+  await t.user.click(await screen.findByRole("button", { name: "Retry send" }));
+  await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
+  expect(t.messages.send).toHaveBeenCalledOnce();
+});
 
 it("the Activity composer starts without stealing focus and keeps delivery with NewMessage", async () => {
   const t = setup();

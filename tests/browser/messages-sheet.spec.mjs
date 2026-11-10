@@ -11,6 +11,7 @@ test("Messages expands from its compact composer and restores visits", async ({
   page,
   app,
 }, testInfo) => {
+  app.append("primary", "dm-peer", "[Open Beta](buzz://channel/beta)", false);
   await page.goto(app.origin);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   const activity = page.getByRole("region", { name: "Activity", exact: true });
@@ -93,9 +94,9 @@ test("Messages expands from its compact composer and restores visits", async ({
   await expect(
     draft.getByText("Inbox DM fixture reply", { exact: true }),
   ).toBeVisible();
-  await draft
-    .getByRole("button", { name: "Close new message", exact: true })
-    .click();
+  await draft.getByRole("link", { name: "Open Beta", exact: true }).click();
+  await expect(page.locator('[data-channel-timeline="beta"]')).toBeVisible();
+  await page.goBack();
   await expect(draft).toHaveCount(0);
 
   // A direct Messages conversation is the reference for every composing host.

@@ -441,7 +441,7 @@ export function InboxSheet({
             session={session}
             scope={scope}
             channels={list.channels}
-            host={host}
+            host={detailHost}
             extensions={extensions}
             onStarted={showConversation}
             onOpenThread={(channelId, messageId, threadId) => {
