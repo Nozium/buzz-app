@@ -345,27 +345,46 @@ mod macos {
                 let retries = ivars.retries.get();
                 if retries >= FULLSCREEN_RETRIES {
                     ivars.retries.set(0);
+                    eprintln!(
+                        "Buzz Browser: a page left fullscreen but did not return to the window; \
+                         its panel updates wait for the next one"
+                    );
                     return;
                 }
                 ivars.retries.set(retries + 1);
-                let _: () = unsafe {
-                    msg_send![
-                        self,
-                        performSelector: sel!(reconcileFullscreen:),
-                        withObject: Option::<&AnyObject>::None,
-                        afterDelay: 0.05f64
-                    ]
-                };
+                self.reconcile_soon();
             }
         }
 
         unsafe impl NSObjectProtocol for FullscreenObserver {}
     );
 
+    impl FullscreenObserver {
+        fn reconcile_soon(&self) {
+            let _: () = unsafe {
+                msg_send![
+                    self,
+                    performSelector: sel!(reconcileFullscreen:),
+                    withObject: Option::<&AnyObject>::None,
+                    afterDelay: 0.05f64
+                ]
+            };
+        }
+    }
+
     const FULLSCREEN_STATE: &str = "fullscreenState";
 
     /// Observes the guest until dropped. WebKit does not retain its observers.
     pub struct Fullscreen(Option<Retained<FullscreenObserver>>);
+
+    impl Fullscreen {
+        /// Applies held requests once the guest is back in its window.
+        pub fn reconcile_soon(&self) {
+            if let Some(observer) = &self.0 {
+                observer.reconcile_soon();
+            }
+        }
+    }
 
     impl Drop for Fullscreen {
         fn drop(&mut self) {
@@ -420,8 +439,9 @@ mod macos {
     /// Whether the guest is in the host's window, rather than WebKit's
     /// fullscreen window or none.
     pub fn in_host_window(guest: &WebView, host: &tauri::Webview) -> bool {
+        // Without a host window to compare, place the guest as before.
         let Ok(host) = host.window().ns_window() else {
-            return false;
+            return true;
         };
         guest
             .webview()
@@ -667,6 +687,11 @@ pub(super) fn leave_fullscreen(_guest: &WebView) {}
 
 #[cfg(not(target_os = "macos"))]
 pub(super) struct Fullscreen;
+
+#[cfg(not(target_os = "macos"))]
+impl Fullscreen {
+    pub(super) fn reconcile_soon(&self) {}
+}
 
 #[cfg(not(target_os = "macos"))]
 pub(super) fn observe_fullscreen(

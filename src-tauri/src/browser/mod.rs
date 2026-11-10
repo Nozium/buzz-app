@@ -88,7 +88,7 @@ struct BrowserSession {
     instance: String,
     host: Webview,
     // Dropped before the guest: it ends the guest's fullscreen and observation.
-    _fullscreen: platform::Fullscreen,
+    fullscreen: platform::Fullscreen,
     guest: WebView,
     // WKWebView's UI and navigation delegate references are weak.
     _permissions: platform::Permissions,
@@ -120,10 +120,6 @@ impl Presentation {
         }
         self.0.set(None);
         Some((bounds, visible))
-    }
-
-    fn holding(&self) -> bool {
-        self.0.get().is_some()
     }
 
     fn after_fullscreen(&self) -> Option<(BrowserBounds, bool)> {
@@ -176,11 +172,15 @@ impl BrowserSession {
     fn set_bounds(&self, bounds: BrowserBounds, visible: bool) -> Result<(), String> {
         // A fullscreen page has left the panel: entering fullscreen hides the main
         // window, and hiding or placing the guest would blank the fullscreen
-        // window. The latest request applies once WebKit gives the page back.
-        let Some((bounds, visible)) =
-            self.presentation
-                .request(platform::fullscreen(&self.guest), bounds, visible)
-        else {
+        // window. WebKit can also report the exit before the page is back in
+        // the panel. The latest request applies once WebKit gives the page back.
+        let fullscreen = platform::fullscreen(&self.guest);
+        let away = fullscreen || !platform::in_host_window(&self.guest, &self.host);
+        let Some((bounds, visible)) = self.presentation.request(away, bounds, visible) else {
+            if !fullscreen {
+                // No fullscreen change is left to report its return.
+                self.fullscreen.reconcile_soon();
+            }
             return Ok(());
         };
         self.guest
@@ -236,10 +236,8 @@ fn present_after_fullscreen(instance: &str) -> bool {
         let Some(browser) = browsers.iter().find(|browser| browser.instance == instance) else {
             return true;
         };
-        if !browser.presentation.holding() {
-            return true;
-        }
-        // WebKit can report the exit before it puts the guest back in the panel.
+        // WebKit can report the exit before it puts the guest back in the panel;
+        // a request can arrive meanwhile.
         if !platform::in_host_window(&browser.guest, &browser.host) {
             return false;
         }
@@ -477,7 +475,7 @@ fn build_contents(
     let browser = BrowserSession {
         instance,
         host,
-        _fullscreen: fullscreen,
+        fullscreen,
         guest,
         _permissions: permissions,
         navigation,
@@ -660,36 +658,7 @@ pub async fn browser_status(app: AppHandle, session_id: String) -> Result<Browse
 
 #[cfg(test)]
 mod storage_tests {
-    use super::{storage_identifier, BrowserBounds, Presentation};
-
-    fn bounds(x: f64) -> BrowserBounds {
-        BrowserBounds {
-            x,
-            y: 0.0,
-            width: 10.0,
-            height: 10.0,
-        }
-    }
-
-    #[test]
-    fn fullscreen_holds_the_latest_presentation_until_it_ends() {
-        let presentation = Presentation::default();
-        assert_eq!(presentation.request(true, bounds(1.0), false), None);
-        assert_eq!(presentation.request(true, bounds(2.0), true), None);
-        assert_eq!(presentation.after_fullscreen(), Some((bounds(2.0), true)));
-        assert_eq!(presentation.after_fullscreen(), None);
-    }
-
-    #[test]
-    fn a_presentation_applied_after_fullscreen_replaces_the_held_one() {
-        let presentation = Presentation::default();
-        assert_eq!(presentation.request(true, bounds(1.0), false), None);
-        assert_eq!(
-            presentation.request(false, bounds(2.0), true),
-            Some((bounds(2.0), true))
-        );
-        assert_eq!(presentation.after_fullscreen(), None);
-    }
+    use super::storage_identifier;
 
     #[test]
     fn names_map_to_stable_distinct_stores() {
@@ -888,5 +857,39 @@ mod handoff_tests {
             .error
             .as_deref()
             .is_some_and(|error| error.contains("gate?app=a.apps.builderlab.xyz")));
+    }
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::{BrowserBounds, Presentation};
+
+    fn bounds(x: f64) -> BrowserBounds {
+        BrowserBounds {
+            x,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        }
+    }
+
+    #[test]
+    fn fullscreen_holds_the_latest_presentation_until_it_ends() {
+        let presentation = Presentation::default();
+        assert_eq!(presentation.request(true, bounds(1.0), false), None);
+        assert_eq!(presentation.request(true, bounds(2.0), true), None);
+        assert_eq!(presentation.after_fullscreen(), Some((bounds(2.0), true)));
+        assert_eq!(presentation.after_fullscreen(), None);
+    }
+
+    #[test]
+    fn a_presentation_applied_after_fullscreen_replaces_the_held_one() {
+        let presentation = Presentation::default();
+        assert_eq!(presentation.request(true, bounds(1.0), false), None);
+        assert_eq!(
+            presentation.request(false, bounds(2.0), true),
+            Some((bounds(2.0), true))
+        );
+        assert_eq!(presentation.after_fullscreen(), None);
     }
 }
