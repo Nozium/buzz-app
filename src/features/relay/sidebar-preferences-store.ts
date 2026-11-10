@@ -117,7 +117,7 @@ export function createSidebarPreferencesStore({
     queueMicrotask(() => {
       if (closed || generation !== scheduledGeneration) return;
       scheduled = false;
-      if (owed()) void refresh();
+      if (owed()) void refresh(true);
     });
   }
   function invalidate() {
@@ -344,12 +344,12 @@ export function createSidebarPreferencesStore({
       ),
     });
   };
-  function refresh(): Promise<void> {
+  function refresh(quiet = false): Promise<void> {
     if (closed || !available) return Promise.resolve();
     if (pendingMoves.size) {
       const refreshGeneration = generation;
       return writeQueue.then(() => {
-        if (!closed && generation === refreshGeneration) return refresh();
+        if (!closed && generation === refreshGeneration) return refresh(quiet);
       });
     }
     if (active) return active.promise;
@@ -377,7 +377,10 @@ export function createSidebarPreferencesStore({
               controller.signal,
             );
             if (!current()) return;
-            if (mutation !== refreshMutation || writes !== writeQueue) {
+            if (
+              mutation !== refreshMutation ||
+              (authoritative && writes !== writeQueue)
+            ) {
               if (creationUncertain || owed()) continue;
               return;
             }
@@ -390,7 +393,10 @@ export function createSidebarPreferencesStore({
             return;
           } catch (error) {
             if (!current()) return;
-            if (mutation !== refreshMutation || writes !== writeQueue) {
+            if (
+              mutation !== refreshMutation ||
+              (authoritative && writes !== writeQueue)
+            ) {
               if (creationUncertain || owed()) continue;
               return;
             }
@@ -413,7 +419,7 @@ export function createSidebarPreferencesStore({
       }
     });
     // Live reconciliation is quiet while useful confirmed content is mounted.
-    if (!owed() || !confirmed) {
+    if (!quiet || !confirmed) {
       publish({
         status: "loading",
         ...(snapshot.cached ? { cached: true as const } : {}),
@@ -1086,7 +1092,7 @@ export function createSidebarPreferencesStore({
         snapshot.status === "idle"
           ? refresh()
           : (active?.promise ?? Promise.resolve()),
-      refresh,
+      refresh: () => refresh(),
     }),
     clear() {
       if (closed) return;

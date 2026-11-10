@@ -1206,3 +1206,136 @@ it("keeps a newer hint owed when an older read fails", async () => {
     store.dispose();
   }
 });
+
+it.each(["success", "failure"] as const)(
+  "settles a manual refresh after read %s when a concurrent rename fails",
+  async (outcome) => {
+    const pending = deferred<SidebarPreferences>();
+    const readStarted = deferred<void>();
+    const rename = deferred<SidebarPreferences>();
+    const renameStarted = deferred<void>();
+    const read = vi
+      .fn(async () => data)
+      .mockImplementationOnce(async () => data)
+      .mockImplementationOnce(() => {
+        readStarted.resolve();
+        return pending.promise;
+      });
+    const store = createSidebarPreferencesStore({
+      available: true,
+      read,
+      renameSection: () => {
+        renameStarted.resolve();
+        return rename.promise;
+      },
+    });
+    try {
+      await store.queries.ensure();
+      const refresh = store.queries.refresh();
+      await readStarted.promise;
+      expect(store.queries.snapshot().status).toBe("loading");
+      const failedRename = expect(
+        store.queries.renameSection("work", "Renamed"),
+      ).rejects.toThrow("rename rejected");
+      await renameStarted.promise;
+      if (outcome === "success") pending.resolve(data);
+      else pending.reject(new Error("read rejected"));
+      await refresh;
+      rename.reject(new Error("rename rejected"));
+      await failedRename;
+      expect(store.queries.snapshot()).toMatchObject({
+        status: outcome === "success" ? "ready" : "error",
+        data,
+        ...(outcome === "failure" ? { error: "read rejected" } : {}),
+      });
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally {
+      pending.resolve(data);
+      rename.resolve(data);
+      store.dispose();
+    }
+  },
+);
+
+it("shows loading for an explicit retry while a live reconciliation remains owed", async () => {
+  const pending = deferred<SidebarPreferences>();
+  const started = deferred<void>();
+  const strong = vi
+    .fn(async () => data)
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockImplementationOnce(() => {
+      started.resolve();
+      return pending.promise;
+    });
+  const store = createSidebarPreferencesStore({
+    available: true,
+    read: async () => data,
+    readAfterWrite: strong,
+  });
+  try {
+    await store.queries.ensure();
+    store.invalidate();
+    await Promise.resolve();
+    await store.queries.ensure();
+    expect(store.queries.snapshot().status).toBe("error");
+    const retry = store.queries.refresh();
+    await started.promise;
+    expect(store.queries.snapshot()).toMatchObject({ status: "loading", data });
+    pending.resolve(data);
+    await retry;
+    expect(store.queries.snapshot()).toEqual({ status: "ready", data });
+    expect(strong).toHaveBeenCalledTimes(2);
+  } finally {
+    pending.resolve(data);
+    store.dispose();
+  }
+});
+
+it("keeps authoritative reconciliation behind an admitted rename", async () => {
+  const rename = deferred<SidebarPreferences>();
+  const renameStarted = deferred<void>();
+  const first = deferred<SidebarPreferences>();
+  const readStarted = deferred<void>();
+  const renamed: SidebarPreferences = {
+    ...data,
+    sections: [{ id: "work", name: "Renamed", order: 0 }],
+  };
+  const strong = vi
+    .fn(async () => renamed)
+    .mockImplementationOnce(() => {
+      readStarted.resolve();
+      return first.promise;
+    });
+  const store = createSidebarPreferencesStore({
+    available: true,
+    read: async () => data,
+    readAfterWrite: strong,
+    renameSection: () => {
+      renameStarted.resolve();
+      return rename.promise;
+    },
+  });
+  try {
+    await store.queries.ensure();
+    store.invalidate();
+    await readStarted.promise;
+    const write = store.queries.renameSection("work", "Renamed");
+    await renameStarted.promise;
+    first.resolve(data);
+    // Let the stale read finish while the admitted write is still held.
+    await Promise.resolve();
+    expect(strong).toHaveBeenCalledOnce();
+    rename.resolve(renamed);
+    await write;
+    await store.queries.ensure();
+    expect(strong).toHaveBeenCalledTimes(2);
+    expect(store.queries.snapshot()).toEqual({
+      status: "ready",
+      data: renamed,
+    });
+  } finally {
+    first.resolve(data);
+    rename.resolve(renamed);
+    store.dispose();
+  }
+});
