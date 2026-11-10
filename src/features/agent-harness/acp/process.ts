@@ -1,3 +1,4 @@
+import { writeJSON } from "../../agent-protection/json-stream";
 // One ACP harness process, driven over line-delimited JSON-RPC. Each
 // conversation is one ACP session in it. Each session gets its own loopback
 // HTTP MCP server for its agent's Buzz tools, which the app serves and
@@ -444,7 +445,7 @@ export class AcpProcess {
   }
 
   private write(message: Wire) {
-    return this.process.write(`${JSON.stringify(message)}\n`);
+    return writeJSON(this.process, message);
   }
   private readError(data: string) {
     this.stderr = (this.stderr + data).slice(-STDERR_LIMIT);
@@ -528,14 +529,17 @@ export class AcpProcess {
     const call = (params ?? {}) as {
       name?: unknown;
       arguments?: { final?: unknown };
+      _meta?: Record<string, unknown>;
     };
     const worked =
       method === "tools/call" &&
       !response.error &&
       !(response.result as { isError?: unknown } | undefined)?.isError;
     if (worked && ANSWERS.has(String(call.name))) session?.answered();
+    // goose names the ACP tool call behind an MCP call in its `_meta`.
+    const toolCall = call._meta?.["agent-tool-call-request-id"];
     if (worked && isFinalMessage(call.name, call.arguments))
-      session?.finished();
+      session?.finished(typeof toolCall === "string" ? toolCall : undefined);
     return response;
   }
 }

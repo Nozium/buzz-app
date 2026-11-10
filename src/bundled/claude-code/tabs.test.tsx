@@ -75,12 +75,21 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 // A build whose auth.tsx signs in interactively, as Block's does: its
 // ClaudeAuth has a sign-in step, which here saves the credentials.
-const interactive = vi.hoisted(() => ({ signIn: false }));
+const interactive = vi.hoisted(() => ({
+  signIn: false,
+  /** Exercise setup's real process-step and cancellation path. */
+  process: false,
+  /** Holds sign-in open until it is called. */
+  hold: undefined as Promise<void> | undefined,
+}));
 vi.mock("./auth", async (actual) => {
   const real = await actual<typeof import("./auth")>();
   class ClaudeAuth extends real.ClaudeAuth {
     override readonly signIn = interactive.signIn
-      ? async () => {
+      ? async (step: import("./auth").Step) => {
+          if (interactive.process)
+            await step("claude", ["auth", "login"], "Sign-in");
+          else await interactive.hold;
           nativeKey.saved = true;
         }
       : undefined;
@@ -249,7 +258,8 @@ function applied({
     const streaming = args.includes("--input-format stream-json");
     let kill: () => void = () => undefined;
     const exited = new Promise<number | null>((resolve) => {
-      if (name === "install" || streaming) kill = () => resolve(null);
+      if (name === "install" || streaming || args === "auth login")
+        kill = () => resolve(null);
       else setTimeout(() => resolve(missing ? 127 : 0), 0);
     });
     queueMicrotask(() =>
@@ -1068,14 +1078,12 @@ it("replaces generic installation copy with the latest installer state", async (
   const installedType = installed({ available: false }).type;
   const Setup = providerSetup(installedType);
   render(<Setup onClose={vi.fn()} />);
-  await waitFor(() =>
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Claude is not installed.",
-    ),
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "The Claude integration isn't installed yet.",
   );
   await userEvent
     .setup()
-    .click(screen.getByRole("button", { name: "Install Claude" }));
+    .click(screen.getByRole("button", { name: "Install integration" }));
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent(
       "Setting up Claude Code...",
@@ -1094,6 +1102,61 @@ it("opens its dialog for a missing key rather than running a step", async () => 
     }),
   );
   expect(type.provider?.attentionAction).toBeUndefined();
+});
+
+it("leaves a missing copy to the provider dialog", async () => {
+  // Without an attention action, Settings' Harness defaults row opens
+  // DialogBody, so the status line and download note precede the download.
+  const { type } = installed({ available: false });
+  await waitFor(() =>
+    expect(type.provider?.snapshot()).toMatchObject({
+      readiness: "attention",
+      attentionLabel: "Install Claude integration",
+    }),
+  );
+  expect(type.provider?.attentionAction).toBeUndefined();
+});
+
+it("updates an outdated copy from the Settings row directly", async () => {
+  // Startup's own update leaves a copy below Buzz's minimum outdated when
+  // no newer release is published, so the row offers the update again.
+  const { type } = installed({ version: "2.1.168" });
+  await waitFor(() =>
+    expect(type.provider?.snapshot()).toEqual({
+      readiness: "attention",
+      attentionLabel: "Update Claude Code",
+    }),
+  );
+  const action = type.provider?.attentionAction;
+  if (!action) throw new Error("Missing attention action");
+  action();
+  // The update runs at once; while it does, the row has nothing to start.
+  expect(type.provider?.snapshot()).toHaveProperty("blocking", true);
+  expect(type.provider?.attentionAction).toBeUndefined();
+  await waitFor(() =>
+    expect(type.provider?.snapshot()).not.toHaveProperty("blocking"),
+  );
+});
+
+it("signs in from the Settings row directly when the build has a sign-in", async () => {
+  interactive.signIn = true;
+  try {
+    const { type } = installed({ keySaved: false });
+    await waitFor(() =>
+      expect(type.provider?.snapshot()).toMatchObject({
+        readiness: "attention",
+        attentionLabel: "Add Claude API key",
+      }),
+    );
+    const action = type.provider?.attentionAction;
+    if (!action) throw new Error("Missing attention action");
+    action();
+    await waitFor(() =>
+      expect(type.provider?.snapshot()).toHaveProperty("readiness", "ready"),
+    );
+  } finally {
+    interactive.signIn = false;
+  }
 });
 
 it("saves settings as one config", async () => {
@@ -1703,7 +1766,7 @@ it("shares one customization-free discovery across cards and workspace changes",
   expect(probes[0]?.[1]?.args).not.toContain("bypassPermissions");
 });
 
-it("asks for the key in Set up Claude when Claude is picked, then offers its models", async () => {
+it("offers Set up Claude beside Harness when Claude is picked, then its models", async () => {
   const { type, navigation } = installed({ keySaved: false });
   const claude = {
     ...type,
@@ -1731,28 +1794,35 @@ it("asks for the key in Set up Claude when Claude is picked, then offers its mod
   const user = userEvent.setup();
   await user.type(screen.getByLabelText("Name"), "Nova");
   await choose("Harness", "Claude");
-  const setupDialog = await screen.findByRole("dialog", {
-    name: "Set up Claude",
-  });
+  const add = await screen.findByRole("button", { name: "Add Claude API key" });
+  expect(add).toHaveTextContent("Add key");
+  // Nothing opens by itself; Model and Thinking wait for the key.
+  expect(screen.queryByRole("dialog", { name: "Set up Claude" })).toBeNull();
+  expect(screen.getByRole("combobox", { name: "Model" })).toBeDisabled();
+  expect(screen.getByRole("combobox", { name: "Thinking" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Create agent" })).toBeDisabled();
+
+  // Closing setup keeps Claude picked.
+  await user.click(add);
+  await screen.findByRole("dialog", { name: "Set up Claude" });
+  await user.keyboard("{Escape}");
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Set up Claude" })).toBeNull(),
+  );
+  expect(screen.getByRole("combobox", { name: "Harness" })).toHaveTextContent(
+    "Claude",
+  );
+
+  await user.click(screen.getByRole("button", { name: "Add Claude API key" }));
+  const dialog = await screen.findByRole("dialog", { name: "Set up Claude" });
   expect(
-    within(setupDialog).getByText(
+    within(dialog).getByText(
       "Claude requires an API key to connect to your account. Create one at console.anthropic.com and paste it below. You only have to set this up once, and Buzz keeps it securely on this computer.",
     ),
   ).toBeVisible();
-  // Turning setup down returns to the harness the person left.
-  await user.keyboard("{Escape}");
-  await waitFor(() =>
-    expect(screen.getByRole("combobox", { name: "Harness" })).toHaveTextContent(
-      "Codex",
-    ),
-  );
-  expect(screen.queryByRole("dialog", { name: "Set up Claude" })).toBeNull();
-  expect(screen.getByRole("button", { name: "Create agent" })).toBeEnabled();
-
-  await choose("Harness", "Claude");
-  const again = await screen.findByRole("dialog", { name: "Set up Claude" });
+  expect(within(dialog).queryByRole("button", { name: "Sign in" })).toBeNull();
   await user.type(
-    within(again).getByLabelText("Anthropic API key"),
+    within(dialog).getByLabelText("Anthropic API key"),
     "sk-ant-api03-pasted{Enter}",
   );
   await waitFor(() =>
@@ -1760,13 +1830,12 @@ it("asks for the key in Set up Claude when Claude is picked, then offers its mod
       screen.queryByRole("dialog", { name: "Set up Claude" }),
     ).not.toBeInTheDocument(),
   );
-  expect(screen.getByRole("combobox", { name: "Harness" })).toHaveTextContent(
-    "Claude",
-  );
   expect(
-    await screen.findByRole("combobox", { name: "Model" }),
-  ).toBeInTheDocument();
-  expect(screen.getByRole("combobox", { name: "Thinking" })).toBeVisible();
+    screen.queryByRole("button", { name: "Add Claude API key" }),
+  ).toBeNull();
+  await waitFor(() =>
+    expect(screen.getByRole("combobox", { name: "Model" })).toBeEnabled(),
+  );
   expect(await screen.findByText("Claude is set up")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Manage in Settings" }));
   expect(navigation.open).toHaveBeenCalledWith({
@@ -1777,7 +1846,7 @@ it("asks for the key in Set up Claude when Claude is picked, then offers its mod
   });
 });
 
-it("keeps Claude's missing key as a row in the Harness group when Claude starts selected", async () => {
+it("holds a new Claude agent without a key, Model and Thinking disabled", async () => {
   const { type } = installed({ keySaved: false });
   const Configuration = type.CreateConfiguration;
   if (!Configuration) throw new Error("Missing creation configuration");
@@ -1791,122 +1860,198 @@ it("keeps Claude's missing key as a row in the Harness group when Claude starts 
       onChange={vi.fn()}
     />,
   );
-  const user = userEvent.setup();
-  const add = await screen.findByRole("button", { name: "Add Claude API key" });
   expect(screen.getByText("Harness row")).toBeVisible();
-  expect(screen.getByText("Claude needs an Anthropic API key")).toBeVisible();
-  // Nothing opens by itself: no harness was left to return to.
+  expect(await screen.findByRole("combobox", { name: "Model" })).toBeDisabled();
+  expect(screen.getByRole("combobox", { name: "Thinking" })).toBeDisabled();
   expect(screen.queryByRole("dialog")).toBeNull();
-  expect(screen.queryByText("Model")).toBeNull();
   expect(onReadyChange).toHaveBeenLastCalledWith(false);
-  await user.click(add);
-  const dialog = await screen.findByRole("dialog", { name: "Set up Claude" });
-  await user.type(
-    within(dialog).getByLabelText("Anthropic API key"),
-    "sk-ant-api03-pasted",
-  );
-  await user.click(within(dialog).getByRole("button", { name: "Save key" }));
-  expect(
-    await screen.findByRole("combobox", { name: "Model" }),
-  ).toBeInTheDocument();
-  expect(screen.queryByRole("dialog", { name: "Set up Claude" })).toBeNull();
-  expect(onReadyChange).toHaveBeenLastCalledWith(true);
 });
 
 it("offers an interactive sign-in in Set up Claude when the build has one", async () => {
   interactive.signIn = true;
   try {
     const { type } = installed({ keySaved: false });
-    const Configuration = type.CreateConfiguration;
-    if (!Configuration) throw new Error("Missing creation configuration");
-    const onDecline = vi.fn();
+    const Action = type.CreateAction;
+    if (!Action) throw new Error("Missing creation action");
     render(
       <ToastProvider>
-        <Configuration
-          config={DEFAULT_CONFIG}
-          disabled={false}
-          harnessControl={<div>Harness row</div>}
-          onDecline={onDecline}
-          onChange={vi.fn()}
-        />
+        <Action disabled={false} />
       </ToastProvider>,
     );
+    const user = userEvent.setup();
+    const open = await screen.findByRole("button", {
+      name: "Add Claude API key",
+    });
+    expect(open).toHaveTextContent("Sign in");
+    await user.click(open);
     const dialog = await screen.findByRole("dialog", { name: "Set up Claude" });
-    await userEvent
-      .setup()
-      .click(within(dialog).getByRole("button", { name: "Sign in" }));
+    await user.click(within(dialog).getByRole("button", { name: "Sign in" }));
     await waitFor(() =>
       expect(
         screen.queryByRole("dialog", { name: "Set up Claude" }),
       ).not.toBeInTheDocument(),
     );
-    expect(
-      await screen.findByRole("combobox", { name: "Model" }),
-    ).toBeInTheDocument();
     expect(await screen.findByText("Claude is set up")).toBeVisible();
-    expect(onDecline).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "Add Claude API key" }),
+    ).toBeNull();
   } finally {
     interactive.signIn = false;
   }
 });
 
-it("offers no sign-in button where the key's form is the setup", async () => {
-  const { type } = installed({ keySaved: false });
-  const Configuration = type.CreateConfiguration;
-  if (!Configuration) throw new Error("Missing creation configuration");
-  render(
-    <Configuration
-      config={DEFAULT_CONFIG}
-      disabled={false}
-      harnessControl={<div>Harness row</div>}
-      onDecline={vi.fn()}
-      onChange={vi.fn()}
-    />,
-  );
-  const dialog = await screen.findByRole("dialog", { name: "Set up Claude" });
-  expect(within(dialog).getByLabelText("Anthropic API key")).toBeVisible();
-  expect(within(dialog).queryByRole("button", { name: "Sign in" })).toBeNull();
+it("stops a sign-in still running when Set up Claude closes", async () => {
+  interactive.signIn = true;
+  let release = () => {};
+  interactive.hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const cancel = vi.spyOn(ClaudeSetup.prototype, "cancel");
+  try {
+    const { type } = installed({ keySaved: false });
+    const Action = type.CreateAction;
+    if (!Action) throw new Error("Missing creation action");
+    render(<Action disabled={false} />);
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: "Add Claude API key" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Set up Claude" });
+    await user.click(within(dialog).getByRole("button", { name: "Sign in" }));
+    await waitFor(() =>
+      expect(
+        within(dialog).queryByRole("button", { name: "Sign in" }),
+      ).toBeNull(),
+    );
+    expect(cancel).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Set up Claude" }),
+      ).toBeNull(),
+    );
+    expect(cancel).toHaveBeenCalledTimes(1);
+  } finally {
+    release();
+    interactive.hold = undefined;
+    interactive.signIn = false;
+    cancel.mockRestore();
+  }
+});
+
+it("restores pending sign-in controls after unmount and can cancel and retry", async () => {
+  interactive.signIn = true;
+  interactive.process = true;
+  const cancel = vi.spyOn(ClaudeSetup.prototype, "cancel");
+  let view: ReturnType<typeof render> | undefined;
+  const processes: { kill(): Promise<void> }[] = [];
+  try {
+    const { type, spawn } = installed({ keySaved: false });
+    const Action = type.CreateAction;
+    if (!Action) throw new Error("Missing creation action");
+    const user = userEvent.setup();
+    view = render(<Action disabled={false} />);
+    await user.click(
+      await screen.findByRole("button", { name: "Add Claude API key" }),
+    );
+    let dialog = await screen.findByRole("dialog", { name: "Set up Claude" });
+    await user.click(within(dialog).getByRole("button", { name: "Sign in" }));
+    const signIns = () =>
+      spawn.mock.calls.filter(
+        ([, options]) => options?.args?.slice(-2).join(" ") === "auth login",
+      );
+    await waitFor(() => expect(signIns()).toHaveLength(1));
+    const index = spawn.mock.calls.findIndex(
+      ([, options]) => options?.args?.slice(-2).join(" ") === "auth login",
+    );
+    const process = await spawn.mock.results[index]?.value;
+    if (!process) throw new Error("Sign-in process missing");
+    processes.push(process);
+    const kill = vi.spyOn(process, "kill");
+    view.unmount();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(kill).not.toHaveBeenCalled();
+
+    view = render(<Action disabled={false} />);
+    dialog = await screen.findByRole("dialog", { name: "Set up Claude" });
+    expect(
+      within(dialog).queryByRole("button", { name: "Sign in" }),
+    ).toBeNull();
+    expect(signIns()).toHaveLength(1);
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await process.exited;
+    expect(kill).toHaveBeenCalledTimes(1);
+    await user.click(
+      await within(dialog).findByRole("button", { name: "Sign in" }),
+    );
+    await waitFor(() => expect(signIns()).toHaveLength(2));
+    const secondIndex = spawn.mock.calls.findIndex(
+      ([, options], next) =>
+        next > index && options?.args?.slice(-2).join(" ") === "auth login",
+    );
+    const secondProcess = await spawn.mock.results[secondIndex]?.value;
+    if (!secondProcess) throw new Error("Second sign-in process missing");
+    processes.push(secondProcess);
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await within(dialog).findByRole("button", { name: "Sign in" });
+    expect(nativeKey.saved).toBe(false);
+  } finally {
+    for (const process of processes) await process.kill();
+    view?.unmount();
+    interactive.process = false;
+    interactive.signIn = false;
+    cancel.mockRestore();
+  }
 });
 
 it("lets an agent on an execution target be edited without a key on this computer", async () => {
   const { type } = installed({ keySaved: false, remote: true });
   const Configuration = type.CreateConfiguration;
-  if (!Configuration) throw new Error("Missing creation configuration");
+  const Action = type.CreateAction;
+  if (!Configuration || !Action) throw new Error("Missing creation fields");
   const onReadyChange = vi.fn();
+  const edited = { ...agent(), executionBinding: { provider: "nexus/blox" } };
   render(
-    <Configuration
-      agent={{ ...agent(), executionBinding: { provider: "nexus/blox" } }}
-      config={DEFAULT_CONFIG}
-      disabled={false}
-      harnessControl={<div>Harness row</div>}
-      onReadyChange={onReadyChange}
-      onDecline={vi.fn()}
-      onChange={vi.fn()}
-    />,
+    <>
+      <Action agent={edited} disabled={false} />
+      <Configuration
+        agent={edited}
+        config={DEFAULT_CONFIG}
+        disabled={false}
+        harnessControl={<div>Harness row</div>}
+        onReadyChange={onReadyChange}
+        onChange={vi.fn()}
+      />
+    </>,
   );
   await waitFor(() => expect(onReadyChange).toHaveBeenLastCalledWith(true));
-  expect(screen.queryByText("Claude needs an Anthropic API key")).toBeNull();
-  expect(screen.queryByRole("dialog", { name: "Set up Claude" })).toBeNull();
   expect(screen.getByText("Model")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Add Claude API key" }),
+  ).toBeNull();
 });
 
 it("still asks for the key to edit an agent that runs on this computer", async () => {
   const { type } = installed({ keySaved: false });
   const Configuration = type.CreateConfiguration;
-  if (!Configuration) throw new Error("Missing creation configuration");
+  const Action = type.CreateAction;
+  if (!Configuration || !Action) throw new Error("Missing creation fields");
   const onReadyChange = vi.fn();
   render(
-    <Configuration
-      agent={agent()}
-      config={DEFAULT_CONFIG}
-      disabled={false}
-      harnessControl={<div>Harness row</div>}
-      onReadyChange={onReadyChange}
-      onChange={vi.fn()}
-    />,
+    <>
+      <Action agent={agent()} disabled={false} />
+      <Configuration
+        agent={agent()}
+        config={DEFAULT_CONFIG}
+        disabled={false}
+        harnessControl={<div>Harness row</div>}
+        onReadyChange={onReadyChange}
+        onChange={vi.fn()}
+      />
+    </>,
   );
   expect(
-    await screen.findByText("Claude needs an Anthropic API key"),
+    await screen.findByRole("button", { name: "Add Claude API key" }),
   ).toBeVisible();
   expect(onReadyChange).toHaveBeenLastCalledWith(false);
 });
@@ -2004,7 +2149,11 @@ it("separates identity fields from runtime settings without changing the stored 
 });
 
 it.each([
-  { available: false, action: "Install Claude", title: "Set up Claude" },
+  {
+    available: false,
+    action: "Install integration",
+    title: "Claude integration",
+  },
 ])(
   "keeps failed Claude $action output in its open dialog",
   async ({ available, action, title }) => {
