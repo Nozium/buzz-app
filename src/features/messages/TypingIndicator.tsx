@@ -27,7 +27,11 @@ import {
   workingRequests,
   type CurrentActivity,
 } from "../agents/current-activity";
-import { localWorkLabel, type LocalWork } from "../agents/local-activity";
+import {
+  localWorkLabel,
+  localWorkRoot,
+  type LocalWork,
+} from "../agents/local-activity";
 import { AgentResponsePreview } from "./AgentResponsePreview";
 import { RemoteAgentHint, RemoteWorkIcon } from "./RemoteAgentHint";
 import { remoteWorkDetail } from "../agents/execution-location";
@@ -442,7 +446,7 @@ export function TypingIndicator({
       workRoot ??
       (work?.soloChat && !work.thread
         ? (threadRootId ?? null)
-        : (work?.threadRootId ??
+        : ((work ? localWorkRoot(work) : undefined) ??
           threadRootId ??
           (detail.roots.length === 1 ? detail.roots[0] : undefined)));
     const conversation = conversationRoot

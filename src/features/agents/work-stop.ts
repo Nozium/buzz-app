@@ -1,7 +1,7 @@
 import type { RelaySession } from "../relay/session";
 import type { Agents } from "./service";
 import type { RequestWork } from "./request-work";
-import { localActivity, type LocalWork } from "./local-activity";
+import { localActivity, localWorkRoot, type LocalWork } from "./local-activity";
 import { activityTranscript } from "./activity-transcript";
 
 export type WorkStopAgents = Pick<Agents, "interruptible" | "interrupt">;
@@ -105,7 +105,7 @@ export function conversationWorkStops(
           {
             control,
             work,
-            threadRootId: continuous ? null : work.threadRootId,
+            threadRootId: continuous ? null : localWorkRoot(work),
           },
         ]
       : [];

@@ -1,4 +1,4 @@
-import { localActivity, localWorkLabel } from "./local-activity";
+import { localActivity, localWorkLabel, localWorkRoot } from "./local-activity";
 import type { RelaySession } from "../relay/session";
 import type { TypingEntry } from "../relay/typing";
 import { activityTranscript, type ToolItem } from "./activity-transcript";
@@ -171,7 +171,7 @@ export function currentActivity(
           .map((row) =>
             row.soloChat && !row.thread && !threadRootId
               ? null
-              : row.threadRootId,
+              : (localWorkRoot(row) ?? null),
           ),
       ),
     ];
