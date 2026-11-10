@@ -919,9 +919,19 @@ available rather than silently discarding it.
   does not prove an agent is ready or running. **Remove as bestie** in the
   Bestie's card menu asks, then saves no Bestie to the account. On desktop it
   works on every device, including one where the agent doesn't run.
-- With the **Bestie** plugin on and no saved choice, **Choose your bestie agent**
-  offers a searchable agent picker and **Create agent**. Choosing a known remote
-  agent, including one created through Builderlab, asks for confirmation:
+- With the **Bestie** plugin on, open **Create an agent** in the left navigation
+  when you haven’t chosen a Bestie. You can create one or choose an existing agent.
+  The placeholder cycles through character avatars; reduced motion keeps it still.
+  If you have no eligible agents in this community, **Create your first agent**
+  offers **Create an agent**, which opens the usual form for name, avatar and
+  provider settings. Otherwise, **Choose your bestie agent** offers a searchable
+  picker and **Create agent**. Creating and choosing your Bestie opens its private DM;
+  merely opening setup does not create an agent or send a welcome message.
+  After creating your first agent here, the pinned DM shows a local welcome on
+  this device. It is not a sent message and does not start an agent response;
+  send a message when you’re ready to begin.
+  Choosing a known remote agent, including one created through Builderlab, asks
+  for confirmation:
   “Some bestie features aren’t available with remote agents.” Cancel leaves the
   Bestie choice unchanged; it does not delete a newly created agent. A hosted
   Bestie whose provider holds its instructions (Builderlab does) shows a
@@ -1003,14 +1013,15 @@ available rather than silently discarding it.
   its speaker. Thread work appears inside its thread; the channel’s reply summary
   still shows when an agent is working there. While the activity under your
   message shows an agent working, it is that agent's only working indicator.
+  Once its recorded updates show that work, they carry the dots instead, until
+  a newer message arrives below them.
   Otherwise dots remain at the end of the conversation while agents work,
   alongside current step details when available. With Reduce Motion enabled,
   the dots stay still. For one agent, click the live activity bubble to open
   its activity; hover or focus the bubble to reveal **Stop** (always visible on
   touch screens). For several agents, open or hover the bubble to choose an
   agent’s activity or stop an individual request. Expand recorded work for its
-  activity controls. The live indicator
-  keeps its controls while recorded updates are visible. In a Solo chat, follow-up messages share one live row per agent. Separate thread work keeps its own row. Stop availability depends on the agent type.
+  activity controls. In a Solo chat, follow-up messages share one live row per agent. Separate thread work keeps its own row. Stop availability depends on the agent type.
 - Agent-to-agent messages stay in the conversation as collapsed history after
   work finishes or you reopen a thread. Expand them to read dispatches, handoffs,
   and results. The working indicator shows current activity separately.
@@ -1097,9 +1108,10 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   **Update** review showing access changes and any change to the branch or tag
   later updates follow, and the plugin keeps its enabled or disabled state.
   Other links to an installed plugin offer **Open in Buzz**.
-- **Reminders** and **Workflows** start off on fresh installs. Upgrades preserve
-  their previous state, including when no choice was saved. Enable or disable
-  them in **Manage plugins**; saved choices persist.
+- **Bestie** starts on, and **Reminders** and **Workflows** start off, on fresh
+  local installs. Upgrades preserve their previous state, including Bestie off
+  when no choice was saved. Enable or disable them in **Manage plugins**; saved
+  choices persist. A deliberate plugin-settings reset uses the current defaults.
 - A plugin's details in Manage plugins link to the Settings sections that hold
   its settings: sections it adds, such as GitHub comment authors, and Decisions
   API for a decision provider, such as TypeSafe. Only sections the Settings
