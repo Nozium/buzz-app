@@ -1755,7 +1755,8 @@ async fn bound_exchange_restore_and_sign_out_keep_then_retire_the_same_device_ke
         record.device_key
     );
     restored.sign_out(None).await;
-    for request in std::mem::take(&mut *restored.0.revocations.lock().unwrap()) {
+    let requests = std::mem::take(&mut *restored.0.revocations.lock().unwrap());
+    for request in requests {
         request.await.unwrap();
     }
     assert!(dpop::DeviceKey::load(&handle, config::DpopMode::Software).is_err());
@@ -1924,11 +1925,13 @@ async fn enabling_dpop_then_signing_out_does_not_restore_a_bearer_after_rollback
         )
         .await
         .unwrap();
-    for request in std::mem::take(&mut *bound.0.revocations.lock().unwrap()) {
+    let requests = std::mem::take(&mut *bound.0.revocations.lock().unwrap());
+    for request in requests {
         request.await.unwrap();
     }
     bound.sign_out(None).await;
-    for request in std::mem::take(&mut *bound.0.revocations.lock().unwrap()) {
+    let requests = std::mem::take(&mut *bound.0.revocations.lock().unwrap());
+    for request in requests {
         request.await.unwrap();
     }
     assert!(memory.raw.lock().unwrap().is_none());
@@ -2014,12 +2017,14 @@ async fn disabling_dpop_retires_the_stored_bound_credential_and_its_key() {
         )
         .await
         .unwrap();
-    for request in std::mem::take(&mut *bearer.0.revocations.lock().unwrap()) {
+    let requests = std::mem::take(&mut *bearer.0.revocations.lock().unwrap());
+    for request in requests {
         request.await.unwrap();
     }
     assert!(dpop::DeviceKey::load(&handle, config::DpopMode::Software).is_err());
     bearer.sign_out(None).await;
-    for request in std::mem::take(&mut *bearer.0.revocations.lock().unwrap()) {
+    let requests = std::mem::take(&mut *bearer.0.revocations.lock().unwrap());
+    for request in requests {
         request.await.unwrap();
     }
     let rollback = mode_host(memory, &base, Some(config::DpopMode::Software));
@@ -2083,7 +2088,8 @@ async fn replacing_another_copys_record_also_retires_the_in_memory_bound_key() {
         )
         .await
         .unwrap();
-    for request in std::mem::take(&mut *owner.0.revocations.lock().unwrap()) {
+    let requests = std::mem::take(&mut *owner.0.revocations.lock().unwrap());
+    for request in requests {
         request.await.unwrap();
     }
     for old in [held, other] {

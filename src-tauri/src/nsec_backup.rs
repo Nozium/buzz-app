@@ -840,6 +840,7 @@ impl NsecBackupHost {
         });
         Ok(RestoreStarted { attempt: id })
     }
+    #[allow(clippy::too_many_arguments)]
     async fn recover(
         &self,
         epoch: u64,
