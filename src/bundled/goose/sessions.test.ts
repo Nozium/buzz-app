@@ -37,6 +37,8 @@ const setup = (
     started,
     tags,
     wrap,
+    fingerprint = (settings: Launch) =>
+      JSON.stringify([settings.workspace, settings.systemPrompt]),
   }: Readonly<{
     pool?: ServerPool;
     started?: SessionsOptions["started"];
@@ -48,6 +50,7 @@ const setup = (
     silent?: readonly string[];
     /** Wraps the fake's `spawn`, as `gated(…).wrap` does. */
     wrap?: (spawn: ReturnType<typeof fakeSpawn>["spawn"]) => Spawn;
+    fingerprint?: (settings: Launch) => string;
   }> = {},
 ) => {
   const fake = fakeSpawn({
@@ -85,8 +88,7 @@ const setup = (
       ...(tags && { tags }),
       launch: async () => settings,
       choice: () => choice,
-      fingerprint: () =>
-        JSON.stringify([settings.workspace, settings.systemPrompt]),
+      fingerprint: () => fingerprint(settings),
     });
     return {
       sessions,
@@ -271,6 +273,39 @@ describe("AgentSessions", () => {
     await flush(30);
     expect(fake.geese[0]?.closed).toEqual(["session-1"]);
     expect(sessions.seen("a")).toBe(0);
+  });
+
+  it("gives an idle session a changed system prompt in place, keeping its conversation", async () => {
+    const { fake, sessions, change } = setup({}, false, {
+      fingerprint: (settings) => settings.workspace,
+    });
+    const fresh = vi.fn(async () => "everything so far");
+    await sessions.deliver("a", "one", 1, { fresh });
+    change({ systemPrompt: "newer" });
+    await sessions.deliver("a", "two", 2, { fresh });
+    const [goose] = fake.geese;
+    expect(goose?.closed).toEqual([]);
+    expect(goose?.opened).toHaveLength(1);
+    expect(goose?.prompts.get("session-1")).toBe("newer");
+    expect(goose?.turns.at(-1)?.text).toBe("two");
+    expect(fresh).not.toHaveBeenCalled();
+  });
+
+  it("gives a busy session a changed system prompt as its next turn starts", async () => {
+    const { fake, sessions, change } = setup({}, true, {
+      fingerprint: (settings) => settings.workspace,
+    });
+    const first = sessions.deliver("a", "one", 1);
+    await flush(30);
+    change({ systemPrompt: "newer" });
+    const [goose] = fake.geese;
+    expect(goose?.prompts.get("session-1")).toBe("prompt");
+    if (goose) goose.hold = false;
+    goose?.turns[0]?.finish();
+    await first;
+    await sessions.deliver("a", "two", 2);
+    expect(goose?.closed).toEqual([]);
+    expect(goose?.prompts.get("session-1")).toBe("newer");
   });
 
   it("shows a reopened conversation everything again", async () => {

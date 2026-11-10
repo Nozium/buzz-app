@@ -347,6 +347,15 @@ export class AcpProcess {
     return session;
   }
 
+  /** Gives an open session `systemPrompt` in place of the one it was opened
+   * with, keeping its conversation. False when the harness cannot, and only a
+   * new session would run on it. */
+  async reprompt(session: AcpSession, systemPrompt: string) {
+    if (!this.hooks.systemPrompt) return false;
+    await this.hooks.systemPrompt(this, session.id, systemPrompt);
+    return true;
+  }
+
   private names() {
     const { names } = this.hooks;
     this.naming ??= names ? names(this) : Promise.resolve(false);

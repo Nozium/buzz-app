@@ -139,7 +139,9 @@ export type SessionsOptions = Readonly<{
   /** The agent's provider, model and thinking level now, which each new
    * turn runs on. */
   choice(): Choice;
-  /** Changes when a setting a session was opened with has changed. */
+  /** Changes when a setting only a new session runs on has changed. A
+   * changed system prompt alone is given to an idle session in place, where
+   * the harness can take it. */
   fingerprint(): string;
   /** Where each conversation's last use is saved. */
   store?: SessionStore;
@@ -163,6 +165,8 @@ type Live = {
   session: AcpSession;
   process: AcpProcess;
   fingerprint: string;
+  /** The system prompt it runs on. */
+  systemPrompt: string;
   slot: Slot;
   /** When it last took in a message or ended a turn. */
   at: number;
@@ -308,6 +312,22 @@ export class AgentSessions {
       ) {
         this.drop(key, live);
         break;
+      }
+      // Checked as each turn starts: a busy session takes it at its next.
+      if (!live.session.busy) {
+        const { systemPrompt } = await this.options.launch();
+        if (this.live.get(key) !== live) continue;
+        if (systemPrompt !== live.systemPrompt) {
+          const updated = await live.process
+            .reprompt(live.session, systemPrompt)
+            .catch(() => false);
+          if (!updated) {
+            if (this.live.get(key) === live) this.drop(key, live);
+            continue;
+          }
+          live.systemPrompt = systemPrompt;
+          continue;
+        }
       }
       return this.answer(
         key,
@@ -609,6 +629,7 @@ export class AgentSessions {
           session: opened,
           process,
           fingerprint,
+          systemPrompt: launch.systemPrompt,
           slot,
           at: Date.now(),
         });
@@ -617,7 +638,14 @@ export class AgentSessions {
     const released = () => pool.release(slot);
     void (session.server?.closed ?? Promise.resolve()).then(released, released);
     session.conversation = key;
-    const live = { session, process, fingerprint, slot, at: Date.now() };
+    const live = {
+      session,
+      process,
+      fingerprint,
+      systemPrompt: launch.systemPrompt,
+      slot,
+      at: Date.now(),
+    };
     if (fingerprint !== this.options.fingerprint() && !this.disposed) {
       // Settings saved while it opened: it would work with the old ones.
       void this.close(live);
