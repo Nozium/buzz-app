@@ -20,10 +20,8 @@ import { useToastNotification } from "../shared/design-system/ui/Toast";
 /** Device inventory, independent of the selected community and its connection. */
 export function ManageCommunitiesSettings({
   communities,
-  onPending,
 }: {
   communities: Communities;
-  onPending?: ((pending: boolean) => void) | undefined;
 }) {
   const client = useSyncExternalStore(
     communities.subscribe,
@@ -48,7 +46,6 @@ export function ManageCommunitiesSettings({
     const viewer = client.viewer;
     busy.current = true;
     setPending(true);
-    onPending?.(true);
     try {
       const result = await removeCommunityFromDevice(communities, removing);
       if (communities.snapshot().viewer === viewer)
@@ -70,7 +67,6 @@ export function ManageCommunitiesSettings({
       if (mounted.current) {
         setPending(false);
         setRemoving(null);
-        onPending?.(false);
       }
     }
   };

@@ -55,16 +55,12 @@ function setup(selected: string | null = primary.id) {
   } as unknown as Communities;
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
-  const onPending = vi.fn();
   render(
     <ToastProvider>
-      <ManageCommunitiesSettings
-        communities={communities}
-        onPending={onPending}
-      />
+      <ManageCommunitiesSettings communities={communities} />
     </ToastProvider>,
   );
-  return { user: userEvent.setup(), communities, leave, fetch, onPending };
+  return { user: userEvent.setup(), communities, leave, fetch };
 }
 const removeButton = (name = "Primary") =>
   screen.getByRole("button", {
@@ -134,7 +130,6 @@ it("blocks repeated removal and dismissal while pending, then permits retry afte
   const trigger = removeButton();
   await h.user.click(trigger);
   await h.user.click(confirm());
-  expect(h.onPending).toHaveBeenLastCalledWith(true);
   expect(
     within(screen.getByRole("alertdialog")).getByRole("button", {
       name: "Cancel",
@@ -148,7 +143,6 @@ it("blocks repeated removal and dismissal while pending, then permits retry afte
     /Couldn’t remove Primary.*Device storage unavailable/,
   );
   await waitFor(() => expect(trigger).toHaveFocus());
-  expect(h.onPending).toHaveBeenLastCalledWith(false);
   expect(trigger).toBeEnabled();
   await h.user.click(trigger);
   await h.user.click(confirm());

@@ -1395,7 +1395,6 @@ export function Settings({
           <ManageCommunitiesSettings
             key={client.viewer}
             communities={communities}
-            onPending={onDeparturePending}
           />
         )}
         <div hidden={selected !== "appearance"}>
