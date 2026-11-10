@@ -37,6 +37,10 @@ export type ChannelSummary = Readonly<{
   readOnly?: true;
   /** Downloaded membership is display-only pending current relay confirmation. */
   cached?: true;
+  /** Metadata the relay has not confirmed since it was downloaded or since the
+   * stream last dropped: the channel may have turned private, so its saved
+   * visibility grants no one reading. */
+  metadataCached?: true;
   /** A Solo chat this device is starting; the relay has not confirmed it yet. */
   pending?: true;
   /** Members-only channel omitted from directories (NIP-29 `hidden`), such as a DM. */
@@ -136,6 +140,9 @@ export type ChannelMessage = Readonly<{
   /** Signed `audience` tag of the original event: `agents` is coordination
    * between agents, shown quietly. Absent means everyone; unknown values too. */
   audience?: "agents";
+  /** Signed `buzz:request` tag: the agent's claim of the triggering message
+   * this update belongs to, separate from its flattened reply link. */
+  request?: string;
   /** Signed display metadata for an automatic execution-failure reply. */
   notice?: "execution-failure";
   /** Original kind 40008. Untrusted display metadata; content stays a raw patch. */
@@ -221,8 +228,13 @@ export type ChannelWindow = Readonly<{
   hasNewer?: boolean | undefined;
   loadingNewer?: boolean | undefined;
 }>;
-/** Post-write discovery opts into writer reads; browsing keeps the default. */
-export type ChannelReadOptions = ReadOptions & Pick<ReadFilter, "consistency">;
+/** Post-write discovery opts into writer reads; browsing keeps the default.
+ * `viewerLookup` marks a lookup the viewer's own action asks for (a name
+ * search, label lookup, mounted link or search read): the channels it finds
+ * become known to the viewer's traffic. Rechecks and agents' lookups leave
+ * that as it was. */
+export type ChannelReadOptions = ReadOptions &
+  Pick<ReadFilter, "consistency"> & { viewerLookup?: boolean };
 export type PublicChannelSearch = Readonly<{
   channels: readonly ChannelSummary[];
   /** The metadata read stopped at its bound, so some channels were not checked. */
@@ -314,6 +326,11 @@ export interface ChannelQueries {
   readDirectory?(options?: {
     signal?: AbortSignal | undefined;
   }): Promise<{ partial: boolean }>;
+  /** Whether the relay holds any stream or forum channel this viewer can
+   * see, open, private or archived; DMs, Solo chats and system channels do
+   * not count, though a full batch of only Solo chats counts as not empty.
+   * One read of a few events. Names no channel, never grants access. */
+  anyChannel?(options?: { signal?: AbortSignal | undefined }): Promise<boolean>;
   /** Member counts for browsing, from a joined channel's roster or an open
    * channel's relay-signed one, kept a few minutes. A channel without a
    * roster is left out of `counts`; `failed` names the ids whose read
@@ -335,6 +352,10 @@ export interface ChannelQueries {
    * withheld answers) and when it ends. Absent when no lookup can run, as in
    * a cached-only store. */
   refer?(channelId: string): () => void;
+  /** A cached-only store: saved conversations while Buzz can't reach the
+   * relay. It reads nothing, so `loadOlder` adds no rows, until a connected
+   * session replaces it. */
+  readonly cachedOnly?: true;
   /** Exact re-read of one already-listed channel's roster, merged into the
    * ready list. `resolve` admits channels the list lacks; this confirms a
    * membership change on one it already carries, without a full rediscovery.
