@@ -297,6 +297,8 @@ mod macos {
         // Returns false while the guest is not yet back where it can be placed.
         exited: Box<dyn Fn() -> bool>,
         retries: std::cell::Cell<u8>,
+        // From a fullscreen change until the guest is back in its window.
+        returning: std::cell::Cell<bool>,
     }
 
     // About two seconds for WebKit to put the guest back after its exit.
@@ -319,6 +321,7 @@ mod macos {
                 _change: Option<&AnyObject>,
                 _context: *mut c_void,
             ) {
+                self.ivars().returning.set(true);
                 // WebKit can report a change from inside a call that holds the
                 // session list, such as dropping the guest; answer from the run loop.
                 let _: () = unsafe {
@@ -340,14 +343,16 @@ mod macos {
                 }
                 if (ivars.exited)() {
                     ivars.retries.set(0);
+                    ivars.returning.set(false);
                     return;
                 }
                 let retries = ivars.retries.get();
                 if retries >= FULLSCREEN_RETRIES {
                     ivars.retries.set(0);
+                    ivars.returning.set(false);
                     eprintln!(
                         "Buzz Browser: a page left fullscreen but did not return to the window; \
-                         its panel updates wait for the next one"
+                         Buzz places it as usual from the next panel update"
                     );
                     return;
                 }
@@ -378,6 +383,14 @@ mod macos {
     pub struct Fullscreen(Option<Retained<FullscreenObserver>>);
 
     impl Fullscreen {
+        /// Whether the guest has changed fullscreen and may not be back in its
+        /// window yet.
+        pub fn returning(&self) -> bool {
+            self.0
+                .as_ref()
+                .is_some_and(|observer| observer.ivars().returning.get())
+        }
+
         /// Applies held requests once the guest is back in its window.
         pub fn reconcile_soon(&self) {
             if let Some(observer) = &self.0 {
@@ -421,6 +434,7 @@ mod macos {
             view: Retained::into_super(view),
             exited: Box::new(exited),
             retries: std::cell::Cell::new(0),
+            returning: std::cell::Cell::new(false),
         });
         let observer: Retained<FullscreenObserver> = unsafe { msg_send![super(allocated), init] };
         let key = NSString::from_str(FULLSCREEN_STATE);
@@ -690,6 +704,10 @@ pub(super) struct Fullscreen;
 
 #[cfg(not(target_os = "macos"))]
 impl Fullscreen {
+    pub(super) fn returning(&self) -> bool {
+        false
+    }
+
     pub(super) fn reconcile_soon(&self) {}
 }
 

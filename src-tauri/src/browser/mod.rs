@@ -175,7 +175,8 @@ impl BrowserSession {
         // window. WebKit can also report the exit before the page is back in
         // the panel. The latest request applies once WebKit gives the page back.
         let fullscreen = platform::fullscreen(&self.guest);
-        let away = fullscreen || !platform::in_host_window(&self.guest, &self.host);
+        let away = fullscreen
+            || (self.fullscreen.returning() && !platform::in_host_window(&self.guest, &self.host));
         let Some((bounds, visible)) = self.presentation.request(away, bounds, visible) else {
             if !fullscreen {
                 // No fullscreen change is left to report its return.
