@@ -39,6 +39,7 @@ import {
 } from "./InboxRow";
 import { inboxTarget } from "./route";
 import styles from "./InboxPreview.module.css";
+import { useInboxRecovery } from "./useInboxRecovery";
 
 /** Rows the card renders and enriches; the Activity page holds the rest. */
 const maxRows = 50;
@@ -132,6 +133,7 @@ function InboxPreviewCard({
     session.unread.sync,
     session.unread.sync,
   );
+  const recovered = useInboxRecovery(session, { list, inbox, feed, reactions });
   const viewScope = session.scope;
   const [unreadOnly, setUnreadOnlyState] = useState(
     () => readView<unknown>(viewScope, unreadOnlyKey, false) === true,
@@ -222,14 +224,20 @@ function InboxPreviewCard({
     list.status === "loading" ||
     inbox.status === "loading" ||
     feed.status === "loading" ||
-    reactions.status === "loading";
+    reactions.status === "loading" ||
+    // A connectivity failure recovery is retrying is not an empty list.
+    recovered.held;
   // As on the page, an empty result is only shown once activity was checked.
   const checked =
     inbox.status === "ready" ||
     feed.status === "ready" ||
     reactions.status === "ready";
   const failure =
-    list.error ?? inbox.error ?? feed.error ?? reactions.error ?? sync.error;
+    recovered.list ??
+    recovered.inbox ??
+    recovered.feed ??
+    recovered.reactions ??
+    sync.error;
   const retry = async () => {
     if (list.status !== "ready") {
       setRefreshAfterRoster(true);
