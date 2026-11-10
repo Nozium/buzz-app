@@ -152,6 +152,7 @@ export function ChannelInventory({
   cached,
   layoutReady = true,
   connectionError,
+  connectionRetrying,
   scope,
   viewer,
   sidebarSections: contributedSections,
@@ -167,6 +168,8 @@ export function ChannelInventory({
   /** Other inventories sharing this viewport must settle before restoring it. */
   layoutReady?: boolean;
   connectionError?: string | undefined;
+  /** The connection retries by itself; the app's one notice reports it. */
+  connectionRetrying?: boolean | undefined;
   scope: string;
   viewer?: string | undefined;
   sidebarSections?: SidebarSections | undefined;
@@ -1642,7 +1645,7 @@ export function ChannelInventory({
     ),
     after: (
       <>
-        {cached && connectionError && (
+        {cached && connectionError && !connectionRetrying && (
           <p className={styles.preferenceNotice} role="status">
             Offline · Showing saved conversations.
             <Button onClick={relay.retry}>Retry connection</Button>
