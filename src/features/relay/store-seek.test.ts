@@ -195,6 +195,29 @@ afterEach(() => {
   current = undefined;
 });
 
+it("keeps the next older edge when an unanchored page reaches the byte budget", async () => {
+  const author = keypair();
+  const incoming = Array.from({ length: 20 }, (_, i) =>
+    message(author, "c", `heavy ${i} ${"x".repeat(1500)}`, T0 + i * HOUR),
+  );
+  const h = setup({
+    count: 60,
+    maxHistoryRows: 40,
+    maxHistoryBytes: byteSize(incoming) + 100,
+  });
+  h.history.splice(0, 20, ...incoming);
+  await h.open();
+  const seen = new Set(h.window().rows.map((row) => row.id));
+  for (let step = 0; h.window().hasMore && step < 8; step++) {
+    h.channels.loadOlder("c");
+    await vi.waitFor(() => expect(h.window().loadingOlder).toBe(false));
+    expect(h.window().error).toBeUndefined();
+    for (const row of h.window().rows) seen.add(row.id);
+  }
+  expect(h.window().hasMore).toBe(false);
+  expect([...seen].sort()).toEqual(h.history.map((row) => row.id).sort());
+});
+
 it("seek installs a segment and resolves the first row at or after from", async () => {
   const h = setup();
   await h.open();

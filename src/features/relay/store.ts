@@ -1420,7 +1420,9 @@ export function createChannelStore(
     const previous = new Set(state.events.map((event) => event.id));
     const edge = rows.findIndex((event) => previous.has(event.id));
     const slice = (count: number) => {
-      let start = Math.max(0, anchor - count + 1);
+      // Without a reader anchor, keep the incoming edge next to the old window.
+      // Discarding it would advance the cursor past rows never shown.
+      let start = Math.max(0, (anchor < 0 ? edge : anchor + 1) - count);
       // Hand off an anchor that would discard every row beyond the old edge.
       if (edge > 0 && start >= edge) start = Math.max(0, edge - count);
       return rows.slice(start, start + count);
