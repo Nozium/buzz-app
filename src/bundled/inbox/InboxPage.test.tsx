@@ -5381,3 +5381,15 @@ it("fog is keyed by viewer and relay: the same viewer on another relay sees none
   await screen.findByText("A thread update");
   await waitFor(() => expect(fogged()).toBe(true));
 });
+
+it("Fog from the row menu returns focus to its row", async () => {
+  const h = await fogFixture();
+  const open = () =>
+    within(threadRow()).getByRole("button", { name: /^Open / });
+  open().focus();
+  fireEvent.contextMenu(open());
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Fog" }));
+  await waitFor(() => expect(fogged()).toBe(true));
+  expect(h.readSteps).toHaveLength(1);
+  await waitFor(() => expect(open()).toHaveFocus());
+});
