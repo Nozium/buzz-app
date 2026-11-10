@@ -165,3 +165,50 @@ it("does not retire recovery on mismatched signed ancestry or a cancelled retry"
   );
   expect(h.storage.load()[0]?.recovery).toBeDefined();
 });
+
+it("keeps two children of the same parent under distinct destination recovery keys", async () => {
+  const h = setup();
+  const owner = h.open();
+  await owner.outbox.ready();
+  const other = "33333333-3333-4333-8333-333333333333";
+  const first = owner.writes.create(
+    id,
+    "First",
+    undefined,
+    false,
+    [],
+    undefined,
+    [],
+    fork,
+  );
+  const second = owner.writes.create(
+    other,
+    "Second",
+    undefined,
+    false,
+    [],
+    undefined,
+    [],
+    fork,
+  );
+  await vi.waitFor(() =>
+    expect(
+      h.storage.load().filter((item) => item.delivery === "accepted"),
+    ).toHaveLength(2),
+  );
+  expect(await owner.outbox.recovery(`solo-fork:${id}`)).toMatchObject({
+    event: { id: first },
+  });
+  expect(await owner.outbox.recovery(`solo-fork:${other}`)).toMatchObject({
+    event: { id: second },
+  });
+  h.read.mockResolvedValue([]);
+  await expect(owner.writes.resumeFork(other, true)).rejects.toThrow(
+    "signed metadata",
+  );
+  expect(owner.publish.mock.calls.map(([event]) => event.id)).toEqual([
+    first,
+    second,
+    second,
+  ]);
+});
