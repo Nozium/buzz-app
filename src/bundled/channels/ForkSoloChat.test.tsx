@@ -313,6 +313,12 @@ it("reports a stranded pre-enqueue fence loudly and retries evidence, never sign
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Submission unresolved",
   );
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Retained create: unavailable. Destination: no claim found.",
+  );
+  expect(
+    screen.getByText(/Last checked:/).querySelector("time"),
+  ).toHaveAttribute("datetime");
   expect(h.open).not.toHaveBeenCalled();
   expect(h.start).not.toHaveBeenCalled();
   h.confirmDestination();
@@ -362,4 +368,19 @@ it("revokes a submission check when its visit is left", async () => {
   expect(h.open).not.toHaveBeenCalled();
   expect(h.start).not.toHaveBeenCalled();
   expect(h.dismiss).not.toHaveBeenCalled();
+});
+
+it("reports failed evidence reads as unknown, not absent", async () => {
+  const h = setup();
+  writeView(scope, key, { title: "Fork", agent, submitted: true });
+  h.resolve.mockRejectedValue(new Error("Relay unavailable"));
+  h.show();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Check submission / open fork" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Relay unavailable",
+  );
+  expect(screen.getByRole("status")).toHaveTextContent("Destination: unknown");
+  expect(h.start).not.toHaveBeenCalled();
 });

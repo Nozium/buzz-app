@@ -139,6 +139,11 @@ export function SoloForkDialog({
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [evidence, setEvidence] = useState<{
+    retained: string;
+    destination: string;
+    checkedAt: string;
+  }>();
   const fence = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -205,19 +210,28 @@ export function SoloForkDialog({
     fence.current = true;
     setBusy(true);
     setError(undefined);
+    let retained = "unknown",
+      destination = "not checked";
     try {
       const saved = await session.outbox?.recovery(
         `solo-fork:${draft.destination}`,
       );
       if (!current()) return;
+      retained = saved ? "yes" : session.outbox ? "no" : "unavailable";
       if (!saved) {
+        destination = "unknown";
         await session.channels.resolve?.([draft.destination], {
           signal: visit.signal,
           consistency: "strong",
         });
         if (!current()) return;
-        const destination = session.channels.get?.(draft.destination);
-        if (!destination?.forkClaim)
+        const channel = session.channels.get?.(draft.destination);
+        destination = session.channels.resolve
+          ? channel?.forkClaim
+            ? "claim found"
+            : "no claim found"
+          : "unavailable";
+        if (!channel?.forkClaim)
           throw new Error(
             "Submission unresolved: no retained create or destination claim was found. Retry submission check when connected. Nothing will be re-enqueued or signed from this form.",
           );
@@ -230,7 +244,14 @@ export function SoloForkDialog({
         setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       fence.current = false;
-      if (current()) setBusy(false);
+      if (current()) {
+        setEvidence({
+          retained,
+          destination,
+          checkedAt: new Date().toISOString(),
+        });
+        setBusy(false);
+      }
     }
   }
   async function submit() {
@@ -419,6 +440,13 @@ export function SoloForkDialog({
             Submission was requested for the original destination. Check for its
             retained create or destination claim before opening it; this form
             never repeats Create.
+          </p>
+        )}
+        {evidence && (
+          <p className="text-caption text-subtle" role="status">
+            Retained create: {evidence.retained}. Destination:{" "}
+            {evidence.destination}. Last checked:{" "}
+            <time dateTime={evidence.checkedAt}>{evidence.checkedAt}</time>.
           </p>
         )}
         {error && <p role="alert">{error}</p>}
