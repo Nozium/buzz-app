@@ -2017,6 +2017,37 @@ it("reads only captured root and reply IDs, leaving other forced rows and later 
   expect(h.journal()?.localUnread["message-force:room"]).toBeGreaterThan(0);
 });
 
+it("clears a captured forced message already behind its saved read frontier", async () => {
+  const h = setup();
+  h.grant("room");
+  const selected = message(h.alice, "room", "selected", 11);
+  const other = message(h.alice, "room", "other", 12);
+  h.emit([selected, other]);
+  const unread = h.session.unread;
+
+  await unread.markThrough(
+    { kind: "message", channelId: "room", messageId: selected.id },
+    selected.id,
+  );
+  await unread.markMessageUnread("room", selected.id);
+  await unread.markMessageUnread("room", other.id);
+
+  await requireCapturedRead(unread, [selected.id]);
+
+  expect(unread.attention("room", selected.id)).toMatchObject({
+    forced: false,
+    unread: false,
+  });
+  expect(unread.attention("room", other.id)).toMatchObject({
+    forced: true,
+    unread: true,
+  });
+  expect(h.journal()?.state.frontiers).toEqual({
+    [`msg:${selected.id}`]: selected.created_at,
+  });
+  expect(h.journal()?.localUnread["message-force:room"]).toBeGreaterThan(0);
+});
+
 it("persists a captured cross-channel set in one save and preserves independent channel and thread marks", async () => {
   const h = setup();
   h.grant("room");
