@@ -5,7 +5,7 @@
   height: 100%;
   min-height: 0;
 }
-.browse[data-side] {
+.browse:has(> [data-panel-dock]:not([hidden], [data-closing])) {
   grid-template-columns: minmax(0, 1fr) minmax(
       20rem,
       var(--secondary-panel-width, 28rem)
@@ -172,10 +172,10 @@
 }
 
 @media (max-width: 52rem) {
-  .browse[data-side] {
+  .browse:has(> [data-panel-dock]:not([hidden], [data-closing])) {
     grid-template-columns: minmax(0, 1fr);
   }
-  .browse[data-side] > .main {
+  .browse:has(> [data-panel-dock]:not([hidden], [data-closing])) > .main {
     display: none;
   }
   .side > [data-panel-resize] {

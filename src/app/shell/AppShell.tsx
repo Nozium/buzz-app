@@ -15,7 +15,12 @@ import {
 } from "react";
 import { isApplePlatform } from "../../features/shortcuts/format";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
-import { SidebarIcon } from "../../shared/design-system/icons";
+import {
+  SidebarIcon,
+  MagnifyingGlassIcon,
+} from "../../shared/design-system/icons";
+import { createPortal } from "react-dom";
+import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
 import { Panel } from "../../shared/design-system/ui/Panel";
 import { isTauri } from "@tauri-apps/api/core";
 import type { SettingsCards } from "../../features/settings/service";
@@ -37,6 +42,10 @@ import type { Appearance } from "../../shared/theme/service";
 import { PageSearch, type SearchServices } from "./PageSearch";
 import { BestieNavigationProvider } from "./BestieNavigation";
 import type { NavigationOpenOptions } from "../../features/navigation/controller";
+import {
+  ConversationDetailPane,
+  useConversationDetailPane,
+} from "../../features/conversation/ConversationDetailPane";
 import { PanelFrame } from "../../features/panels/PanelFrame";
 import { useRelayConnection } from "../../features/relay/react";
 import { macTitleBarDragHandlers } from "./title-bar";
@@ -127,16 +136,27 @@ function AppShellContent({
     open: boolean,
     onOpenChange: (open: boolean) => void,
     triggerContainer: HTMLElement | null,
+    menuTriggerContainer: HTMLElement | null,
   ) => ReactNode;
   creationInSidebar?: boolean;
   children: ReactNode;
 }) {
+  const detailPane = useConversationDetailPane();
   const fillsWorkspace = workspace || selected === "settings";
   const [creationContainer, setCreationContainer] =
     useState<HTMLDivElement | null>(null);
   const [creationOpen, setCreationOpen] = useState(false);
+  const [creationMenuContainer, setCreationMenuContainer] =
+    useState<HTMLDivElement | null>(null);
+  const [searchContainer, setSearchContainer] = useState<HTMLDivElement | null>(
+    null,
+  );
   const [switcherOpen, setSwitcherOpen] = useState(false);
-  const openSwitcher = useCallback(() => setSwitcherOpen(true), []);
+  const openSwitcher = useCallback(() => {
+    setSidebarOpen(true);
+    setNavigationOpen(true);
+    setSwitcherOpen(true);
+  }, []);
   const connection = useRelayConnection(communities.relay);
   const sidebarScope = connection.scope ?? "disconnected";
   const owner = navigationOwner(pages, selected);
@@ -164,6 +184,7 @@ function AppShellContent({
   const visibleSidebar =
     hasNavigation && (narrow ? navigationOpen : sidebarOpen);
   const visibleRail = narrow ? navigationOpen : sidebarOpen;
+  const compactRail = !narrow && !sidebarOpen;
   const creationInNavigation = !!creationAction && creationInSidebar;
   useEffect(
     () =>
@@ -248,7 +269,43 @@ function AppShellContent({
       onSelect={onSelect}
       services={searchServices}
       presentation="bar"
+    >
+      {(open) =>
+        searchContainer &&
+        createPortal(
+          <IconButton
+            aria-label="Search"
+            title="Search"
+            icon={<MagnifyingGlassIcon size={16} />}
+            onClick={(event) => {
+              event.currentTarget.focus();
+              open();
+            }}
+          />,
+          searchContainer,
+        )
+      }
+    </PageSearch>
+  );
+  const railCommunity = (
+    <CommunityPicker
+      communities={communities}
+      invite={invite}
+      onInviteClose={onInviteClose}
+      settingsCards={settingsCards}
+      federatedIdentity={federatedIdentity}
+      onSelect={onCommunitySelect}
+      onOpenTarget={onOpenTarget}
+      open={switcherOpen}
+      onOpenChange={setSwitcherOpen}
+      side={compactRail ? "right" : "bottom"}
     />
+  );
+  const railActions = (
+    <>
+      <div ref={setSearchContainer} />
+      {creationAction && <div ref={setCreationMenuContainer} />}
+    </>
   );
   const dock = (
     <AppDock
@@ -256,7 +313,8 @@ function AppShellContent({
         !(connection.viewer && connection.scope && searchServices?.navigation)
       }
       search={null}
-      open={visibleRail}
+      open={visibleRail || compactRail}
+      compact={compactRail}
       onDismiss={() => {
         if (narrow) setNavigationOpen(false);
         else setSidebarOpen(false);
@@ -270,10 +328,26 @@ function AppShellContent({
       community={null}
       profile={null}
       settings={null}
+      header={
+        compactRail ? (
+          <div className="flex flex-col items-center gap-1">
+            {railCommunity}
+            {railActions}
+          </div>
+        ) : (
+          <PanelHeader
+            variant="card"
+            title="Buzz"
+            icon={railCommunity}
+            actions={railActions}
+          />
+        )
+      }
     >
       {connection.viewer && connection.scope && searchServices?.navigation ? (
         <RailNavigation
           key={connection.scope}
+          compact={compactRail}
           session={connection.session}
           scope={{
             viewer: connection.viewer,
@@ -290,20 +364,10 @@ function AppShellContent({
           creationAction={
             creationInNavigation ? <div ref={setCreationContainer} /> : null
           }
-          pinnedConversation={
-            pages.some((page) => page.key === "buzz.bestie/bestie") ? (
-              <PageNavigation
-                pages={pages.filter(
-                  (page) => page.key === "buzz.bestie/bestie",
-                )}
-                selected={selected}
-                onSelect={onSelect}
-              />
-            ) : undefined
-          }
         />
       ) : (
         <PageNavigation
+          placement={compactRail ? "dock" : "sidebar"}
           pages={pages.filter(
             (page) => page.primary && page.key !== "buzz.inbox/inbox",
           )}
@@ -376,18 +440,6 @@ function AppShellContent({
         >
           <div className="shell-actions-fixed">
             {launchers}
-            <CommunityPicker
-              communities={communities}
-              invite={invite}
-              onInviteClose={onInviteClose}
-              settingsCards={settingsCards}
-              federatedIdentity={federatedIdentity}
-              onSelect={onCommunitySelect}
-              onOpenTarget={onOpenTarget}
-              open={switcherOpen}
-              onOpenChange={setSwitcherOpen}
-              side="bottom"
-            />
             <ProfileButton
               communities={communities}
               accountActions={accountActions}
@@ -409,6 +461,7 @@ function AppShellContent({
         data-detail-container=""
         data-feed-layout={activityPage || undefined}
         data-rail-open={visibleRail || undefined}
+        data-rail-compact={compactRail || undefined}
       >
         {dock}
         <div
@@ -459,28 +512,33 @@ function AppShellContent({
                   className="min-h-0 min-w-0 flex-1"
                 >
                   <Panel as="div" joined>
-                    <PanelFrame scope={connection.scope} companion={companion}>
-                      <div
-                        id={`shell-page-${owner}`}
-                        className={
-                          fillsWorkspace
-                            ? "buzz-tabs-panel h-full min-h-0"
-                            : "buzz-tabs-panel h-full min-h-0 overflow-y-auto px-2 pt-10 pb-8 sm:px-4 sm:pt-14 sm:pb-10"
-                        }
+                    <ConversationDetailPane value={detailPane.value}>
+                      <PanelFrame
+                        scope={connection.scope}
+                        companion={detailPane.companion ?? companion}
                       >
                         <div
+                          id={`shell-page-${owner}`}
                           className={
                             fillsWorkspace
-                              ? "h-full min-h-0"
-                              : "mx-auto w-full max-w-4xl"
+                              ? "buzz-tabs-panel h-full min-h-0"
+                              : "buzz-tabs-panel h-full min-h-0 overflow-y-auto px-2 pt-10 pb-8 sm:px-4 sm:pt-14 sm:pb-10"
                           }
                         >
-                          <OpenCommunitySwitcher value={openSwitcher}>
-                            {children}
-                          </OpenCommunitySwitcher>
+                          <div
+                            className={
+                              fillsWorkspace
+                                ? "h-full min-h-0"
+                                : "mx-auto w-full max-w-4xl"
+                            }
+                          >
+                            <OpenCommunitySwitcher value={openSwitcher}>
+                              {children}
+                            </OpenCommunitySwitcher>
+                          </div>
                         </div>
-                      </div>
-                    </PanelFrame>
+                      </PanelFrame>
+                    </ConversationDetailPane>
                   </Panel>
                 </main>
               </div>
@@ -488,7 +546,12 @@ function AppShellContent({
           </div>
         </div>
       </div>
-      {creationAction?.(creationOpen, setCreationOpen, creationContainer)}
+      {creationAction?.(
+        creationOpen,
+        setCreationOpen,
+        creationContainer,
+        creationMenuContainer,
+      )}
       {searchServices && (
         <>
           <MarkAllReadShortcut

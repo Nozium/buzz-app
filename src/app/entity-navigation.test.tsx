@@ -605,9 +605,7 @@ it("reopens a visit that timed out while connecting once the connection is live"
       await screen.findByRole("heading", { name: "Can’t connect" }),
     ).toBeVisible();
     // The collection is still available when one conversation could not connect.
-    expect(
-      screen.getByRole("button", { name: "Go to Messages" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Go to Team" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open Settings" })).toBeNull();
     expect(
       screen.getByRole("button", { name: "Try again" }).dataset.variant,
@@ -747,8 +745,9 @@ it("keeps a failed message read in place until its own Retry succeeds", async ()
     message(author, "alpha", "Back again", 1_700_000_100),
     bounds(author, "alpha", "head", { has_more: false, next_cursor: null }),
   ];
-  // Two failed history reads within one live connection, then recovery.
-  let failures = 2;
+  // Hold failure until the selected reader exposes its retry, independent of
+  // background preview and inbox reads in the same connection.
+  let failHistory = true;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, options?: RequestInit) => {
@@ -758,8 +757,7 @@ it("keeps a failed message read in place until its own Retry succeeds", async ()
       if (url.endsWith("/query")) {
         const filters = JSON.parse(String(options?.body)) as ReadFilter[];
         if (filters.some((filter) => filter.kinds?.includes(9))) {
-          if (failures > 0) {
-            failures--;
+          if (failHistory) {
             return Response.json({ error: "offline" }, { status: 503 });
           }
           return Response.json(history);
@@ -794,6 +792,7 @@ it("keeps a failed message read in place until its own Retry succeeds", async ()
       presented: true,
     }),
   );
+  failHistory = false;
   const generation = current.relay.snapshot().generation;
   expect(screen.queryByText(pageFailure)).toBeNull();
   // The page keeps its visit's authority, so the timeline's own Retry works.
@@ -819,7 +818,6 @@ it("keeps a failed message read in place until its own Retry succeeds", async ()
   ).toEqual(["Back again"]);
   expect(screen.queryByRole("button", { name: "Retry messages" })).toBeNull();
   expect(current.navigation.snapshot().attempt.signal.aborted).toBe(false);
-  expect(failures).toBe(0);
   expect(current.relay.snapshot().generation).toBe(generation);
   expect(screen.queryByText(pageFailure)).toBeNull();
 });
@@ -926,7 +924,7 @@ it("lists active primary pages in the universal rail", async () => {
     pluginId: "buzz.inbox",
     pageId: "inbox",
   });
-  await userEvent.click(screen.getByRole("button", { name: "Messages" }));
+  await userEvent.click(screen.getByRole("button", { name: "Team" }));
   expect(screen.getByRole("button", { name: "Bestie" })).toBeInTheDocument();
 
   expect(
@@ -1002,7 +1000,7 @@ it("lists active primary pages in the universal rail", async () => {
   expect(
     screen.queryByRole("button", { name: "Bestie" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Messages" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Team" })).toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: "Apps" })).toBeInTheDocument();
 });
 
@@ -1286,7 +1284,7 @@ async function activityTurnedOff() {
     within(card)
       .getAllByRole("button")
       .map((button) => button.textContent),
-  ).toEqual(["Manage plugins", "Go to Messages"]);
+  ).toEqual(["Manage plugins", "Go to Team"]);
   return card;
 }
 
@@ -1306,7 +1304,7 @@ async function backOntoTurnedOffActivity() {
   await act(() => current.plugins.change("disable", "buzz.inbox"));
   await userEvent.click(
     within(await activityTurnedOff()).getByRole("button", {
-      name: "Go to Messages",
+      name: "Go to Team",
     }),
   );
   await waitFor(() =>
@@ -1382,7 +1380,7 @@ it("turning a plugin back on over its failed page offers Try again, which opens 
     within(card)
       .getAllByRole("button")
       .map((button) => button.textContent),
-  ).toEqual(["Try again", "Go to Messages"]);
+  ).toEqual(["Try again", "Go to Team"]);
   expect(
     screen.queryByRole("heading", { name: "Activity is turned off" }),
   ).not.toBeInTheDocument();

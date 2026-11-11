@@ -3,6 +3,18 @@
   flex-direction: column;
   gap: var(--space-1);
 }
+.dock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+.dockTile {
+  display: flex;
+  padding: var(--space-1);
+  border-radius: var(--radius-icon-button);
+  background: var(--surface-rail-card);
+}
 .pageRows {
   padding-inline: var(--space-panel-inset);
   padding-block-end: var(--space-4);
@@ -93,14 +105,80 @@
 .row {
   min-width: 0;
 }
-.handle {
+.grabber {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
   display: flex;
-  opacity: 0;
+  opacity: var(--rail-grabber-proximity, 0);
+  pointer-events: none;
 }
-.group:hover .handle,
-.group:focus-within .handle,
-.handle:has([aria-expanded="true"]) {
+.grabber button {
+  cursor: grab;
+  touch-action: none;
+}
+.grabDots {
+  opacity: 0.4;
+}
+.group [data-rail-view-more] {
+  opacity: 0.5;
+}
+.group [data-rail-view-more]:focus-visible {
   opacity: 1;
+}
+/* Tabler's outer columns move inward 1px: 4px dots with 2px gaps. */
+.grabDots path:nth-child(-n + 2) {
+  transform: translateX(calc(var(--space-half) / 2));
+}
+.grabDots path:nth-child(n + 5) {
+  transform: translateX(calc(var(--space-half) / -2));
+}
+.grabber button:active {
+  cursor: grabbing;
+}
+/* Keep card geometry fixed while secondary controls fade in. */
+.group [data-rail-card-actions] {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .group [data-rail-card-actions] {
+    opacity: 0;
+    transition: opacity var(--time-fast) var(--ease-state);
+  }
+  .group:hover [data-rail-card-actions],
+  .group [data-rail-card-actions]:focus-within,
+  .group [data-rail-card-actions]:has([aria-expanded="true"]),
+  html[data-keyboard-input] .group:focus-within [data-rail-card-actions] {
+    opacity: 1;
+  }
+  .group:hover .grabber {
+    pointer-events: auto;
+  }
+  .group:hover .grabber:hover {
+    opacity: 1;
+  }
+}
+/* Keyboard and direct drag intent must never wait for decorative hover motion. */
+.grabber:focus-within,
+.group[data-dragging="true"] .grabber,
+html[data-keyboard-input] .group:focus-within .grabber {
+  opacity: 1;
+  pointer-events: auto;
+  transition: none;
+}
+.group [data-rail-card-actions]:focus-within,
+.group [data-rail-card-actions]:has([aria-expanded="true"]),
+html[data-keyboard-input] .group:focus-within [data-rail-card-actions] {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .grabber,
+  .group [data-rail-card-actions] {
+    transition-duration: var(--time-immediate);
+  }
 }
 .group,
 .row {
@@ -175,9 +253,10 @@
     transform var(--time-sheet) cubic-bezier(0.34, 1.56, 0.64, 1),
     opacity var(--time-fast) var(--ease-enter);
 }
-@media (hover: none) and (pointer: coarse) {
-  .handle {
+@media (hover: none) {
+  .grabber {
     opacity: 1;
+    pointer-events: auto;
   }
 }
 @media (prefers-reduced-motion: reduce) {

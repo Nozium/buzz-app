@@ -1284,8 +1284,10 @@ it("opens a selected card in the detail rail and closes from its keyboard contro
     "Open Message helper: When a message is posted, send a message.",
   );
   expect(open).toHaveAttribute("aria-pressed", "true");
-  const detail = screen.getByRole("dialog", { name: "Message helper" });
-  within(detail).getByRole("button", { name: "Close" }).focus();
+  const detail = screen.getByRole("region", { name: "Workflow details" });
+  within(detail)
+    .getByRole("button", { name: "Close Message helper tab" })
+    .focus();
   await user.keyboard("{Escape}");
   await waitFor(() =>
     expect(
@@ -1295,9 +1297,9 @@ it("opens a selected card in the detail rail and closes from its keyboard contro
   expect(open).toHaveAttribute("aria-pressed", "false");
   await user.click(open);
   await user.click(
-    within(screen.getByRole("dialog", { name: "Message helper" })).getByRole(
+    within(screen.getByRole("region", { name: "Workflow details" })).getByRole(
       "button",
-      { name: "Close" },
+      { name: "Close Message helper tab" },
     ),
   );
   await waitFor(() =>

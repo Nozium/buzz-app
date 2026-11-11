@@ -298,7 +298,7 @@ it("leaves the app's own navigation as the way out when Messages itself is unava
   expect(
     await screen.findByRole("heading", { name: "This page isn’t available" }),
   ).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Go to Messages" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Go to Team" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Open Settings" })).toBeNull();
 });
 
@@ -709,7 +709,7 @@ it("opens removed Messages settings links at Appearance without adding a navigat
     ...target,
     section: "appearance",
   });
-  expect(screen.queryByRole("button", { name: "Messages" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Team" })).toBeNull();
 });
 
 it("keeps a return path for addressed plugin settings through Back and Forward", async () => {

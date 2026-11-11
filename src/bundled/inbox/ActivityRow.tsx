@@ -108,6 +108,8 @@ export const ActivityMessageRow = memo(function ActivityMessageRow({
             previewId={previewId}
             disabled={pending}
             selected={selected}
+            onPointerEnter={() => session.channels.prepare?.(item.channelId)}
+            onFocus={() => session.channels.prepare?.(item.channelId)}
             onClick={() => actions.current?.open(item, channel)}
           />
           {readable && (
@@ -158,7 +160,12 @@ export const ActivityReactionRow = memo(function ActivityReactionRow({
   selected,
 }: Common & { item: InboxReaction; time: string }) {
   return (
-    <li className={feedStyles.item} data-inbox-row={item.id}>
+    <li
+      className={feedStyles.item}
+      data-inbox-row={item.id}
+      onPointerEnter={() => session.channels.prepare?.(item.channelId)}
+      onFocus={() => session.channels.prepare?.(item.channelId)}
+    >
       <ReactionRowButton
         item={item}
         time={time}

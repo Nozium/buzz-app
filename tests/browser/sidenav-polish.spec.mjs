@@ -608,7 +608,7 @@ test.extend({ companionFixture: true })(
       if (await show.isVisible()) await show.click();
     };
     const selectChannel = async (name) => {
-      await pages.getByRole("tab", { name: "Messages", exact: true }).click();
+      await pages.getByRole("tab", { name: "Team", exact: true }).click();
       await showNavigation();
       await sidebar.getByRole("button", { name, exact: true }).click();
     };

@@ -60,8 +60,10 @@ export function useRailLayout(scope: string) {
     (listener: () => void) => subscribeView(scope, listener),
     [scope],
   );
-  const revision = useSyncExternalStore(subscribe, () =>
-    viewRevision(scope, KEY),
+  const revision = useSyncExternalStore(
+    subscribe,
+    () => viewRevision(scope, KEY),
+    () => undefined,
   );
   const layout = useMemo(
     () =>
@@ -123,9 +125,17 @@ export function useRailLayout(scope: string) {
     }));
   const remove = (id: string) =>
     save((current) => ({
+      ...current,
       order: current.order.filter((key) => key !== id),
       sections: current.sections.filter((section) => section.id !== id),
       placements: current.placements.filter((item) => item.section !== id),
     }));
-  return { layout, move, reorder, create, remove, reset };
+  return {
+    layout,
+    move,
+    reorder,
+    create,
+    remove,
+    reset,
+  };
 }

@@ -30,6 +30,7 @@ type Props = {
   navigator: Navigation;
   agents?: Agents | undefined;
   triggerContainer?: HTMLElement | null;
+  menuTriggerContainer?: HTMLElement | null;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 };
@@ -53,6 +54,7 @@ function ReadyNewMenu({
   session,
   available,
   triggerContainer,
+  menuTriggerContainer,
   open,
   onOpenChange,
 }: Props & { session: RelaySession; available: boolean }) {
@@ -65,6 +67,12 @@ function ReadyNewMenu({
   const [creatingSection, setCreatingSection] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const headerTrigger = useRef<HTMLButtonElement>(null);
+  const menuAnchor = useRef<HTMLButtonElement>(null);
+  const openMenu = (anchor: HTMLButtonElement) => {
+    menuAnchor.current = anchor;
+    setMenuOpen(true);
+  };
   const scope = splitPartition(session.scope);
   const current = () => relay.snapshot().session === session;
   // + opens the To composer; its context menu keeps the other creations.
@@ -103,7 +111,7 @@ function ReadyNewMenu({
       onClick={compose}
       onContextMenu={(event) => {
         event.preventDefault();
-        setMenuOpen(true);
+        openMenu(event.currentTarget);
       }}
     />
   );
@@ -112,8 +120,26 @@ function ReadyNewMenu({
       {triggerContainer === undefined
         ? menuTrigger
         : triggerContainer && createPortal(menuTrigger, triggerContainer)}
+      {menuTriggerContainer &&
+        createPortal(
+          <IconButton
+            ref={headerTrigger}
+            aria-label="Create"
+            title="Create"
+            aria-haspopup="menu"
+            aria-expanded={
+              menuOpen && menuAnchor.current === headerTrigger.current
+            }
+            disabled={!available || !scope}
+            variant="ghost"
+            size="sm"
+            icon={<PlusIcon size={16} strokeWidth={2} />}
+            onClick={(event) => openMenu(event.currentTarget)}
+          />,
+          menuTriggerContainer,
+        )}
       <MenuRoot open={menuOpen} onOpenChange={setMenuOpen}>
-        <MenuPopup anchor={trigger}>
+        <MenuPopup anchor={menuAnchor} finalFocus={menuAnchor}>
           <MenuGroup>
             <MenuGroupLabel emphasis="quiet">Solo</MenuGroupLabel>
             <MenuItem
@@ -136,20 +162,7 @@ function ReadyNewMenu({
           <MenuSeparator />
           <MenuGroup>
             <MenuGroupLabel emphasis="quiet">Team</MenuGroupLabel>
-            <MenuItem
-              disabled={!scope}
-              onClick={() => {
-                if (scope && current())
-                  void navigator.open({
-                    version: 1,
-                    kind: "page",
-                    pluginId: "buzz.channels",
-                    pageId: "channels",
-                    scope,
-                    route: { version: 1, params: "new-message" },
-                  });
-              }}
-            >
+            <MenuItem disabled={!scope} onClick={compose}>
               New DM
             </MenuItem>
             <MenuItem
@@ -176,7 +189,7 @@ function ReadyNewMenu({
         onOpenChange={setCreatingChannel}
         session={session}
         agents={agents}
-        finalFocus={trigger}
+        finalFocus={menuAnchor}
         destinations={preferences.data?.sections ?? []}
         initialGroup=""
         groupsReady={preferences.writable}
@@ -190,7 +203,7 @@ function ReadyNewMenu({
           writable={preferences.sectionCreationWritable}
           refreshing={preferences.status === "loading"}
           retry={preferences.reload}
-          finalFocus={trigger}
+          finalFocus={menuAnchor}
           close={() => setCreatingSection(false)}
           create={async (section) => {
             if (
@@ -209,7 +222,7 @@ function ReadyNewMenu({
           session={session}
           create={(section) => session.soloPreferences.createSection(section)}
           close={() => setCreatingProject(false)}
-          finalFocus={trigger}
+          finalFocus={menuAnchor}
           onCreated={(id) => {
             if (!current()) return;
             resetNewChatProject(session.scope, id);

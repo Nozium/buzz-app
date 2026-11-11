@@ -1,4 +1,4 @@
-import { isInboxRoute } from "../inbox/route";
+import { isMessagesRoute } from "./messages-sheet-route";
 import { StartLinkedChat, canStartLinkedChat } from "./StartLinkedChat";
 import { ChannelCompletion } from "./ChannelCompletion";
 import { channelQuery } from "./channel-query";
@@ -131,7 +131,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   });
   ctx.pages.register({
     id: "channels",
-    title: "Channels",
+    title: "Team",
     primary: true,
     placement: "dock",
     layout: "workspace",
@@ -141,45 +141,68 @@ export const apply: PluginModule["apply"] = (ctx) => {
       version: 1,
       validate: (params) =>
         isChannelRoute(params) ||
-        isInboxRoute(params) ||
+        isMessagesRoute(params) ||
         isSidebarSectionRoute(params),
     },
-    component: ({ companion, navigation }) =>
-      navigation?.target.kind === "page" &&
-      isSidebarSectionRoute(navigation.target.route?.params) ? (
-        <RailSectionPage
-          section={navigation.target.route.params.section}
-          relay={relay}
-          navigator={navigator}
-          pages={ctx.pages}
-          sidebarSections={ctx.reflect.get("sidebarSections")}
-          navigation={navigation}
-        />
-      ) : navigation?.target.kind === "page" &&
-        (!navigation.target.route ||
-          isInboxRoute(navigation.target.route.params)) ? (
+    component: ({ companion, navigation }) => {
+      const target = navigation?.target;
+      const params = target?.kind === "page" ? target.route?.params : undefined;
+      const section = isSidebarSectionRoute(params)
+        ? params.section
+        : undefined;
+      if (section && section !== "messages" && section !== "solo")
+        return (
+          <RailSectionPage
+            section={section}
+            relay={relay}
+            navigator={navigator}
+            pages={ctx.pages}
+            sidebarSections={ctx.reflect.get("sidebarSections")}
+            navigation={navigation}
+          />
+        );
+      const collection =
+        target?.kind === "page" &&
+        (!target.route ||
+          (params !== undefined && isMessagesRoute(params)) ||
+          !!section);
+      return (
         <MessagesIndex
           host={ctx}
           extensions={extensions}
           relay={relay}
           navigator={navigator}
           navigation={navigation}
+          section={section === "solo" ? "solo" : undefined}
+          list={(section, listNavigator) => (
+            <RailSectionPage
+              section={section}
+              relay={relay}
+              navigator={listNavigator}
+              pages={ctx.pages}
+              sidebarSections={ctx.reflect.get("sidebarSections")}
+            />
+          )}
+          detail={
+            collection ? undefined : (
+              <ChannelsPage
+                chatMenus={ctx.conversation.chatMenus}
+                navigation={navigation}
+                navigator={navigator}
+                extensions={extensions}
+                relay={relay}
+                panels={panels}
+                archive={archive}
+                read={read}
+                companion={companion}
+                agents={agents}
+                communities={ctx.communityReader}
+                membership={membership}
+              />
+            )
+          }
         />
-      ) : (
-        <ChannelsPage
-          chatMenus={ctx.conversation.chatMenus}
-          navigation={navigation}
-          navigator={navigator}
-          extensions={extensions}
-          relay={relay}
-          panels={panels}
-          archive={archive}
-          read={read}
-          companion={companion}
-          agents={agents}
-          communities={ctx.communityReader}
-          membership={membership}
-        />
-      ),
+      );
+    },
   });
 };

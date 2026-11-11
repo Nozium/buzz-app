@@ -168,7 +168,7 @@ it("opens Drafts & sent from the shared rail and retains the rail through Back/F
     expect(services?.navigation.snapshot().status).toBe("opened"),
   );
   act(() => services?.navigation.back());
-  expect(await screen.findByRole("region", { name: "Messages" })).toBeVisible();
+  expect(await screen.findByRole("region", { name: "Team" })).toBeVisible();
   act(() => services?.navigation.forward());
   expect(
     await screen.findByRole("region", { name: "Drafts & sent" }),

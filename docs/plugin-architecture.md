@@ -410,10 +410,9 @@ icon, and callback. A render failure, including invalid rows, replaces only that
 section with its unavailable state. Its Retry renders the current rows again.
 Rejected row/header actions stay local to that section.
 
-The rail previews up to four rows. Contributions may supply `listTarget`, an
-`OpenTarget` for their complete list; the host's **View more** opens it through
-normal page navigation. Without it, the host opens a dedicated page showing the
-contribution's registered rows. This does not request more data from the plugin.
+The rail previews up to four rows. The host's **View more** opens a dedicated
+page showing the contribution's registered rows through normal page navigation.
+This does not request more data from the plugin.
 
 ```tsx
 import { createElement } from "react";

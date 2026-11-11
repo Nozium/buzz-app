@@ -579,6 +579,7 @@ it("opens the side panel with the type's tabs and the app's Settings and Memory 
     "Your agents",
     "Your teams",
     "Marketplace",
+    "AAda",
     "Reply",
     "Memory",
     "Settings",
@@ -592,9 +593,12 @@ it("opens the side panel with the type's tabs and the app's Settings and Memory 
   expect(screen.getByText("Reply tab")).toBeInTheDocument();
 
   await user.click(
-    within(screen.getByRole("dialog", { name: "Ada" })).getByRole("button", {
-      name: "Close",
-    }),
+    within(screen.getByRole("region", { name: "Agent profile" })).getByRole(
+      "button",
+      {
+        name: "Close Ada tab",
+      },
+    ),
   );
   expect(screen.getByRole("gridcell", { name: /Ada/ })).toHaveAttribute(
     "aria-selected",
@@ -1310,9 +1314,8 @@ it("cancels inline name edits and flags an empty name on Save", async () => {
     );
   };
   await edit();
-  expect(screen.getAllByRole("dialog")).toEqual([
-    screen.getByRole("dialog", { name: "Ada" }),
-  ]);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByRole("region", { name: "Agent profile" })).toBeVisible();
   expect(
     screen.queryByRole("button", { name: "Message" }),
   ).not.toBeInTheDocument();
@@ -3939,9 +3942,8 @@ it("opens avatar and name editing from the profile menu", async () => {
   expect(
     await screen.findByRole("textbox", { name: "Agent name" }),
   ).toHaveValue("Ada");
-  expect(screen.getAllByRole("dialog")).toEqual([
-    screen.getByRole("dialog", { name: "Ada" }),
-  ]);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByRole("region", { name: "Agent profile" })).toBeVisible();
   expect(agents.save).not.toHaveBeenCalled();
 });
 
@@ -4365,10 +4367,9 @@ it("asks before closing a panel with an unsaved draft and keeps it through anoth
   await user.clear(field);
   await user.type(field, "Unsaved reply");
 
-  const close = within(screen.getByRole("dialog", { name: "Ada" })).getByRole(
-    "button",
-    { name: "Close" },
-  );
+  const close = within(
+    screen.getByRole("region", { name: "Agent profile" }),
+  ).getByRole("button", { name: "Close Ada tab" });
   await user.click(close);
   const prompt = await screen.findByRole("alertdialog", {
     name: "Discard changes?",
@@ -4415,9 +4416,12 @@ it("asks before closing a panel with an unsaved draft and keeps it through anoth
   expect(field).toHaveValue("Unsaved reply");
 
   await user.click(
-    within(screen.getByRole("dialog", { name: "Ada" })).getByRole("button", {
-      name: "Close",
-    }),
+    within(screen.getByRole("region", { name: "Agent profile" })).getByRole(
+      "button",
+      {
+        name: "Close Ada tab",
+      },
+    ),
   );
   await user.click(
     within(
@@ -4445,10 +4449,9 @@ it("leaves focus in the grid when changing agents after keeping a draft over Clo
   await user.click(within(grid).getByText("Ada"));
   const field = screen.getByRole("textbox", { name: "Reply" });
   await user.type(field, "!");
-  const close = within(screen.getByRole("dialog", { name: "Ada" })).getByRole(
-    "button",
-    { name: "Close" },
-  );
+  const close = within(
+    screen.getByRole("region", { name: "Agent profile" }),
+  ).getByRole("button", { name: "Close Ada tab" });
   await user.click(close);
   await user.click(
     within(
@@ -4511,9 +4514,12 @@ it("focuses the closed agent's card after discarding a draft over ×, panel Esca
   // The card is found by key, so a reorder behind the prompt cannot misplace it.
   await edit("Bo");
   await user.click(
-    within(screen.getByRole("dialog", { name: "Bo" })).getByRole("button", {
-      name: "Close",
-    }),
+    within(screen.getByRole("region", { name: "Agent profile" })).getByRole(
+      "button",
+      {
+        name: "Close Bo tab",
+      },
+    ),
   );
   await prompt();
   act(() => show([bo, ada]));
@@ -4554,9 +4560,12 @@ it("focuses a cleanly closed panel's card, and leaves focus held outside the pan
 
   await user.click(within(grid).getByText("Ada"));
   await user.click(
-    within(screen.getByRole("dialog", { name: "Ada" })).getByRole("button", {
-      name: "Close",
-    }),
+    within(screen.getByRole("region", { name: "Agent profile" })).getByRole(
+      "button",
+      {
+        name: "Close Ada tab",
+      },
+    ),
   );
   expect(
     screen.queryByRole("region", { name: "Agent profile" }),
@@ -5715,12 +5724,12 @@ it("opens a Marketplace tile in the profile pane and returns focus on close and 
     ).toBeVisible();
     expect(screen.getByText("Help with tasks.")).toBeVisible();
     expect(
-      screen.getByRole("dialog", { name: "Marketplace helper" }),
+      screen.getByRole("region", { name: "Shared agent profile" }),
     ).toBeVisible();
     await user.click(
       within(
-        screen.getByRole("dialog", { name: "Marketplace helper" }),
-      ).getByRole("button", { name: "Close" }),
+        screen.getByRole("region", { name: "Shared agent profile" }),
+      ).getByRole("button", { name: "Close Marketplace helper tab" }),
     );
     expect(tile).toHaveFocus();
     expect(

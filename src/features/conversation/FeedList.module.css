@@ -24,13 +24,19 @@
 /* Shared framing for every Activity filter; row controls keep their own behavior. */
 .list {
   --conversation-row-avatar: var(--space-8);
-  --conversation-row-pad-inline: var(--space-control-inset);
+  --conversation-row-pad-inline: calc(
+    var(--collection-content-inset, var(--space-panel-inset)) -
+    var(--space-row-gap)
+  );
   --conversation-row-pad-block: var(--space-3);
   --conversation-row-column-gap: var(--space-row-gap);
   --conversation-row-line-gap: var(--space-half);
   --conversation-row-preview-lines: 1;
   --message-row-line-gap: var(--space-half);
   --message-row-preview-lines: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-half);
   list-style: none;
   margin: 0;
   padding: 0 var(--space-row-gap) var(--space-4);
@@ -38,7 +44,6 @@
 
 .item {
   min-width: 0;
-  padding-block: var(--space-1);
 }
 
 @container (max-width: 30rem) {

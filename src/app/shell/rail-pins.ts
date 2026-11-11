@@ -62,8 +62,10 @@ export function useRailPins(scope: string) {
     (listener: () => void) => subscribeView(scope, listener),
     [scope],
   );
-  const revision = useSyncExternalStore(subscribe, () =>
-    viewRevision(scope, KEY),
+  const revision = useSyncExternalStore(
+    subscribe,
+    () => viewRevision(scope, KEY),
+    () => undefined,
   );
   const pins = useMemo(
     () => (revision !== undefined ? readRailPins(scope) : []),

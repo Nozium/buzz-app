@@ -21,6 +21,7 @@ import type { ChannelSummary, Profile } from "../../features/relay/contracts";
 import type { RelaySession } from "../../features/relay/session";
 import { ClockIcon } from "../../shared/design-system/icons/index";
 import { channelIcon } from "../../features/channels/channel-icon";
+import { ChannelAvatar } from "../../features/channels/ChannelAvatar";
 import { ChannelActivityPopover } from "./ChannelActivityPopover";
 import { channelDurationLabel } from "./ChannelDurationField";
 import { ChannelSidebarRow } from "./ChannelSidebarRow";
@@ -221,6 +222,8 @@ function ChannelSidebarItemCore({
               <Icon size={16} />
             )}
           </DmTypingBadge>
+        ) : channel.channelType !== "solo" ? (
+          <ChannelAvatar name={channel.name} size="compact" />
         ) : (
           <Icon size={16} />
         )

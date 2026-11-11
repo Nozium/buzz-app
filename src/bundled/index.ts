@@ -1,5 +1,3 @@
-import smartSectionsManifest from "./smart-sections/manifest.json";
-import * as smartSections from "./smart-sections";
 import meshManifest from "./mesh-compute/manifest.json";
 import * as mesh from "./mesh-compute";
 import voiceNotesManifest from "./voice-notes/manifest.json";
@@ -89,11 +87,6 @@ const claudeHarness: BundledPlugin = {
 };
 
 export const bundledPlugins: readonly BundledPlugin[] = [
-  {
-    manifest: { ...smartSectionsManifest, apiVersion: 1 },
-    module: smartSections,
-    enabledByDefault: true,
-  },
   {
     manifest: { ...meshManifest, apiVersion: 1 },
     module: mesh,

@@ -12,7 +12,12 @@ import type {
   RegisteredPanel,
 } from "../../features/panels/service";
 import { Panel } from "../../shared/design-system/ui/Panel";
-import { PanelDock } from "../../features/panels/PanelDock";
+import {
+  PanelHeader,
+  PanelHeaderLabel,
+} from "../../shared/design-system/ui/PanelHeader";
+import { IconButton } from "../../shared/design-system/ui/IconButton";
+import { XIcon } from "../../shared/design-system/icons";
 import { PanelView } from "../../features/panels/PanelView";
 import styles from "./Channels.module.css";
 
@@ -105,10 +110,7 @@ export function useChannelPanels(
     if (retained && !available.includes(retained.panel))
       forgetRetained?.(undefined);
   }, [local, selected, retained, forgetRetained, available]);
-  const shown =
-    selected?.panel.channelPlacement !== "side" || tabs?.paneOpen !== false
-      ? selected
-      : undefined;
+  const shown = tabs?.paneOpen !== false ? selected : undefined;
   const activeOpening = useRef<Opening>(undefined);
   useLayoutEffect(() => {
     activeOpening.current = selected;
@@ -193,8 +195,9 @@ export function useChannelPanels(
           })}
       </div>
     ),
-    side: selected?.panel.channelPlacement === "side" && (
+    side: selected && (
       <Panel
+        joined
         aria-label={`${selected.panel.title} panel`}
         onKeyDown={(event) => {
           // Shift+Escape is Mark all as read, not a dismissal.
@@ -204,36 +207,29 @@ export function useChannelPanels(
           }
         }}
       >
-        <PanelView
-          panel={selected.panel}
-          target={selected.target}
-          channelContext={context}
-          context={openingContext(selected)}
-          close={() => hide(selected)}
-        />
+        <div className={styles.settingsPanel}>
+          <PanelHeader
+            title={<PanelHeaderLabel title={selected.panel.title} />}
+            actions={
+              <IconButton
+                size="toolbar"
+                aria-label={`Close ${selected.panel.title} panel`}
+                icon={<XIcon size={18} />}
+                onClick={() => hide(selected)}
+              />
+            }
+          />
+          <PanelView
+            panel={selected.panel}
+            target={selected.target}
+            channelContext={context}
+            context={openingContext(selected)}
+            close={() => hide(selected)}
+          />
+        </div>
       </Panel>
     ),
-    content: (
-      <PanelDock
-        open={!!selected && selected.panel.channelPlacement !== "side"}
-        title={selected?.panel.title}
-        close={() => {
-          if (selected) hide(selected);
-        }}
-        className={styles.channelDrawer}
-      >
-        {selected && selected.panel.channelPlacement !== "side" && (
-          <section aria-label={`${selected.panel.title} drawer`}>
-            <PanelView
-              panel={selected.panel}
-              target={selected.target}
-              channelContext={context}
-              context={openingContext(selected)}
-              close={() => hide(selected)}
-            />
-          </section>
-        )}
-      </PanelDock>
-    ),
+    // Legacy bottom launchers now share the full-height companion pane.
+    content: null,
   };
 }

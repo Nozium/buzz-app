@@ -1738,10 +1738,10 @@ export const TYPE_ROLES: TypeRole[] = [
     token: "text-message",
     pointsAt: "body/message",
     size: "14px",
-    lineHeight: "1.5714285714285714 (22px at default)",
-    tracking: "-0.0025em",
+    lineHeight: "1.5357142857142858 (21.5px at default)",
+    tracking: "-0.01em",
     weight: "400",
-    use: "Sent and received message prose, with compact line spacing.",
+    use: "Sent and received message prose and composer text, with compact line spacing.",
     status: "core",
   },
   {
@@ -2059,6 +2059,24 @@ export const RADII = [
 ];
 
 export const MOTION = [
+  {
+    token: "scale-press",
+    variable: "--scale-press",
+    value: "0.97",
+    use: "Pointer-down compression for buttons, icon actions, tabs and artwork controls.",
+  },
+  {
+    token: "scale-press-row",
+    variable: "--scale-press-row",
+    value: "0.99",
+    use: "Shallower pointer-down compression for wide navigation and menu rows.",
+  },
+  {
+    token: "easing-press-release",
+    variable: "--easing-press-release",
+    value: "cubic-bezier(.34,1.56,.64,1)",
+    use: "A small easeOutBack overshoot when a pointer press is released; keyboard and reduced motion stay immediate.",
+  },
   {
     token: "duration-sheet",
     variable: "--duration-sheet",

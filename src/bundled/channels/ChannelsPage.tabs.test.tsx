@@ -245,7 +245,7 @@ async function page(
     hidden: routed,
   });
   const open = async () => {
-    if (!screen.queryByRole("dialog")) composer.focus();
+    if (!detailWorkspace()) composer.focus();
     act(() =>
       expect(panels.requestOpen({ channelId, target: "fixture:notes" })).toBe(
         true,
@@ -281,7 +281,7 @@ it.each(["side", "main"] as const)(
     const root = h.root;
     if (!root) throw new Error("Routed thread root unavailable");
     const tabs = renderHook(() => useChannelTabState(h.session, "alpha"));
-    await screen.findByRole("dialog", { name: "Initiating thread" });
+    await screen.findByRole("tabpanel", { name: "Initiating thread" });
     act(() =>
       expect(
         h.panels.requestOpen({
@@ -291,20 +291,16 @@ it.each(["side", "main"] as const)(
         }),
       ).toBe(true),
     );
-    expect(screen.getByRole("dialog", { name: "App" })).toBeVisible();
+    expect(screen.getByRole("tabpanel", { name: "App" })).toBeVisible();
     expect(open).not.toHaveBeenCalled();
     expect(tabs.result.current.tabs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: "thread", messageId: root }),
       ]),
     );
-    await h.user.click(
-      within(screen.getByRole("dialog", { name: "App" })).getByRole("button", {
-        name: "Close",
-      }),
-    );
+    await h.user.click(screen.getByRole("button", { name: "Close App tab" }));
     expect(
-      await screen.findByRole("dialog", { name: "Initiating thread" }),
+      await screen.findByRole("tabpanel", { name: "Initiating thread" }),
     ).toBeVisible();
     expect(open).not.toHaveBeenCalled();
   },
@@ -458,7 +454,7 @@ it("hands the community roster to Channel settings and follows the republished f
   });
   await screen.findByRole("textbox", { name: "Message #Alpha" });
   const user = userEvent.setup();
-  await user.click(await headerAction("Channel actions"));
+  await user.click(await headerAction("Conversation actions"));
   await user.click(
     await screen.findByRole("menuitem", { name: "View channel details" }),
   );
@@ -605,7 +601,7 @@ it("restoring an app with old main placement keeps its live browser guest in the
   await vi.waitFor(() =>
     expect(observed).toContain("https://app.example/second.html"),
   );
-  const sheet = screen.getByRole("dialog", { name: "App" });
+  const sheet = screen.getByRole("tabpanel", { name: "App" });
   const guest = sheet
     .querySelector("[data-browser-session]")
     ?.getAttribute("data-browser-session");
@@ -619,7 +615,7 @@ it("restoring an app with old main placement keeps its live browser guest in the
     expect(state.result.current.mainEntries).toBeUndefined();
     expect(
       screen
-        .getByRole("dialog", { name: "App" })
+        .getByRole("tabpanel", { name: "App" })
         .querySelector("[data-browser-session]"),
     ).toHaveAttribute("data-browser-session", guest);
   });
@@ -666,11 +662,7 @@ it("solo composer retains side-tab cycling and close focus", async () => {
     ["buzz:next-tab", thread],
     ["buzz:previous-tab", notes],
   ] as const) {
-    (
-      screen
-        .getByRole("dialog")
-        .querySelector("[data-panel-workspace]") as HTMLElement
-    ).focus();
+    (detailWorkspace() as HTMLElement).focus();
     const event = new Event(eventName, { cancelable: true });
     act(() => {
       window.dispatchEvent(event);
@@ -678,16 +670,12 @@ it("solo composer retains side-tab cycling and close focus", async () => {
     expect(event.defaultPrevented).toBe(true);
     expect(selected).toHaveAttribute("aria-selected", "true");
   }
-  (
-    screen
-      .getByRole("dialog")
-      .querySelector("[data-panel-workspace]") as HTMLElement
-  ).focus();
+  (detailWorkspace() as HTMLElement).focus();
   expect(closeTabs("buzz:close-active-tab")).toBe(true);
   expect(notes).not.toBeInTheDocument();
-  expect(
-    screen.getByRole("dialog", { name: "Thread · Alpha" }),
-  ).toContainElement(document.activeElement as HTMLElement);
+  expect(detailWorkspace()).toContainElement(
+    document.activeElement as HTMLElement,
+  );
 });
 
 it("leaves Shift+Escape (Mark all as read) to a side thread, closing it on Escape", async () => {
@@ -697,8 +685,10 @@ it("leaves Shift+Escape (Mark all as read) to a side thread, closing it on Escap
   act(() =>
     tabs.result.current.openThreadTab("alpha", root, root, undefined, "side"),
   );
-  const thread = await screen.findByRole("dialog", { name: "Thread · Alpha" });
-  const content = thread.querySelector("[data-panel-workspace]");
+  const thread = await screen.findByRole("tabpanel", {
+    name: "Thread · Alpha",
+  });
+  const content = thread.closest("[data-panel-workspace]");
   if (!content) throw new Error("The side thread has no content");
   fireEvent.keyDown(content, { key: "Escape", shiftKey: true });
   expect(thread).toBeInTheDocument();
@@ -713,22 +703,22 @@ it.each(["stream", "solo"] as const)(
     h.composer.focus();
     await h.user.keyboard("Keep typing");
     await h.open();
-    expect(screen.getByRole("dialog", { name: "Notes" })).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel", { name: "Notes" })).toBeInTheDocument();
     const modal = document.createElement("dialog");
     modal.open = true;
     document.body.append(modal);
     closeTabs();
     modal.remove();
-    expect(screen.getByRole("dialog", { name: "Notes" })).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel", { name: "Notes" })).toBeInTheDocument();
     expect(closeTabs()).toBe(true);
     expect(
-      screen.queryByRole("dialog", { name: "Notes" }),
+      screen.queryByRole("tabpanel", { name: "Notes" }),
     ).not.toBeInTheDocument();
-    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await vi.waitFor(() => expect(detailWorkspace()).toBeNull());
     expect(h.composer).toHaveFocus();
     expect(h.composer).toHaveTextContent("Keep typing");
     closeTabs();
-    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await vi.waitFor(() => expect(detailWorkspace()).toBeNull());
     expect(h.composer).toHaveFocus();
     expect(h.composer).toHaveTextContent("Keep typing");
   },
@@ -740,12 +730,15 @@ it.each(["stream", "solo"] as const)(
     const h = await page(type);
     const trigger = await headerAction("Open notes");
     await h.user.click(trigger);
-    await screen.findByRole("dialog", { name: "Notes" });
-    await h.user.click(screen.getByRole("button", { name: "Detail actions" }));
+    await screen.findByRole("tabpanel", { name: "Notes" });
+    await h.user.pointer({
+      target: screen.getByRole("tab", { name: "Notes" }),
+      keys: "[MouseRight]",
+    });
     await h.user.click(
-      await screen.findByRole("button", { name: "Close all details" }),
+      await screen.findByRole("menuitem", { name: "Close all tabs" }),
     );
-    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await vi.waitFor(() => expect(detailWorkspace()).toBeNull());
     expect(h.composer).toBeInTheDocument();
     expect(
       document.activeElement?.closest('[aria-hidden="true"], [inert]'),
@@ -774,11 +767,14 @@ it("an empty tab menu returns keyboard focus to the conversation identity", asyn
 it("the detail sheet actions clear the page's retained tabs too", async () => {
   const h = await page();
   await h.open();
-  await h.user.click(screen.getByRole("button", { name: "Detail actions" }));
+  await h.user.pointer({
+    target: screen.getByRole("tab", { name: "Notes" }),
+    keys: "[MouseRight]",
+  });
   await h.user.click(
-    await screen.findByRole("button", { name: "Close all details" }),
+    await screen.findByRole("menuitem", { name: "Close all tabs" }),
   );
-  await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await vi.waitFor(() => expect(detailWorkspace()).toBeNull());
   const state = renderHook(() => useChannelTabState(h.session, "alpha"));
   expect(state.result.current.entries).toHaveLength(0);
   expect(h.composer).toBeInTheDocument();
@@ -792,7 +788,7 @@ it("close-all closes a thread restored from the old main placement", async () =>
     tabs.result.current.openThreadTab("alpha", root, root, undefined, "main"),
   );
   expect(
-    await screen.findByRole("dialog", { name: "Thread · Alpha" }),
+    await screen.findByRole("tabpanel", { name: "Thread · Alpha" }),
   ).toBeVisible();
   expect(closeTabs()).toBe(true);
   expect(screen.queryAllByRole("tab")).toHaveLength(0);
@@ -819,16 +815,16 @@ it.each([false, true])(
       );
     }
     await h.open();
-    expect(screen.getByRole("dialog", { name: "Notes" })).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel", { name: "Notes" })).toBeInTheDocument();
     h.composer.focus();
     expect(closeTabs("buzz:close-active-tab")).toBe(true);
     expect(
-      screen.queryByRole("dialog", { name: "Notes" }),
+      screen.queryByRole("tabpanel", { name: "Notes" }),
     ).not.toBeInTheDocument();
     expect(h.composer).toHaveFocus();
     await h.user.keyboard("{Enter}");
     expect(
-      screen.queryByRole("dialog", { name: "Notes" }),
+      screen.queryByRole("tabpanel", { name: "Notes" }),
     ).not.toBeInTheDocument();
     expect(h.composer).toHaveFocus();
     await h.user.keyboard("Keep typing");
@@ -854,12 +850,12 @@ it.each(["Notes", "Thread · Alpha"] as const)(
       await screen.findByRole("menuitem", { name: "Close other tabs" }),
     );
     await vi.waitFor(() =>
-      expect(screen.getByRole("dialog", { name })).toBeVisible(),
+      expect(screen.getByRole("tabpanel", { name })).toBeVisible(),
     );
     expect(
       tabs.result.current.tabs.length + tabs.result.current.entries.length,
     ).toBe(1);
-    expect(screen.getByRole("dialog", { name })).toContainElement(
+    expect(detailWorkspace()).toContainElement(
       document.activeElement as HTMLElement,
     );
   },
@@ -1060,7 +1056,7 @@ it("keeps a newer header move recoverable after an earlier one succeeds", async 
       { id: "conversation:gamma", kind: "conversation", channelId: "gamma" },
     ]),
   );
-  await screen.findByRole("dialog", { name: "Gamma" });
+  await screen.findByRole("tabpanel", { name: "Gamma" });
   const moveTo = async (name: string) => {
     await h.user.click(await headerAction("Chat actions"));
     (await screen.findByRole("menuitem", { name: "Move to" })).focus();
@@ -1162,7 +1158,15 @@ it("opens another conversation's tab in its channel, but not the current channel
   );
 });
 
+function detailWorkspace() {
+  return document.querySelector<HTMLElement>(
+    "[data-panel-dock]:not([hidden]) [data-panel-workspace]",
+  );
+}
+
 async function headerAction(name: string) {
+  if (name === "Conversation actions")
+    return screen.findByRole("button", { name });
   const action = screen.queryByRole("button", { name });
   if (action) return action;
   await userEvent.click(

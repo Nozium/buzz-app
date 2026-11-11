@@ -63,8 +63,6 @@
 }
 .mainConversation {
   width: 100%;
-  max-width: var(--size-conversation-frame);
-  margin-inline: auto;
 }
 .collectionSidebar {
   --sidebar-padding: var(--space-4);

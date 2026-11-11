@@ -329,6 +329,8 @@ html[data-keyboard-input] :is(.subviewBase, .subview) {
 }
 
 .workspaceIdentity {
+  display: flex;
+  justify-content: center;
   min-width: 0;
   max-width: 100%;
 }

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useSyncExternalStore } from "react";
-import { channelIcon } from "../../features/channels/channel-icon";
+import { ChannelAvatar } from "../../features/channels/ChannelAvatar";
 import { usePublicChannelSearch } from "../../features/channels/usePublicChannelSearch";
 import type {
   CompletionSuggestion,
@@ -129,7 +129,6 @@ export function ChannelCompletion({
         channel: ChannelSummary,
         member: boolean,
       ): CompletionSuggestion => {
-        const Icon = channelIcon(channel);
         const duplicate = (names.get(channel.name.toLowerCase()) ?? 0) > 1;
         const label = `#${channel.name}`.replace(/[\\`*_[\]()#<>~&]/g, "\\$&");
         const id = encodeURIComponent(channel.id).replace(
@@ -147,7 +146,7 @@ export function ChannelCompletion({
           id: channel.id,
           label: channel.name,
           ...(detail ? { detail } : {}),
-          preview: <Icon size={22} />,
+          preview: <ChannelAvatar name={channel.name} size="small" />,
           edit: { text: `[${label}](buzz://channel/${id})` },
           canSelect: () => {
             const current = member

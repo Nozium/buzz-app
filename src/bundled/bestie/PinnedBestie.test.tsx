@@ -685,10 +685,7 @@ it("restores Bestie threads with Back and Forward and retires every explicitly c
   expect(await screen.findByLabelText("Thread")).toBeVisible();
 
   await userEvent.click(
-    within(screen.getByRole("dialog", { name: "Are you there?" })).getByRole(
-      "button",
-      { name: "Close" },
-    ),
+    screen.getByRole("button", { name: "Close Are you there? tab" }),
   );
   rerender();
   expect(navigator.snapshot().entry.target).toEqual(bestie);
@@ -877,7 +874,7 @@ it("keeps the DM draft mounted behind a thread sheet and restores the reply draf
     await screen.findByRole("button", { name: "View thread: 1 reply" }),
   );
   f.rerender();
-  const sheet = await screen.findByRole("dialog", { name: "Are you there?" });
+  const sheet = await screen.findByRole("tabpanel", { name: "Are you there?" });
   expect(await screen.findByLabelText("Thread")).toBeVisible();
   expect(composer).toBeInTheDocument();
   expect(composer).toHaveTextContent("Main draft");
@@ -885,9 +882,15 @@ it("keeps the DM draft mounted behind a thread sheet and restores the reply draf
   await user.type(reply, "Reply draft");
   expect(reply).toHaveTextContent("Reply draft");
   expect(reply).toHaveFocus();
-  await user.click(within(sheet).getByRole("button", { name: "Close" }));
+  await user.click(
+    screen.getByRole("button", { name: "Close Are you there? tab" }),
+  );
   f.rerender();
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("tabpanel", { name: "Are you there?" }),
+    ).toBeNull(),
+  );
   expect(screen.getByRole("textbox", { name: "Message Pollen" })).toBe(
     composer,
   );
@@ -909,7 +912,11 @@ it("keeps the DM draft mounted behind a thread sheet and restores the reply draf
   ).toHaveTextContent("Reply draft");
   await user.keyboard("{Escape}");
   f.rerender();
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("tabpanel", { name: "Are you there?" }),
+    ).toBeNull(),
+  );
   expect(composer).toHaveTextContent("Main draft");
 });
 
@@ -968,12 +975,12 @@ it("offers the shared DM actions and channel details in Bestie", async () => {
   f.choose(pollen);
   const user = userEvent.setup();
   f.mount();
-  await user.click(await headerAction("Channel actions"));
+  await user.click(await headerAction("Conversation actions"));
   await user.click(
     await screen.findByRole("menuitem", { name: "View channel details" }),
   );
   expect(
-    await screen.findByRole("dialog", { name: "Channel settings" }),
+    await screen.findByRole("tabpanel", { name: "Channel settings" }),
   ).toBeVisible();
   expect(
     screen.getByRole("textbox", { name: "Message Pollen", hidden: true }),
@@ -1002,7 +1009,7 @@ it("opens eligible plugin menu items in the Bestie workspace", async () => {
     } satisfies RegisteredPanel,
   ]);
   f.mount();
-  await user.click(await headerAction("Channel actions"));
+  await user.click(await headerAction("Conversation actions"));
   await user.click(
     await screen.findByRole("menuitem", { name: "View canvas" }),
   );
@@ -1014,6 +1021,8 @@ it("opens eligible plugin menu items in the Bestie workspace", async () => {
 
 /** Header tools retain their controls inside the shared overflow. */
 async function headerAction(name: string) {
+  if (name === "Conversation actions")
+    return screen.findByRole("button", { name });
   const action = screen.queryByRole("button", { name });
   if (action) return action;
   await userEvent.click(

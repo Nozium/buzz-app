@@ -25,7 +25,7 @@ function Inspector() {
       <button type="button" onClick={() => setOpen(true)}>
         Open inspector
       </button>
-      <PanelDock open={open} keepMounted className="">
+      <PanelDock presentation="sheet" open={open} keepMounted className="">
         <PanelWorkspace
           value="notes"
           select={() => {}}
@@ -102,7 +102,7 @@ test("switching from a conversation to a tool keeps the editor mounted and lets 
     return (
       <>
         <input aria-label="Main draft" />
-        <PanelDock open className="">
+        <PanelDock presentation="sheet" open className="">
           <PanelWorkspace
             value={selected}
             select={select}

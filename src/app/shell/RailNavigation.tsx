@@ -1,13 +1,13 @@
 import {
   useEffect,
   useMemo,
-  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
   type ComponentProps,
   type ReactNode,
 } from "react";
+import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
 import { flushSync } from "react-dom";
 import type { RelaySession } from "../../features/relay/session";
 import type { ChannelSummary } from "../../features/relay/contracts";
@@ -23,10 +23,7 @@ import { canMessageAgent } from "../../features/agents/choices";
 import { archiveHides } from "../../features/relay/identity-archives";
 import { readSearchUsage } from "../../features/search/usage";
 import { avatarMedia } from "../../shared/avatar-source";
-import {
-  channelAvatarSurface,
-  channelIcon,
-} from "../../features/channels/channel-icon";
+import { ChannelAvatar } from "../../features/channels/ChannelAvatar";
 import { dmLabel } from "../../bundled/inbox/dm-label";
 import { useIdentityNames } from "../../features/identity-names/react";
 import { useSavedHiddenDmIds } from "../../bundled/channels/useHiddenDms";
@@ -45,23 +42,42 @@ import { Input } from "../../shared/design-system/ui/Input";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import {
   ArrowRightIcon,
+  Filter2Icon,
   ChatCircleIcon,
   PinIcon,
   PlusIcon,
-  RobotIcon,
   StorefrontIcon,
+  RobotIcon,
+  UserIcon,
 } from "../../shared/design-system/icons";
 import { useRailLayout } from "./rail-layout";
 import { RailArrangement, RailGroup, RailSourceRow } from "./RailArrangement";
 import { ContributedRailSections } from "../../features/channel-navigation/ContributedRailSections";
 import type { SidebarSections } from "../../features/channel-navigation/sidebar-sections-service";
 import { PageNavigation } from "./PageNavigation";
+import { RailConversationList } from "./RailConversationList";
 import { useRailPins, type RailEntry } from "./rail-pins";
-import { useBestieConversation } from "./bestie-context";
 import { useChannelNavigation } from "../../features/channel-navigation/ChannelNavigationState";
-import { MenuItem } from "../../shared/design-system/ui/Menu";
+import {
+  MenuItem,
+  MenuRoot,
+  MenuTrigger,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuCheckboxItem,
+  MenuGroupLabel,
+  MenuSeparator,
+} from "../../shared/design-system/ui/Menu";
 import styles from "./RailNavigation.module.css";
-import { preferredRailAgents, recentReceivedMessages } from "./rail-activity";
+import { preferredRailAgents } from "./rail-activity";
+import {
+  ConversationList,
+  CollectionFilters,
+  conversationViews,
+  includeMessagesChannel,
+  useActivityView,
+} from "../../features/conversation/ConversationList";
 
 export function RailNavigation({
   session,
@@ -70,10 +86,10 @@ export function RailNavigation({
   pages,
   selected,
   onSelect,
-  pinnedConversation,
   creationAction,
   sidebarSections,
   pageSection,
+  compact = false,
 }: {
   session: RelaySession;
   scope: NavigationScope;
@@ -84,17 +100,16 @@ export function RailNavigation({
     key: string,
     options?: Pick<NavigationOpenOptions, "focus"> & { section?: string },
   ): void;
-  pinnedConversation?: ReactNode;
   creationAction?: ReactNode;
   sidebarSections?: SidebarSections | undefined;
   pageSection?: string | undefined;
+  compact?: boolean;
 }) {
   const partition = `${scope.communityOrigin}:${scope.viewer}`;
   const contributed = useSyncExternalStore(
     sidebarSections?.subscribe ?? noSubscription,
     sidebarSections?.snapshot ?? noSections,
   );
-  const bestieChannel = useBestieConversation(session);
   const channelNavigation = useChannelNavigation();
   const closeMuteMenu = useRef<(() => void) | undefined>(undefined);
   const muteRecovery =
@@ -124,6 +139,13 @@ export function RailNavigation({
   const resolveName = useIdentityNames(session.names);
   const { layout: railLayout, reset: resetPlacement } =
     useRailLayout(partition);
+  const [messageView, setMessageView] = useActivityView(partition);
+  const messageSort = messageView.sort ?? "recent";
+  const messageFilter = messageView.filter;
+  const setMessageSort = (sort: "recent" | "alpha") =>
+    setMessageView({ ...messageView, sort });
+  const setMessageFilter = (filter: typeof messageFilter) =>
+    setMessageView({ ...messageView, filter });
   const { pins, setPinned } = useRailPins(partition);
   const list = useSyncExternalStore(
     session.channels.subscribeList,
@@ -138,10 +160,6 @@ export function RailNavigation({
     session.archives.subscribe,
     session.archives.snapshot,
   );
-  const inbox = useSyncExternalStore(
-    session.unread.subscribeInbox,
-    session.unread.inbox,
-  );
   const navigation = useSyncExternalStore(
     navigator.subscribe,
     navigator.snapshot,
@@ -153,10 +171,6 @@ export function RailNavigation({
   const selectedSection = isSidebarSectionRoute(sectionRoute)
     ? sectionRoute.section
     : undefined;
-  const [messageVersion, updateMessages] = useReducer(
-    (version: number) => version + 1,
-    0,
-  );
   const [picker, setPicker] = useState(false);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string>();
@@ -170,7 +184,6 @@ export function RailNavigation({
     pending.current = undefined;
     setOpening(undefined);
   }, [navigation.attempt.id]);
-  useEffect(() => session.subscribeIncoming(() => updateMessages()), [session]);
   useEffect(() => () => pending.current?.abort(), []);
 
   const channels = useMemo(
@@ -262,7 +275,7 @@ export function RailNavigation({
     (): RailEntry[] =>
       pages.map((page) => ({
         id: page.key,
-        label: page.title === "Channels" ? "Messages" : page.title,
+        label: page.title === "Channels" ? "Team" : page.title,
         kind: "page",
         target: {
           version: 1,
@@ -381,7 +394,30 @@ export function RailNavigation({
             entry.target.messageId === target.messageId)
       : targetKey(entry.target) === targetKey(target);
   };
-  const artwork = (entry: RailEntry, avatarOnly = false) => {
+  const avatarArtwork = (entry: RailEntry, avatarOnly = false) => {
+    const channelId =
+      entry.target.kind === "conversation" ? entry.target.channelId : undefined;
+    const channel = channelId
+      ? channels.find((item) => item.id === channelId)
+      : undefined;
+    const participants =
+      channel?.channelType === "dm"
+        ? [...new Set(channel.participants ?? [])].filter(
+            (person) => person !== session.viewer,
+          )
+        : [];
+    if (avatarOnly && participants.length > 1)
+      return (
+        <AvatarStack
+          size="cluster"
+          items={participants.slice(0, 3).map((person) => ({
+            id: person,
+            name: resolveName(person, profiles.get(person)?.name ?? "Member"),
+            src: avatarMedia(profiles.get(person)?.picture, session.media),
+            shape: profiles.get(person)?.isAgent ? "squircle" : "circle",
+          }))}
+        />
+      );
     if (entry.kind === "person" || entry.kind === "agent")
       return (
         <Avatar
@@ -392,24 +428,11 @@ export function RailNavigation({
           fallback={entry.label}
         />
       );
-    const channelId =
-      entry.target.kind === "conversation" ? entry.target.channelId : undefined;
-    const channel = channelId
-      ? channels.find((channel) => channel.id === channelId)
-      : undefined;
-    const Icon =
-      entry.kind === "channel"
-        ? channelIcon(channel)
-        : entry.kind === "chat"
-          ? ChatCircleIcon
-          : StorefrontIcon;
+    const Icon = entry.kind === "chat" ? ChatCircleIcon : StorefrontIcon;
     return entry.kind === "channel" ? (
-      <Avatar
+      <ChannelAvatar
         size={avatarOnly ? "fill" : "compact"}
-        alt=""
-        fallback={entry.label}
-        fallbackContent={<Icon size={avatarOnly ? 24 : 14} />}
-        fallbackSurface={channelAvatarSurface(entry.label)}
+        name={entry.label}
       />
     ) : avatarOnly ? (
       <Avatar
@@ -429,6 +452,25 @@ export function RailNavigation({
       />
     ) : (
       <Icon size={18} />
+    );
+  };
+  const artwork = (entry: RailEntry, avatarOnly = false) => {
+    const avatar = avatarArtwork(entry, avatarOnly);
+    if (!avatarOnly) return avatar;
+    return (
+      <span className={styles.pinArtwork}>
+        {isSelected(entry) && (
+          <span
+            className={styles.pinSelection}
+            data-channel={entry.kind === "channel" || undefined}
+            data-agent={entry.kind === "agent" || undefined}
+            aria-hidden="true"
+          >
+            <span className={styles.pinSelectionArtwork}>{avatar}</span>
+          </span>
+        )}
+        {avatar}
+      </span>
     );
   };
   const row = (entry: RailEntry, avatarOnly = false) => {
@@ -485,18 +527,12 @@ export function RailNavigation({
     );
   };
 
-  // Local UI changes and profile arrivals do not rescan loaded histories.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: incoming messages invalidate already-loaded windows.
-  const recent = useMemo(
-    () =>
-      recentReceivedMessages(
-        session,
-        channels.filter((channel) => channel.channelType !== "solo"),
-        inbox.items,
-        bestieChannel,
-      ),
-    [session, channels, inbox.items, bestieChannel, messageVersion],
+  const sourceRow = (entry: RailEntry, section: string) => (
+    <RailSourceRow key={entry.id} section={section} entry={entry}>
+      {row(entry, section === "pins" && pageSection !== "pins")}
+    </RailSourceRow>
   );
+
   const soloChats = useMemo(
     () =>
       channels
@@ -522,7 +558,6 @@ export function RailNavigation({
         "buzz.channels/channels",
         "buzz.inbox/inbox",
         "buzz.agents/agents",
-        "buzz.bestie/bestie",
       ].includes(page.key),
   );
   const current = entries.find(
@@ -535,7 +570,15 @@ export function RailNavigation({
     kind: "page" as const,
     target: navigation.entry.target,
   };
-  const bestieEntry = byId.get("buzz.bestie/bestie");
+  const sortMessages = (
+    a: RailEntry,
+    b: RailEntry,
+    order: ReadonlyMap<string, number>,
+  ) =>
+    (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(b.id) ?? Number.MAX_SAFE_INTEGER) ||
+    a.label.localeCompare(b.label) ||
+    a.id.localeCompare(b.id);
   const matches = (picker ? entries : [])
     .filter((entry) =>
       `${entry.label} ${entry.kind}`
@@ -544,18 +587,164 @@ export function RailNavigation({
     )
     .slice(0, 60);
 
+  const messageCard = (
+    children: ReactNode,
+    order: ReadonlyMap<string, number>,
+  ) => (
+    <RailGroup
+      id="messages"
+      title="Team"
+      rowsLabel="Recent conversations"
+      pageContent={sectionPage}
+      sortEntries={(a, b) => sortMessages(a, b, order)}
+      action={
+        <>
+          <MenuRoot>
+            <MenuTrigger
+              render={
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  aria-label="Filter and sort Team card"
+                  title="Filter and sort Team card"
+                  icon={<Filter2Icon size={16} strokeWidth={2} />}
+                />
+              }
+            />
+            <MenuPopup align="end" size="compact">
+              <MenuRadioGroup
+                aria-label="Team view"
+                value={messageFilter}
+                onValueChange={(value) => {
+                  const choice = conversationViews.find(
+                    (item) => item.value === value,
+                  );
+                  if (choice) setMessageFilter(choice.value);
+                }}
+              >
+                <MenuGroupLabel>Show</MenuGroupLabel>
+                {conversationViews.map(({ value, label }) => (
+                  <MenuRadioItem key={value} value={value} closeOnClick>
+                    {label}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+              <MenuSeparator />
+              <MenuCheckboxItem
+                checked={messageView.unread}
+                onCheckedChange={(unread) =>
+                  setMessageView({ ...messageView, unread })
+                }
+              >
+                Unread only
+              </MenuCheckboxItem>
+              <MenuSeparator />
+              <MenuRadioGroup
+                aria-label="Team sort order"
+                value={messageSort}
+                onValueChange={(value) => {
+                  if (value === "recent" || value === "alpha")
+                    setMessageSort(value);
+                }}
+              >
+                <MenuGroupLabel>Sort</MenuGroupLabel>
+                <MenuRadioItem value="recent" closeOnClick>
+                  Recent activity
+                </MenuRadioItem>
+                <MenuRadioItem value="alpha" closeOnClick>
+                  A–Z
+                </MenuRadioItem>
+              </MenuRadioGroup>
+            </MenuPopup>
+          </MenuRoot>
+          {creationAction}
+        </>
+      }
+      footer={
+        <NavigationItem
+          label="View more"
+          data-rail-view-more=""
+          aria-label="View more team"
+          icon={<ArrowRightIcon size={18} />}
+          selected={
+            navigation.entry.target.kind === "page" &&
+            !isSidebarSectionRoute(navigation.entry.target.route?.params) &&
+            selected === "buzz.channels/channels"
+          }
+          onClick={() => onSelect("buzz.channels/channels")}
+        />
+      }
+    >
+      {children}
+    </RailGroup>
+  );
+  let sectionPage: ReactNode;
+  if (pageSection === "messages" || pageSection === "solo") {
+    const activeGroups = new Set([
+      "navigation",
+      "pins",
+      "messages",
+      "solo",
+      "agents",
+      ...contributed.map((section) => section.key),
+      ...railLayout.sections.map((section) => section.id),
+    ]);
+    const source = (
+      pageSection === "solo"
+        ? soloChats.map((channel) => channel.id)
+        : channels.map((channel) => channel.id)
+    ).flatMap((id) => {
+      const entry = byId.get(`channel:${id}`);
+      return entry &&
+        !railLayout.placements.some(
+          (placed) =>
+            placed.entry.id === entry.id && activeGroups.has(placed.section),
+        )
+        ? [entry]
+        : [];
+    });
+    const placed = railLayout.placements
+      .filter((item) => item.section === pageSection)
+      .map(({ entry }) => byId.get(entry.id) ?? entry);
+    sectionPage = (
+      <RailConversationList
+        section={pageSection}
+        entries={[...source, ...placed]}
+        session={session}
+        scope={scope}
+        navigator={navigator}
+        target={navigation.entry.target}
+        renderOther={(entry) => row(entry)}
+      />
+    );
+  }
   return (
     <>
       <RailArrangement
         key={partition}
         partition={partition}
+        renderSectionList={(id, title, entries, action) => (
+          <RailConversationList
+            section={id}
+            title={title}
+            heading={
+              <CollectionFilters title={title} actions={action}>
+                {null}
+              </CollectionFilters>
+            }
+            entries={entries}
+            session={session}
+            scope={scope}
+            navigator={navigator}
+            target={navigation.entry.target}
+            renderOther={(entry) => row(entry)}
+          />
+        )}
         pageSection={pageSection}
+        compact={compact}
         selectedSection={selectedSection}
         openSection={(id) =>
-          void navigator.open(
-            contributed.find((section) => section.key === id)?.listTarget ??
-              sidebarSectionTarget(scope, id),
-          )
+          void navigator.open(sidebarSectionTarget(scope, id))
         }
         isPinned={(entry) => pinned.has(entry.id)}
         onTogglePin={(entry, nextPinned) => {
@@ -570,7 +759,8 @@ export function RailNavigation({
             )?.focus();
         }}
         renderEntry={(entry, section) => {
-          if (section === "pins") return row(byId.get(entry.id) ?? entry, true);
+          if (section === "pins")
+            return row(byId.get(entry.id) ?? entry, pageSection !== "pins");
           const contribution = contributed.find((section) =>
             entry.id.startsWith(`contributed:${section.key}:`),
           );
@@ -634,6 +824,7 @@ export function RailNavigation({
           {
             id: "navigation",
             title: "Plugins",
+            icon: <StorefrontIcon size={22} />,
             content: (
               <RailGroup
                 id="navigation"
@@ -665,9 +856,10 @@ export function RailNavigation({
                 })}
                 <RailSourceRow section="navigation" entry={pluginCatalog}>
                   <NavigationItem
-                    label="Plugins"
+                    label="View more"
+                    data-rail-view-more=""
                     aria-label="View all plugins"
-                    icon={<StorefrontIcon size={18} />}
+                    icon={<ArrowRightIcon size={18} />}
                     onClick={() => onSelect("settings", { section: "plugins" })}
                   />
                 </RailSourceRow>
@@ -677,6 +869,7 @@ export function RailNavigation({
           {
             id: "pins",
             title: "Pins",
+            icon: <PinIcon size={22} />,
             content: (
               <RailGroup
                 id="pins"
@@ -695,15 +888,7 @@ export function RailNavigation({
                   />
                 }
               >
-                {pins.map((pin) => (
-                  <RailSourceRow
-                    key={pin.id}
-                    section="pins"
-                    entry={byId.get(pin.id) ?? pin}
-                  >
-                    {row(byId.get(pin.id) ?? pin, true)}
-                  </RailSourceRow>
-                ))}
+                {pins.map((pin) => sourceRow(byId.get(pin.id) ?? pin, "pins"))}
                 {!pins.length &&
                   !railLayout.placements.some(
                     (item) => item.section === "pins",
@@ -722,61 +907,59 @@ export function RailNavigation({
           },
           {
             id: "messages",
-            title: "Messages",
+            title: "Team",
+            icon: <ChatCircleIcon size={22} />,
             content: (
-              <RailGroup
-                id="messages"
-                title="Messages"
-                rowsLabel="Recent conversations"
-                action={creationAction}
-                footer={
-                  <NavigationItem
-                    label="View more"
-                    aria-label="View more messages"
-                    icon={<ArrowRightIcon size={18} />}
-                    selected={
-                      navigation.entry.target.kind === "page" &&
-                      !isSidebarSectionRoute(
-                        navigation.entry.target.route?.params,
-                      ) &&
-                      selected === "buzz.channels/channels"
-                    }
-                    onClick={() => onSelect("buzz.channels/channels")}
-                  />
+              <ConversationList
+                session={session}
+                navigator={navigator}
+                scope={scope}
+                target={navigation.entry.target}
+                view={messageView}
+                includeChannel={(channel) =>
+                  includeMessagesChannel(channel, messageView)
                 }
-              >
-                {pinnedConversation && bestieEntry ? (
-                  <RailSourceRow section="messages" entry={bestieEntry}>
-                    {pinnedConversation}
-                  </RailSourceRow>
-                ) : (
-                  pinnedConversation
-                )}
-                {recent.map((message) => {
-                  const entry = byId.get(`channel:${message.channelId}`);
-                  return entry ? (
-                    <RailSourceRow
-                      key={entry.id}
-                      section="messages"
-                      entry={entry}
-                    >
-                      {row(entry)}
-                    </RailSourceRow>
-                  ) : null;
-                })}
-                {!recent.length && (
-                  <p className={styles.note}>No received messages yet.</p>
-                )}
-              </RailGroup>
+                renderEntries={(items) => {
+                  const filtered = items.flatMap((item) => {
+                    const source = byId.get(`channel:${item.target.channelId}`);
+                    return source
+                      ? [
+                          {
+                            ...source,
+                            id: item.key.startsWith("e:")
+                              ? `activity:${item.key}`
+                              : source.id,
+                            label: item.label,
+                            target: item.target,
+                            at: item.at,
+                          },
+                        ]
+                      : [];
+                  });
+                  return messageCard(
+                    [
+                      ...filtered.map((entry) => sourceRow(entry, "messages")),
+                      !filtered.length && (
+                        <p key="empty" className={styles.note}>
+                          No matching conversations.
+                        </p>
+                      ),
+                    ],
+                    new Map(filtered.map((entry, index) => [entry.id, index])),
+                  );
+                }}
+              />
             ),
           },
           {
             id: "solo",
             title: "Solo",
+            icon: <UserIcon size={22} />,
             content: (
               <RailGroup
                 id="solo"
                 title="Solo"
+                pageContent={sectionPage}
                 action={
                   <IconButton
                     size="sm"
@@ -791,11 +974,7 @@ export function RailNavigation({
               >
                 {soloChats.map((channel) => {
                   const entry = byId.get(`channel:${channel.id}`);
-                  return entry ? (
-                    <RailSourceRow key={entry.id} section="solo" entry={entry}>
-                      {row(entry)}
-                    </RailSourceRow>
-                  ) : null;
+                  return entry ? sourceRow(entry, "solo") : null;
                 })}
                 {!soloChats.length && (
                   <p className={styles.note}>No Solo chats yet.</p>
@@ -806,6 +985,7 @@ export function RailNavigation({
           {
             id: "agents",
             title: "Agents",
+            icon: <RobotIcon size={22} />,
             content: (
               <RailGroup
                 id="agents"
@@ -813,17 +993,14 @@ export function RailNavigation({
                 footer={
                   <NavigationItem
                     label="View more"
+                    data-rail-view-more=""
                     aria-label="View more agents"
-                    icon={<RobotIcon size={18} />}
+                    icon={<ArrowRightIcon size={18} />}
                     onClick={() => onSelect("buzz.agents/agents")}
                   />
                 }
               >
-                {topAgents.map((entry) => (
-                  <RailSourceRow key={entry.id} section="agents" entry={entry}>
-                    {row(entry)}
-                  </RailSourceRow>
-                ))}
+                {topAgents.map((entry) => sourceRow(entry, "agents"))}
                 {!topAgents.length && (
                   <p className={styles.note}>
                     {agents.pending ? "Loading agents…" : "No agents yet."}
@@ -835,6 +1012,7 @@ export function RailNavigation({
           ...contributed.map((section) => ({
             id: section.key,
             title: section.title,
+            icon: <>{section.icon}</>,
             content: sidebarSections && (
               <ContributedRailSections
                 registry={sidebarSections}

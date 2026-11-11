@@ -12,8 +12,10 @@ export function AppDock({
   profile,
   settings,
   children,
+  header,
   showPrimaryNavigation = true,
   open = true,
+  compact = false,
   onDismiss,
   ...pages
 }: Omit<ComponentProps<typeof PageNavigation>, "placement"> & {
@@ -22,8 +24,10 @@ export function AppDock({
   profile: ReactNode;
   settings: ReactNode;
   children?: ReactNode;
+  header?: ReactNode;
   showPrimaryNavigation?: boolean;
   open?: boolean;
+  compact?: boolean;
   onDismiss?: () => void;
 }) {
   const scrollEdges = useScrollEdges("block");
@@ -33,6 +37,7 @@ export function AppDock({
       aria-label="Apps"
       id="shell-rail"
       hidden={!open}
+      data-compact={compact || undefined}
       onKeyDown={(event) => {
         if (
           event.key === "Escape" &&
@@ -51,6 +56,11 @@ export function AppDock({
       }}
       data-search-external={!search || undefined}
     >
+      {header && (
+        <div className={`${sectionStyles.group} ${styles.heading}`}>
+          {header}
+        </div>
+      )}
       <div
         className={styles.apps}
         ref={scrollEdges}
@@ -61,7 +71,10 @@ export function AppDock({
             <div className={`${sectionStyles.group} ${styles.primary}`}>
               <NavigationSection>
                 {search}
-                <PageNavigation {...pages} placement="sidebar" />
+                <PageNavigation
+                  {...pages}
+                  placement={compact ? "dock" : "sidebar"}
+                />
               </NavigationSection>
             </div>
           )}

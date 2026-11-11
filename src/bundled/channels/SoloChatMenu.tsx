@@ -24,7 +24,10 @@ import {
   MenuSubmenu,
   MenuSubmenuPopup,
   MenuSubmenuTrigger,
+  MenuGroup,
+  MenuGroupLabel,
 } from "../../shared/design-system/ui/Menu";
+import { useHeaderToolsMenu } from "../../features/conversation/ConversationHeaderTools";
 import {
   FolderSimpleIcon,
   HashArrowInIcon,
@@ -69,6 +72,7 @@ export function SoloChatMenuItems({
   onReadResult(error?: string): void;
 }) {
   const handoff = useChannelNavigation();
+  const overflow = useHeaderToolsMenu();
   const regions = useSoloNavigation(session);
   const preferences = session.soloPreferences;
   const snapshot = useSyncExternalStore(
@@ -81,6 +85,27 @@ export function SoloChatMenuItems({
   const grouped = groups.some((group) => group.id === assigned);
   // Archived chats keep only what still applies, including Unarchive.
   const active = !channel.archived;
+  const moveItems = (
+    <>
+      {grouped && (
+        <MenuItem disabled={!preferences.writable} onClick={() => onMove?.()}>
+          Chats
+        </MenuItem>
+      )}
+      {groups.map((group) => (
+        <MenuItem
+          key={group.id}
+          disabled={!preferences.writable}
+          onClick={() => onMove?.(group.id)}
+        >
+          {group.name}
+        </MenuItem>
+      ))}
+      <MenuItem disabled={!preferences.writable} onClick={onNewWorkspace}>
+        New workspace
+      </MenuItem>
+    </>
+  );
   return (
     <>
       {session.unread.sync().capability === "frontier-sync" && (
@@ -125,7 +150,13 @@ export function SoloChatMenuItems({
       {active &&
         !regions.excluded.has(channel.id) &&
         onMove &&
-        onNewWorkspace && (
+        onNewWorkspace &&
+        (overflow ? (
+          <MenuGroup>
+            <MenuGroupLabel>Move to</MenuGroupLabel>
+            {moveItems}
+          </MenuGroup>
+        ) : (
           <MenuSubmenu>
             <MenuSubmenuTrigger disabled={!preferences.writable}>
               <MenuIcon>
@@ -134,16 +165,10 @@ export function SoloChatMenuItems({
               Move to
             </MenuSubmenuTrigger>
             <MenuSubmenuPopup aria-label="Workspace">
-              {grouped && <MenuItem onClick={() => onMove()}>Chats</MenuItem>}
-              {groups.map((group) => (
-                <MenuItem key={group.id} onClick={() => onMove(group.id)}>
-                  {group.name}
-                </MenuItem>
-              ))}
-              <MenuItem onClick={onNewWorkspace}>New workspace</MenuItem>
+              {moveItems}
             </MenuSubmenuPopup>
           </MenuSubmenu>
-        )}
+        ))}
       {active && children}
       <MenuSeparator />
       {active && (

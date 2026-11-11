@@ -14,6 +14,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ConversationHostServices } from "../../features/conversation/ConversationHost";
 import type { ConversationExtensions } from "../../features/conversation/contracts";
 import { setThreadPlacementPreference } from "../../features/messages/thread-preferences";
+import { createRelaySession } from "../../features/relay/session";
 import type { RelaySession } from "../../features/relay/session";
 import type { ConversationTab as Tab } from "./useChannelTabState";
 import { PageTabs, type PageTabOptions, type PageTabTarget } from "./PageTabs";
@@ -94,6 +95,7 @@ function fixture(visits?: boolean) {
   ]);
   const available: never[] = [];
   const session = {
+    ...createRelaySession(null).session,
     viewer: "viewer",
     channels: {
       ensureList: () => () => {},
@@ -161,23 +163,17 @@ function fixture(visits?: boolean) {
     },
   };
 }
-const side = () => {
-  const sheet = within(screen.getByRole("dialog"));
-  const tabs = sheet.queryAllByRole("tab");
-  return tabs.length
-    ? tabs.map((tab) => tab.textContent)
-    : [sheet.getByRole("heading", { level: 2 }).textContent];
-};
+const side = () =>
+  within(screen.getByRole("tablist", { name: "Panel tabs" }))
+    .getAllByRole("tab")
+    .map((tab) => tab.textContent);
 
-it("keeps the page in view, opening threads in the bottom expansion", () => {
+it("keeps the page in view, opening threads beside it", () => {
   setThreadPlacementPreference("main");
   const page = fixture();
   expect(screen.getByText("Chat list")).toBeVisible();
   expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
-  expect(screen.getByRole("dialog")).toHaveAttribute(
-    "data-placement",
-    "bottom",
-  );
+  expect(screen.getByRole("tabpanel", { name: "Root text" })).toBeVisible();
   expect(side()).toEqual(["Root text"]);
   expect(screen.getByText("Chat list")).toBeVisible();
   expect(screen.getByText("thread in alpha")).toBeVisible();
@@ -351,10 +347,10 @@ it("names a thread's conversation inside it, linking where the menu's Open in ch
       name: `DM · Ann, Bob, ${formatPublicKey("e".repeat(64))} +1`,
     }),
   ).toBeVisible();
-  expect(screen.getByRole("dialog", { name: "Root text" })).toBeVisible();
+  expect(screen.getByRole("tabpanel", { name: "Root text" })).toBeVisible();
 });
 
-it("opens a detail's conversation from its header actions and hands focus to navigation", async () => {
+it("opens a detail's conversation from its tab actions and hands focus to navigation", async () => {
   const user = userEvent.setup();
   const page = fixture();
   page.open({ channelId: "alpha", threadId: "root", messageId: "reply" });
@@ -365,12 +361,15 @@ it("opens a detail's conversation from its header actions and hands focus to nav
     focused = document.activeElement;
     return { status: "opened" };
   });
-  const workspace = document.querySelector("[data-panel-workspace]");
-  await user.click(screen.getByRole("button", { name: "Detail actions" }));
+  const selected = screen.getByRole("tab", { name: "Root text" });
+  await user.pointer({
+    target: screen.getByRole("tab", { selected: true, name: /Root text|beta/ }),
+    keys: "[MouseRight]",
+  });
   await user.click(
-    await screen.findByRole("button", { name: "Open in channel" }),
+    await screen.findByRole("menuitem", { name: "Open in channel" }),
   );
-  await vi.waitFor(() => expect(focused).toBe(workspace));
+  await vi.waitFor(() => expect(focused).toBe(selected));
   expect(page.navigation.open).toHaveBeenLastCalledWith({
     version: 1,
     kind: "conversation",
@@ -381,9 +380,12 @@ it("opens a detail's conversation from its header actions and hands focus to nav
     context: "channel",
   });
   page.open({ channelId: "beta" });
-  await user.click(screen.getByRole("button", { name: "Detail actions" }));
+  await user.pointer({
+    target: screen.getByRole("tab", { selected: true, name: /Root text|beta/ }),
+    keys: "[MouseRight]",
+  });
   await user.click(
-    await screen.findByRole("button", { name: "Open in channel" }),
+    await screen.findByRole("menuitem", { name: "Open in channel" }),
   );
   await vi.waitFor(() =>
     expect(page.navigation.open).toHaveBeenLastCalledWith({

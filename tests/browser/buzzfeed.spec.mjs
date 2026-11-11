@@ -479,9 +479,7 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
   await sheet
     .getByRole("button", { name: "Conversation actions", exact: true })
     .click();
-  await page
-    .getByRole("button", { name: "Open in Messages", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Open in Team", exact: true }).click();
   await expect(sheet).toHaveCount(0);
   await page.goBack();
   await expect(feed).toBeVisible();
@@ -507,10 +505,10 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
   });
   const dock = page.getByRole("navigation", { name: "Apps", exact: true });
   await dock
-    .getByRole("button", { name: "View more messages", exact: true })
+    .getByRole("button", { name: "View more team", exact: true })
     .click();
   await expect(
-    dock.getByRole("button", { name: "View more messages", exact: true }),
+    dock.getByRole("button", { name: "View more team", exact: true }),
   ).toHaveAttribute("aria-current", "page");
   await dock.getByRole("button", { name: "Activity", exact: true }).click();
   await opener.click();
@@ -520,7 +518,7 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
   await expect(page).not.toHaveURL(/channelId/);
   await page.goBack();
   await expect(
-    dock.getByRole("button", { name: "View more messages", exact: true }),
+    dock.getByRole("button", { name: "View more team", exact: true }),
   ).toHaveAttribute("aria-current", "page");
 });
 
@@ -533,10 +531,10 @@ test("Activity sheets use a light window-wide scrim above the rail and header", 
   await page.goto(app.origin);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   await rail
-    .getByRole("button", { name: "View more messages", exact: true })
+    .getByRole("button", { name: "View more team", exact: true })
     .click();
   await expect(
-    page.getByRole("region", { name: "Messages", exact: true }),
+    page.getByRole("region", { name: "Team", exact: true }),
   ).toBeVisible();
   await rail.getByRole("button", { name: "Activity", exact: true }).click();
   const activity = page.getByRole("region", { name: "Activity", exact: true });
@@ -602,7 +600,7 @@ test("Activity sheets use a light window-wide scrim above the rail and header", 
   await expect(openDm).toBeFocused();
   await page.goBack();
   await expect(
-    page.getByRole("region", { name: "Messages", exact: true }),
+    page.getByRole("region", { name: "Team", exact: true }),
   ).toBeVisible();
   await expect(dialog).toHaveCount(0);
 });

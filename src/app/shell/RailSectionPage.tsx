@@ -31,7 +31,7 @@ export function RailSectionPage({
   const scope = connection.scope ? splitPartition(connection.scope) : undefined;
   const content = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (navigation?.signal.aborted) return;
+    if (!navigation || navigation.signal.aborted) return;
     if (navigation?.focus !== "preserve")
       content.current?.focus({ preventScroll: true });
     navigation?.complete({ status: "opened" });

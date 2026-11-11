@@ -4,6 +4,8 @@
  * Hosts choose how rows open and which conversation remains selected.
  */
 import {
+  createContext,
+  useContext,
   useCallback,
   type ReactNode,
   type RefCallback,
@@ -22,12 +24,12 @@ import type {
   OpenTarget,
 } from "../../features/navigation/targets";
 import { useChannelList } from "../../features/relay/react";
-import { useUnreadState } from "../../bundled/channels/UnreadBadge";
 import {
-  channelAvatarSurface,
-  channelIcon,
-  channelText,
-} from "../../features/channels/channel-icon";
+  channelUnread,
+  useUnreadState,
+} from "../../bundled/channels/UnreadBadge";
+import { channelIcon, channelText } from "../../features/channels/channel-icon";
+import { ChannelAvatar } from "../channels/ChannelAvatar";
 import { messagePreview } from "../../features/notifications/content";
 import { avatarMedia } from "../../shared/avatar-source";
 import { formatPublicKey } from "../../shared/identity/public-key";
@@ -49,12 +51,19 @@ import { Tabs } from "../../shared/design-system/ui/Tabs";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   MenuPopup,
+  MenuGroupLabel,
+  MenuSeparator,
   MenuRadioGroup,
   MenuRadioItem,
   MenuRoot,
   MenuTrigger,
 } from "../../shared/design-system/ui/Menu";
-import { readView, writeView } from "../../shared/view-state";
+import {
+  readView,
+  writeView,
+  subscribeView,
+  viewRevision,
+} from "../../shared/view-state";
 import styles from "./ConversationList.module.css";
 import feedStyles from "./FeedList.module.css";
 import {
@@ -67,10 +76,11 @@ import { dmLabel } from "../../bundled/inbox/dm-label";
 export type ActivityView = {
   filter: "all" | "threads" | "direct" | "working" | "waiting";
   unread: boolean;
+  sort?: "recent" | "alpha";
 };
 type View = ActivityView;
 
-const views = [
+export const conversationViews = [
   {
     value: "all",
     label: "All",
@@ -102,6 +112,7 @@ const viewKey = "activity-sidebar:view:v5";
 function readSavedView(scope: string): View {
   const saved = readView<Partial<View> | null>(scope, viewKey, null);
   return {
+    ...(saved?.sort === "alpha" && { sort: "alpha" as const }),
     filter:
       saved?.filter === "threads" ||
       saved?.filter === "direct" ||
@@ -125,6 +136,14 @@ const kindOf = (channel: ChannelSummary): Kind | undefined =>
           channel.channelType === undefined
         ? "team"
         : undefined;
+
+/** All keeps Solo in its own collection; explicit agent/direct views may include it. */
+export function includeMessagesChannel(
+  channel: ChannelSummary,
+  view: ActivityView,
+) {
+  return view.filter !== "all" || channel.channelType !== "solo";
+}
 
 const listed = (channel: ChannelSummary) =>
   !channel.archived && !channel.huddle && !channel.metadataPending;
@@ -166,34 +185,51 @@ export function activityViewFor(
 }
 
 export function useActivityView(scope: string) {
+  const subscribe = useCallback(
+    (listener: () => void) => subscribeView(scope, listener),
+    [scope],
+  );
+  const snapshot = useCallback(() => viewRevision(scope, viewKey), [scope]);
+  const revision = useSyncExternalStore(subscribe, snapshot, snapshot);
   const [saved, setSaved] = useState(() => ({
     scope,
+    revision,
     view: readSavedView(scope),
   }));
   let view = saved.view;
-  if (saved.scope !== scope) {
+  if (saved.scope !== scope || saved.revision !== revision) {
     view = readSavedView(scope);
-    setSaved({ scope, view });
+    setSaved({ scope, revision, view });
   }
   const setView = useCallback(
-    (view: View) => setSaved({ scope, view }),
+    (view: View) => {
+      writeView(scope, viewKey, view);
+      // A failed save still leaves this control usable in memory.
+      setSaved({ scope, revision: viewRevision(scope, viewKey), view });
+    },
     [scope],
   );
-  useEffect(() => {
-    writeView(scope, viewKey, view);
-  }, [scope, view]);
   return [view, setView] as const;
 }
 
-/** The unread filter above the recency list. */
-function ActivityUnreadFilter({
+/** The collection host supplies its existing draft action to the list heading. */
+export const CollectionCreationAction = createContext<ReactNode>(null);
+
+/** Collection controls share one menu; compact sidebar controls keep Show only. */
+function ConversationFiltersMenu({
   view,
   onChange,
+  sort = false,
 }: {
   view: View;
   onChange(view: View): void;
+  sort?: boolean;
 }) {
-  const showLabel = view.unread ? "Showing unread" : "Showing all";
+  const showLabel = sort
+    ? "Filter and sort conversations"
+    : view.unread
+      ? "Showing unread"
+      : "Showing all";
   return (
     <MenuRoot>
       <MenuTrigger
@@ -208,13 +244,18 @@ function ActivityUnreadFilter({
           />
         }
       />
-      <MenuPopup aria-label="Show">
+      <MenuPopup
+        aria-label={sort ? "Filter and sort conversations" : "Show"}
+        size="compact"
+      >
         <MenuRadioGroup
+          aria-label="Show conversations"
           value={view.unread ? "unread" : "all"}
           onValueChange={(value) =>
             onChange({ ...view, unread: value === "unread" })
           }
         >
+          {sort && <MenuGroupLabel>Show</MenuGroupLabel>}
           <MenuRadioItem value="all" closeOnClick>
             All conversations
           </MenuRadioItem>
@@ -222,6 +263,27 @@ function ActivityUnreadFilter({
             Unread only
           </MenuRadioItem>
         </MenuRadioGroup>
+        {sort && (
+          <>
+            <MenuSeparator />
+            <MenuRadioGroup
+              aria-label="Conversation sort order"
+              value={view.sort ?? "recent"}
+              onValueChange={(value) => {
+                if (value === "recent" || value === "alpha")
+                  onChange({ ...view, sort: value });
+              }}
+            >
+              <MenuGroupLabel>Sort</MenuGroupLabel>
+              <MenuRadioItem value="recent" closeOnClick>
+                Recent activity
+              </MenuRadioItem>
+              <MenuRadioItem value="alpha" closeOnClick>
+                A–Z
+              </MenuRadioItem>
+            </MenuRadioGroup>
+          </>
+        )}
       </MenuPopup>
     </MenuRoot>
   );
@@ -233,41 +295,45 @@ export function ActivityFilters({
   onChange,
   creationAction,
   layout = "sidebar",
+  title,
 }: {
   view: View;
   onChange(view: View): void;
   creationAction?: ReactNode;
   layout?: "sidebar" | "collection";
+  title?: string;
 }) {
   const tabs = (
     <Tabs
       label="Conversation view"
       variant="buttons"
-      leadingAction={layout === "sidebar" ? creationAction : undefined}
+      leadingAction={
+        layout === "sidebar" ? (
+          creationAction
+        ) : (
+          <ConversationFiltersMenu view={view} onChange={onChange} sort />
+        )
+      }
       trailingAction={
         layout === "sidebar" ? (
-          <ActivityUnreadFilter view={view} onChange={onChange} />
+          <ConversationFiltersMenu view={view} onChange={onChange} />
         ) : undefined
       }
       value={view.filter}
-      items={views}
+      items={conversationViews}
       onValueChange={(filter) => onChange({ ...view, filter })}
     />
   );
   return layout === "collection" ? (
     <CollectionFilters
       title={
-        view.filter === "all"
-          ? "Messages"
-          : (views.find((item) => item.value === view.filter)?.label ??
-            "Messages")
+        title ??
+        (view.filter === "all"
+          ? "Team"
+          : (conversationViews.find((item) => item.value === view.filter)
+              ?.label ?? "Team"))
       }
-      actions={
-        <>
-          {creationAction}
-          <ActivityUnreadFilter view={view} onChange={onChange} />
-        </>
-      }
+      actions={creationAction}
     >
       {tabs}
     </CollectionFilters>
@@ -281,7 +347,7 @@ export function ActivityFilters({
 /** One collection heading and aligned view strip for Messages and Activity. */
 export function CollectionFilters({
   title,
-  icon = <ChatCircleIcon size={24} />,
+  icon,
   actions,
   children,
 }: {
@@ -290,18 +356,26 @@ export function CollectionFilters({
   actions?: ReactNode;
   children: ReactNode;
 }) {
+  const collectionCreation = useContext(CollectionCreationAction);
   return (
     <div className={styles.filters} data-layout="collection">
       <Header
         title={title}
-        icon={<HeaderIcon>{icon}</HeaderIcon>}
+        icon={icon ? <HeaderIcon>{icon}</HeaderIcon> : undefined}
         level={2}
-        actions={actions}
+        actions={actions ?? collectionCreation}
       />
       {children}
     </div>
   );
 }
+
+export type ConversationListEntry = {
+  key: string;
+  label: string;
+  at: number;
+  target: Extract<OpenTarget, { kind: "conversation" }>;
+};
 
 export function ConversationList({
   session,
@@ -313,6 +387,9 @@ export function ConversationList({
   isOpen,
   includeAuthor,
   layout = "sidebar",
+  renderEntries,
+  includeChannel,
+  wrapRow,
 }: {
   session: RelaySession;
   navigator: Navigation;
@@ -333,6 +410,13 @@ export function ConversationList({
     | ((target: { channelId: string; threadId?: string }) => boolean)
     | undefined;
   layout?: "sidebar" | "feed" | "navigation";
+  includeChannel?: ((channel: ChannelSummary) => boolean) | undefined;
+  /** Hosts may reuse this inventory while retaining their row/section controls. */
+  renderEntries?: (entries: readonly ConversationListEntry[]) => ReactNode;
+  /** Keep host-owned row context actions around the shared feed renderer. */
+  wrapRow?:
+    | ((entry: ConversationListEntry, row: ReactNode) => ReactNode)
+    | undefined;
 }) {
   const list = useChannelList(session.channels);
   const inbox = useSyncExternalStore(
@@ -350,6 +434,11 @@ export function ConversationList({
     session.profiles.snapshot,
     session.profiles.snapshot,
   );
+  const resolveName = useIdentityNames(session.names);
+  const channelLabel = (channel: ChannelSummary) =>
+    channel.channelType === "dm"
+      ? dmLabel(channel.participants, profiles, resolveName, channel.name)
+      : channel.name;
   const selectedChannel =
     target.kind === "conversation" ? target.channelId : undefined;
   const selectedThread =
@@ -395,6 +484,7 @@ export function ConversationList({
     : list.channels.filter(
         (channel) =>
           listed(channel) &&
+          (!includeChannel || includeChannel(channel)) &&
           kindOf(channel) !== undefined &&
           (!direct || kindOf(channel) !== "team") &&
           (!agentView || channel.channelType === "solo"),
@@ -459,29 +549,67 @@ export function ConversationList({
       ...threads.map((item) => item.createdAt),
     );
   };
+  const preferences = useSyncExternalStore(
+    session.sidebarPreferences.subscribe,
+    session.sidebarPreferences.snapshot,
+  );
   const sorted = channels
     .map((channel) => ({ channel, at: recency(channel) }))
+    .filter(({ channel }) => {
+      if (!unreadOnly || isSelected(channel.id)) return true;
+      const muted =
+        !preferences.cached && !!preferences.data?.muted.includes(channel.id);
+      return (
+        channelUnread(
+          session.unread.snapshot({ kind: "channel", channelId: channel.id }),
+          channel.channelType === "dm",
+          muted,
+        ) ||
+        (session.unread.activity(channel.id).items ?? []).some(
+          (item) => item.unreadCount > 0,
+        )
+      );
+    })
     .sort(
-      (a, b) => b.at - a.at || a.channel.name.localeCompare(b.channel.name),
+      (a, b) =>
+        (view.sort === "alpha"
+          ? channelLabel(a.channel).localeCompare(channelLabel(b.channel))
+          : b.at - a.at) ||
+        channelLabel(a.channel).localeCompare(channelLabel(b.channel)) ||
+        a.channel.id.localeCompare(b.channel.id),
     );
   const byId = new Map(sorted.map((entry) => [entry.channel.id, entry]));
   const teamIds = new Set(
     list.channels
-      .filter((channel) => listed(channel) && kindOf(channel) === "team")
+      .filter(
+        (channel) =>
+          listed(channel) &&
+          kindOf(channel) === "team" &&
+          (!includeChannel || includeChannel(channel)),
+      )
       .map((channel) => channel.id),
   );
   const channelsById = new Map(list.channels.map((c) => [c.id, c]));
   const shownEvents = (
     flat
-      ? threadEvents(inbox.items, [...teamIds], session, teamIds)
+      ? threadEvents(inbox.items, teamIds, session)
       : direct
         ? mentionEvents(inbox.items, teamIds)
         : []
-  ).filter(
-    (event) =>
-      (!unreadOnly || event.unread) &&
-      (!includeAuthor || includeAuthor(event.authorId)),
-  );
+  )
+    .sort(newestFirst)
+    .filter(
+      (event) =>
+        (!unreadOnly || event.unread) &&
+        (!includeAuthor || includeAuthor(event.authorId)),
+    );
+  if (view.sort === "alpha")
+    shownEvents.sort(
+      (a, b) =>
+        (channelsById.get(a.channelId)?.name ?? "").localeCompare(
+          channelsById.get(b.channelId)?.name ?? "",
+        ) || a.preview.localeCompare(b.preview),
+    );
   // Direct interleaves chats, DMs and mentions; All lists conversations.
   const eventsByKey = new Map(shownEvents.map((event) => [event.key, event]));
   const entries = flat
@@ -490,12 +618,16 @@ export function ConversationList({
         ...sorted.map((entry) => ({
           key: `c:${entry.channel.id}`,
           at: entry.at,
+          label: channelLabel(entry.channel),
         })),
         ...shownEvents.map((event) => ({
           key: `e:${event.key}`,
           at: event.createdAt,
+          label: channelsById.get(event.channelId)?.name ?? "",
         })),
-      ].sort((a, b) => b.at - a.at);
+      ].sort((a, b) =>
+        view.sort === "alpha" ? a.label.localeCompare(b.label) : b.at - a.at,
+      );
   const order = useFrozenOrder(entries.map((entry) => entry.key).join("\n"));
 
   const ids = [
@@ -524,54 +656,105 @@ export function ConversationList({
         .ensure(profileKey.split(":"), "background")
         .catch(() => {});
   }, [session, profileKey, list.status]);
-  const resolveName = useIdentityNames(session.names);
   const nameOf = (id: string) =>
     resolveName(id, profiles.get(id)?.name ?? formatPublicKey(id) ?? "Someone");
+
+  const describeEvent = (event: ActivityEvent): ConversationListEntry => ({
+    key: `e:${event.key}`,
+    label: `${channelsById.get(event.channelId)?.name ?? nameOf(event.authorId)} · ${messagePreview(event.preview)}`,
+    at: event.createdAt,
+    target: {
+      version: 1,
+      kind: "conversation",
+      scope,
+      channelId: event.channelId,
+      messageId: event.messageId,
+      ...(event.rootId && {
+        threadRootId: event.rootId,
+        context: "channel" as const,
+      }),
+    },
+  });
+  const describeChannel = (
+    entry: (typeof sorted)[number],
+  ): ConversationListEntry => ({
+    key: `c:${entry.channel.id}`,
+    label: channelLabel(entry.channel),
+    at: entry.at,
+    target: {
+      version: 1,
+      kind: "conversation",
+      scope,
+      channelId: entry.channel.id,
+    },
+  });
+  function mapEntries<T>(
+    eventItem: (event: ActivityEvent) => T,
+    channelItem: (entry: (typeof sorted)[number]) => T,
+  ): T[] {
+    if (flat) return shownEvents.map(eventItem);
+    return order.flatMap((key) => {
+      if (key.startsWith("e:")) {
+        const event = eventsByKey.get(key.slice(2));
+        return event ? [eventItem(event)] : [];
+      }
+      const entry = byId.get(key.slice(2));
+      return entry ? [channelItem(entry)] : [];
+    });
+  }
+  if (renderEntries)
+    return renderEntries(mapEntries(describeEvent, describeChannel));
 
   /** A thread or mention: a message, opened where it lives. */
   const eventRow = (event: ActivityEvent) => {
     const channel = channelsById.get(event.channelId);
     const name = nameOf(event.authorId);
+    const profile = profiles.get(event.authorId);
+    const content = (
+      <ConversationRow
+        layout={layout}
+        selected={!!event.rootId && isSelected(event.channelId, event.rootId)}
+        onClick={() =>
+          open(event.channelId, {
+            messageId: event.messageId,
+            ...(event.rootId ? { threadRootId: event.rootId } : {}),
+          })
+        }
+        avatar={
+          <Avatar
+            size="fill"
+            alt=""
+            fallback={name}
+            src={avatarMedia(profile?.picture, session.media)}
+            shape={profile?.isAgent ? "squircle" : "circle"}
+          />
+        }
+        placeIcon={
+          event.rootId ? (
+            <MessageReplyIcon size={14} aria-label="Thread" />
+          ) : (
+            privateIcon(channel)
+          )
+        }
+        place={
+          layout === "navigation"
+            ? `${channel ? `${channelText(channel)} · ` : ""}${messagePreview(event.preview)}`
+            : channel
+              ? `${event.rootId ? "in " : ""}${channelText(channel)}`
+              : ""
+        }
+        time={shortTime(event.createdAt)}
+        preview={messagePreview(event.preview)}
+        state={event.unread ? "unread" : "read"}
+        onMarkRead={() => void markEventRead(session, event)}
+      />
+    );
     return (
       <li
         key={event.key}
         className={layout === "feed" ? feedStyles.item : undefined}
       >
-        <ConversationRow
-          layout={layout}
-          selected={!!event.rootId && isSelected(event.channelId, event.rootId)}
-          onClick={() =>
-            open(event.channelId, {
-              messageId: event.messageId,
-              ...(event.rootId ? { threadRootId: event.rootId } : {}),
-            })
-          }
-          avatar={
-            <PersonAvatar
-              session={session}
-              profile={profiles.get(event.authorId)}
-              name={name}
-            />
-          }
-          placeIcon={
-            event.rootId ? (
-              <MessageReplyIcon size={14} aria-label="Thread" />
-            ) : (
-              privateIcon(channel)
-            )
-          }
-          place={
-            layout === "navigation"
-              ? `${channel ? `${channelText(channel)} · ` : ""}${messagePreview(event.preview)}`
-              : channel
-                ? `${event.rootId ? "in " : ""}${channelText(channel)}`
-                : ""
-          }
-          time={shortTime(event.createdAt)}
-          preview={messagePreview(event.preview)}
-          state={event.unread ? "unread" : "read"}
-          onMarkRead={() => void markEventRead(session, event)}
-        />
+        {wrapRow ? wrapRow(describeEvent(event), content) : content}
       </li>
     );
   };
@@ -582,36 +765,30 @@ export function ConversationList({
         className={layout === "feed" ? feedStyles.list : styles.rows}
         aria-label="Conversations"
       >
-        {flat
-          ? shownEvents.map((event) => eventRow(event))
-          : order.map((key) => {
-              if (key.startsWith("e:")) {
-                const event = eventsByKey.get(key.slice(2));
-                return event ? eventRow(event) : null;
-              }
-              const id = key.slice(2);
-              const entry = byId.get(id);
-              if (!entry) return null;
-              return (
-                <ChannelActivityRow
-                  previewRef={previewRef}
-                  layout={layout}
-                  key={key}
-                  session={session}
-                  channel={entry.channel}
-                  at={entry.at}
-                  latest={latestOf(entry.channel)}
-                  team={kindOf(entry.channel) === "team"}
-                  working={working.has(id)}
-                  profiles={profiles}
-                  nameOf={nameOf}
-                  resolveName={resolveName}
-                  unreadOnly={unreadOnly}
-                  selected={isSelected(id)}
-                  onOpen={() => open(id)}
-                />
-              );
-            })}
+        {mapEntries(eventRow, (entry) => (
+          <ChannelActivityRow
+            previewRef={previewRef}
+            wrap={
+              wrapRow
+                ? (content) => wrapRow(describeChannel(entry), content)
+                : undefined
+            }
+            layout={layout}
+            key={`c:${entry.channel.id}`}
+            session={session}
+            channel={entry.channel}
+            at={entry.at}
+            latest={latestOf(entry.channel)}
+            team={kindOf(entry.channel) === "team"}
+            working={working.has(entry.channel.id)}
+            profiles={profiles}
+            nameOf={nameOf}
+            resolveName={resolveName}
+            unreadOnly={unreadOnly}
+            selected={isSelected(entry.channel.id)}
+            onOpen={() => open(entry.channel.id)}
+          />
+        ))}
       </ul>
       {list.status === "ready" &&
         !shownEvents.length &&
@@ -666,9 +843,8 @@ const newestFirst = (a: ActivityEvent, b: ActivityEvent) =>
 /** Every active thread in Team channels, one row each, at its latest reply. */
 function threadEvents(
   items: readonly InboxItem[],
-  channelIds: readonly string[],
-  session: RelaySession,
   team: ReadonlySet<string>,
+  session: RelaySession,
 ): ActivityEvent[] {
   const byRoot = new Map<string, ActivityEvent>();
   const add = (event: ActivityEvent) => {
@@ -683,7 +859,7 @@ function threadEvents(
     else if (event.unread && !held.unread)
       byRoot.set(key, { ...held, unread: true });
   };
-  for (const id of channelIds)
+  for (const id of team)
     for (const thread of session.unread.activity(id).items ?? [])
       add({
         key: "",
@@ -709,7 +885,7 @@ function threadEvents(
       unread: itemUnread(item),
     });
   }
-  return [...byRoot.values()].sort(newestFirst);
+  return [...byRoot.values()];
 }
 
 /** Mentions of you in Team channels, in a thread or not. */
@@ -729,8 +905,7 @@ function mentionEvents(
       preview: item.preview,
       createdAt: item.createdAt,
       unread: itemUnread(item),
-    }))
-    .sort(newestFirst);
+    }));
 }
 
 /** Channels an agent is working in: a working turn, or typing that isn't
@@ -797,6 +972,7 @@ function useFrozenOrder(key: string) {
 
 export function ChannelActivityRow({
   previewRef,
+  wrap,
   layout,
   session,
   channel,
@@ -812,6 +988,7 @@ export function ChannelActivityRow({
   onOpen,
 }: {
   previewRef?: RefCallback<HTMLLIElement> | undefined;
+  wrap?: ((row: ReactNode) => ReactNode) | undefined;
   layout: "sidebar" | "feed" | "navigation";
   session: RelaySession;
   channel: ChannelSummary;
@@ -834,7 +1011,6 @@ export function ChannelActivityRow({
   );
   const unread = state.unread || threadUnread;
   if (unreadOnly && !unread && !selected) return null;
-  const Icon = channelIcon(channel);
   const solo = channel.channelType === "solo";
   const people = dm || solo ? conversationPeople(channel, session.viewer) : [];
   // The latest event: a thread reply you're in, when it is newer.
@@ -847,67 +1023,65 @@ export function ChannelActivityRow({
       : channel.preview
         ? messagePreview(channel.preview)
         : "";
+  const content = (
+    <ConversationRow
+      layout={layout}
+      aria-current={selected ? "page" : undefined}
+      selected={selected}
+      onClick={onOpen}
+      onPointerEnter={() => session.channels.prepare?.(channel.id)}
+      onFocus={() => session.channels.prepare?.(channel.id)}
+      avatar={
+        people.length ? (
+          <AvatarStack
+            size={layout === "navigation" ? "compact" : "cluster"}
+            items={people.map((id) => ({
+              id,
+              name: nameOf(id),
+              src: avatarMedia(profiles.get(id)?.picture, session.media),
+              shape: profiles.get(id)?.isAgent ? "squircle" : "circle",
+            }))}
+          />
+        ) : !dm && !solo ? (
+          <ChannelAvatar size="fill" shape="squircle" name={channel.name} />
+        ) : (
+          <Avatar
+            size="fill"
+            alt=""
+            shape="squircle"
+            fallback={channel.name}
+            fallbackContent={<UsersIcon size={16} aria-hidden="true" />}
+          />
+        )
+      }
+      placeIcon={privateIcon(channel)}
+      place={
+        dm
+          ? dmLabel(
+              channel.participants,
+              profiles,
+              resolveName,
+              channel.name || "Direct message",
+            )
+          : solo || layout === "navigation"
+            ? channel.name
+            : channelText(channel)
+      }
+      time={at ? shortTime(at) : ""}
+      preview={preview}
+      state={working ? "working" : unread ? "unread" : "read"}
+      onMarkRead={() =>
+        void session.unread.markChannelRead(channel.id).catch(() => {})
+      }
+    />
+  );
   return (
     <li
       ref={previewRef}
       data-activity-row={channel.id}
       className={layout === "feed" ? feedStyles.item : undefined}
     >
-      <ConversationRow
-        layout={layout}
-        aria-current={selected ? "page" : undefined}
-        selected={selected}
-        onClick={onOpen}
-        avatar={
-          people.length ? (
-            <AvatarStack
-              size={layout === "navigation" ? "compact" : "cluster"}
-              items={people.map((id) => ({
-                id,
-                name: nameOf(id),
-                src: avatarMedia(profiles.get(id)?.picture, session.media),
-                shape: profiles.get(id)?.isAgent ? "squircle" : "circle",
-              }))}
-            />
-          ) : (
-            <Avatar
-              size="fill"
-              alt=""
-              shape="squircle"
-              fallback={channel.name}
-              fallbackSurface={
-                dm || solo ? "subtle" : channelAvatarSurface(channel.name)
-              }
-              fallbackContent={
-                dm || solo ? (
-                  <UsersIcon size={16} aria-hidden="true" />
-                ) : (
-                  <Icon size={16} aria-hidden="true" />
-                )
-              }
-            />
-          )
-        }
-        placeIcon={privateIcon(channel)}
-        place={
-          dm
-            ? dmLabel(
-                channel.participants,
-                profiles,
-                resolveName,
-                channel.name || "Direct message",
-              )
-            : solo || layout === "navigation"
-              ? channel.name
-              : channelText(channel)
-        }
-        time={at ? shortTime(at) : ""}
-        preview={preview}
-        state={working ? "working" : unread ? "unread" : "read"}
-        onMarkRead={() =>
-          void session.unread.markChannelRead(channel.id).catch(() => {})
-        }
-      />
+      {wrap ? wrap(content) : content}
     </li>
   );
 }
@@ -950,24 +1124,4 @@ async function markEventRead(session: RelaySession, event: ActivityEvent) {
       .markMessageRead(event.channelId, event.messageId)
       .catch(() => {});
   }
-}
-
-function PersonAvatar({
-  session,
-  profile,
-  name,
-}: {
-  session: RelaySession;
-  profile: Profile | undefined;
-  name: string;
-}) {
-  return (
-    <Avatar
-      size="fill"
-      alt=""
-      fallback={name}
-      src={avatarMedia(profile?.picture, session.media)}
-      shape={profile?.isAgent ? "squircle" : "circle"}
-    />
-  );
 }

@@ -1,5 +1,11 @@
 import {
+  ConversationListToggle,
+  ConversationListVisibility,
+} from "../../features/conversation/ConversationListToggle";
+import { CollectionCreationAction } from "../../features/conversation/ConversationList";
+import {
   createContext,
+  type ReactNode,
   useContext,
   useCallback,
   useLayoutEffect,
@@ -18,13 +24,20 @@ import {
   type ConversationHostServices,
 } from "../../features/conversation/ConversationHost";
 import { useConversationPresentation } from "../../features/conversation/ConversationPresentation";
+import {
+  ConversationDetailPane,
+  useConversationDetailPane,
+} from "../../features/conversation/ConversationDetailPane";
+import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
+import { IconButton } from "../../shared/design-system/ui/IconButton";
+import { PlusIcon, XIcon } from "../../shared/design-system/icons";
+import { PanelFrame } from "../../features/panels/PanelFrame";
 import { NewMessage } from "../../features/direct-messages/NewMessage";
 import { SoloDraft } from "../../features/solo/SoloDraft";
 import { ConversationPresentation } from "../../features/conversation/ConversationPresentation";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { useChannelList } from "../../features/relay/react";
-import { Dialog } from "../../shared/design-system/ui/Dialog";
-import { ScrollEdgeMaterial } from "../../shared/design-system/ui/ScrollEdgeMaterial";
+import type { ChannelSummary } from "../../features/relay/contracts";
 import { ConversationTab } from "../channels/ConversationTab";
 import { ChannelMembersButton } from "../channels/ChannelMembersDialog";
 import { useChannelLabels } from "../channels/useChannelLabels";
@@ -50,6 +63,19 @@ const activitySheetRoute = {
 const sameConversation = (a: PageTabTarget, b: PageTabTarget) =>
   a.channelId === b.channelId && a.threadId === b.threadId;
 
+/** Opening, traversal, and retention use the same current channel evidence. */
+const availableInSheet = (
+  channel: ChannelSummary | undefined,
+  viewer: string | undefined,
+) =>
+  channel &&
+  !channel.archived &&
+  (!channel.readOnly || channel.viewerRole === "guest") &&
+  !channel.cached &&
+  !channel.huddle &&
+  !channel.metadataPending &&
+  (channel.channelType !== "solo" || !!channel.members?.includes(viewer ?? ""));
+
 type Opening = {
   target: PageTabTarget;
   request: number;
@@ -57,8 +83,7 @@ type Opening = {
   reply?: boolean | undefined;
 };
 
-/** Activity keeps its list mounted; its existing open/close contract places
- * the conversation in one composer sheet instead of a split workspace. */
+/** Collections keep their list mounted beside the shared conversation reader. */
 export function InboxSheet({
   session,
   scope,
@@ -66,70 +91,128 @@ export function InboxSheet({
   host,
   extensions,
   navigation,
+  detail,
   route = activitySheetRoute,
 }: PageTabsProps & {
   navigation?: PageNavigation | undefined;
+  /** Existing full conversation workspace for direct chat destinations. */
+  detail?: ReactNode;
   route?: typeof activitySheetRoute;
   host: ConversationHostServices;
   extensions: ConversationExtensions;
 }) {
   const list = useChannelList(session.channels);
+  const listVisibility = useContext(ConversationListVisibility);
+  const controlledList = !!listVisibility;
+  const listIsOpen = listVisibility?.open ?? true;
+  const animateList = listVisibility?.animate ?? false;
+  const reader = useRef<HTMLElement>(null);
+  const readerMotion = useRef<Animation | null>(null);
+  const priorListLayout = useRef<
+    { open: boolean; left: number; narrow: boolean } | undefined
+  >(undefined);
   const notify = useToastNotification();
   const [composer, setComposer] = useState<HTMLDivElement | null>(null);
   const presented = useConversationPresentation();
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  const { value: detailPane, companion } = useConversationDetailPane();
   const [drafting, setDrafting] = useState(false);
-  const [draftContent, setDraftContent] = useState<HTMLDivElement | null>(null);
-  const [draftMount] = useState(() => {
-    const element = document.createElement("div");
-    element.className = styles.draftContent ?? "";
-    return element;
-  });
   const [opening, setOpening] = useState<Opening>();
   const [shown, setShown] = useState(false);
+  const [narrow, setNarrow] = useState(false);
+  const selected = shown || !!detail;
   const [feedbackMount, setFeedbackMount] = useState<HTMLDivElement | null>(
     null,
   );
-  const covered = shown || drafting || !!draftContent;
-  // Keep one portal destination so expanding never recreates the editor or
-  // mounts history in the collapsed card before the dialog is ready.
+  // Keep responsive presentation and reader activity in sync with available
+  // workspace width, including sidebar changes and enlarged text.
   useLayoutEffect(() => {
-    const destination = draftContent ?? composer;
-    if (!destination || draftMount.parentElement === destination) return;
-    const moving = !!draftMount.parentElement;
-    destination.appendChild(draftMount);
-    if (moving && presented && !shown)
-      draftMount
-        .querySelector<HTMLElement>('[role="textbox"]')
-        ?.focus({ preventScroll: true });
-  }, [draftContent, composer, draftMount, presented, shown]);
-  useLayoutEffect(() => () => draftMount.remove(), [draftMount]);
-  // The feed runs behind the floating editor. Reserve its measured height only
-  // at the scroll end, so the last row can still be brought above a growing draft.
-  useLayoutEffect(() => {
-    if (!container || !composer || covered) return;
+    if (!container) return;
     const measure = () => {
-      container.style.setProperty(
-        "--activity-composer-clearance",
-        `${composer.getBoundingClientRect().height}px`,
+      if (!container.clientWidth) return;
+      if (
+        priorListLayout.current &&
+        reader.current &&
+        readerMotion.current?.playState !== "running" &&
+        readerMotion.current?.playState !== "paused"
+      )
+        priorListLayout.current.left =
+          reader.current.getBoundingClientRect().left;
+      setNarrow(
+        container.clientWidth <
+          48 * parseFloat(getComputedStyle(document.documentElement).fontSize),
       );
     };
     measure();
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? undefined
-        : new ResizeObserver(measure);
-    observer?.observe(composer);
-    return () => {
-      observer?.disconnect();
-    };
-  }, [container, composer, covered]);
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [container]);
+  // Reflow once, then move the reader from its previous visual position. Keeping
+  // its text unscaled avoids per-frame layout work and reverses from mid-flight.
+  useLayoutEffect(() => {
+    const element = reader.current;
+    if (!element || !controlledList) return;
+    const previous = priorListLayout.current;
+    const transform = getComputedStyle(element).transform;
+    const shift =
+      readerMotion.current && transform !== "none"
+        ? new DOMMatrixReadOnly(transform).m41
+        : 0;
+    readerMotion.current?.cancel();
+    readerMotion.current = null;
+    const left = element.getBoundingClientRect().left;
+    priorListLayout.current = { open: listIsOpen, left, narrow };
+    if (
+      !previous ||
+      previous.open === listIsOpen ||
+      !animateList ||
+      narrow ||
+      previous.narrow ||
+      document.documentElement.hasAttribute("data-keyboard-input") ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    )
+      return;
+    const offset = previous.left + shift - left;
+    if (!offset) return;
+    const tokens = getComputedStyle(element);
+    readerMotion.current = element.animate(
+      [
+        { transform: `translateX(${offset}px)` },
+        { transform: "translateX(0px)" },
+      ],
+      {
+        duration: parseFloat(
+          tokens.getPropertyValue(
+            listIsOpen ? "--time-panel-enter" : "--time-fast",
+          ),
+        ),
+        easing: tokens.getPropertyValue("--ease-enter").trim(),
+      },
+    );
+  }, [controlledList, listIsOpen, animateList, narrow]);
+  useLayoutEffect(() => () => readerMotion.current?.cancel(), []);
   const trigger = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (!presented || shown || drafting || !trigger.current?.isConnected)
+      return;
+    const focused = document.activeElement;
+    if (
+      focused instanceof HTMLElement &&
+      focused !== document.body &&
+      focused.isConnected &&
+      !focused.closest("[hidden]") &&
+      !(narrow && composer?.contains(focused))
+    )
+      return;
+    trigger.current.focus({ preventScroll: true });
+  }, [presented, shown, drafting, narrow, composer]);
   const current = useRef<Opening | undefined>(undefined);
   const live = useRef(false);
   const sequence = useRef(0);
   const visit = useRef(navigation);
   const appliedVisit = useRef<PageNavigation | undefined>(undefined);
+  const localVisit = useRef<string | undefined>(undefined);
   const returnTarget = useRef<OpenTarget | undefined>(undefined);
   useLayoutEffect(() => {
     visit.current = navigation;
@@ -145,6 +228,7 @@ export function InboxSheet({
     live.current = presented;
     if (!presented) {
       appliedVisit.current = undefined;
+      localVisit.current = undefined;
       current.current = undefined;
       setShown(false);
       setDrafting(false);
@@ -166,25 +250,17 @@ export function InboxSheet({
       host.navigation.dismiss(
         (candidate) => {
           const next = route.detail(candidate);
-          if (compose)
-            return (
-              candidate.kind === "page" &&
-              route.composing(candidate) &&
-              (candidate.scope === undefined ||
-                (candidate.scope?.viewer === session.viewer &&
-                  candidate.scope?.communityOrigin ===
-                    navigationScope.communityOrigin))
-            );
-          return (
-            !!detail &&
-            !!next &&
-            sameConversation(detail, next) &&
-            candidate.kind === "page" &&
-            (candidate.scope === undefined ||
-              (candidate.scope?.viewer === session.viewer &&
-                candidate.scope?.communityOrigin ===
+          if (
+            candidate.kind !== "page" ||
+            (candidate.scope !== undefined &&
+              (candidate.scope?.viewer !== session.viewer ||
+                candidate.scope?.communityOrigin !==
                   navigationScope.communityOrigin))
-          );
+          )
+            return false;
+          return compose
+            ? route.composing(candidate)
+            : !!detail && !!next && sameConversation(detail, next);
         },
         returnTarget.current ?? {
           ...route.target(route.filters(active.target) ?? {}),
@@ -210,14 +286,7 @@ export function InboxSheet({
         !live.current ||
         connection.status !== "ready" ||
         connection.session !== session ||
-        !channel ||
-        (channel.readOnly && channel.viewerRole !== "guest") ||
-        channel.archived ||
-        channel.cached ||
-        channel.huddle ||
-        channel.metadataPending ||
-        (channel.channelType === "solo" &&
-          !channel.members?.includes(session.viewer ?? ""))
+        !availableInSheet(channel, session.viewer)
       )
         return false;
       if (!current.current)
@@ -230,7 +299,8 @@ export function InboxSheet({
       setOpening(next);
       setShown(true);
       setDrafting(false);
-      if (visit.current)
+      if (visit.current) {
+        localVisit.current = visit.current.entryId;
         void host.navigation.open(
           {
             ...route.target({
@@ -241,6 +311,7 @@ export function InboxSheet({
           },
           { focus: "preserve" },
         );
+      }
       return true;
     },
     [host.relay, host.navigation, session, navigationScope, route],
@@ -250,6 +321,7 @@ export function InboxSheet({
     if (!navigation || !presented || appliedVisit.current === navigation)
       return;
     if (route.composing(navigation.target)) {
+      localVisit.current = undefined;
       appliedVisit.current = navigation;
       setShown(false);
       setDrafting(true);
@@ -258,6 +330,7 @@ export function InboxSheet({
     setDrafting(false);
     const target = route.detail(navigation.target);
     if (!target) {
+      localVisit.current = undefined;
       appliedVisit.current = navigation;
       returnTarget.current = navigation.target;
       current.current = undefined;
@@ -265,21 +338,30 @@ export function InboxSheet({
       return;
     }
     const channel = list.channels.find((item) => item.id === target.channelId);
-    if (
-      !channel ||
-      channel.archived ||
-      channel.cached ||
-      (channel.readOnly && channel.viewerRole !== "guest") ||
-      channel.huddle ||
-      channel.metadataPending ||
-      (channel.channelType === "solo" &&
-        !channel.members?.includes(session.viewer ?? ""))
-    ) {
+    // Downloaded membership is pending evidence, not a completed access denial.
+    // Leave the visit unapplied until the existing channel owner verifies it.
+    if (channel?.cached || channel?.metadataPending) return;
+    if (!availableInSheet(channel, session.viewer)) {
       if (list.status === "ready") dismiss();
       return;
     }
     appliedVisit.current = navigation;
     const prior = current.current;
+    // The route acknowledges a local opening; it must not restart its reveal.
+    // Traversal to another visit still creates a fresh request below.
+    const acknowledged =
+      localVisit.current !== undefined &&
+      localVisit.current !== navigation.entryId;
+    localVisit.current = undefined;
+    if (
+      acknowledged &&
+      prior &&
+      sameConversation(prior.target, target) &&
+      prior.target.messageId === target.messageId
+    ) {
+      setShown(true);
+      return;
+    }
     const next = {
       target,
       request: ++sequence.current,
@@ -329,17 +411,8 @@ export function InboxSheet({
     session.names,
   );
   const channel =
-    channels.find((item) => item.id === target?.channelId) ??
-    list.channels.find((item) => item.id === target?.channelId);
-  const available =
-    channel &&
-    !channel.archived &&
-    (!channel.readOnly || channel.viewerRole === "guest") &&
-    !channel.cached &&
-    !channel.huddle &&
-    !channel.metadataPending &&
-    (channel.channelType !== "solo" ||
-      !!channel.members?.includes(session.viewer ?? ""));
+    channels.find((item) => item.id === target?.channelId) ?? selectedChannel;
+  const available = availableInSheet(channel, session.viewer);
   useLayoutEffect(() => {
     if (shown && !available) dismiss();
   }, [shown, available, dismiss]);
@@ -391,7 +464,13 @@ export function InboxSheet({
     if (!open(target)) navigateConversation(target);
   };
   const expandDraft = () => {
-    if (!presented || drafting || shown) return;
+    if (!presented || drafting) return;
+    trigger.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    current.current = undefined;
+    setShown(false);
     setDrafting(true);
     if (visit.current)
       void host.navigation.open(
@@ -429,175 +508,256 @@ export function InboxSheet({
         });
   return (
     <FeedbackMount value={shown ? feedbackMount : null}>
-      <div ref={setContainer} className={styles.sheetHost}>
+      <ConversationDetailPane value={detailPane}>
         <div
-          className={styles.sheetFeed}
-          data-activity-covered={covered || undefined}
+          ref={setContainer}
+          className={styles.sheetHost}
+          data-detail-workspace=""
+          data-narrow={narrow || undefined}
         >
-          <ConversationPresentation value={presented && !covered}>
-            {children(open, close, isOpen)}
-          </ConversationPresentation>
-        </div>
-        <div
-          ref={setComposer}
-          className={styles.newMessage}
-          data-covered={covered || undefined}
-        >
-          <div className={styles.composerEdge}>
-            <ScrollEdgeMaterial edge="bottom" />
-          </div>
-          <ConversationPresentation value={presented && !shown}>
-            <NewMessage
-              layout="composer"
-              expanded={drafting && !!draftContent}
-              contentContainer={draftMount}
-              onAddressed={expandDraft}
-              allowChannels
-              session={session}
-              scope={scope}
-              channels={list.channels}
-              host={detailHost}
-              extensions={extensions}
-              onStarted={showConversation}
-              onOpenThread={(channelId, messageId, threadId) => {
-                open({ channelId, messageId, threadId });
-              }}
-              onOpenChat={showConversation}
-              renderSolo={(agent, focusRequest, onDraftChange) => (
-                <SoloDraft
-                  key={agent}
-                  embedded
-                  draftPrefix="direct-message"
-                  onDraftChange={onDraftChange}
-                  agent={agent}
-                  focusRequest={focusRequest}
-                  session={session}
-                  scope={scope}
-                  extensions={extensions}
-                  onStarted={showConversation}
-                  onFailed={(_id, message, retry) =>
-                    notify(
-                      message,
-                      "error",
-                      retry
-                        ? {
-                            label: "Retry restoring message",
-                            onClick: () => {
-                              void retry();
-                            },
-                            timeout: Infinity,
-                          }
-                        : undefined,
-                    )
-                  }
-                />
-              )}
-            />
-          </ConversationPresentation>
-        </div>
-        <Dialog
-          visit
-          open={drafting}
-          onOpenChange={(next) => {
-            if (!next) dismiss();
-          }}
-          title="New message"
-          closeLabel="Close new message"
-          backdrop="subtle"
-          placement="bottom"
-          anchor={composer}
-          size="wide"
-          height="stable"
-          bodyLayout="flex"
-          initialFocus={false}
-          finalFocus={false}
-        >
-          <div ref={setDraftContent} className={styles.draftContent} />
-        </Dialog>
-        {available && channel && target && tab && (
-          <ConversationPresentation value={shown}>
-            <ConversationHost
-              host={detailHost}
-              session={session}
-              scope={scope}
-              channelId={channel.id}
-              channelName={channel.name}
-              threadId={target.threadId}
+          <div
+            className={styles.collectionPanes}
+            data-detail-selected={selected || drafting || undefined}
+            data-list-controlled={listVisibility ? "" : undefined}
+            data-list-open={listVisibility?.open ?? true}
+            data-list-animate={listVisibility?.animate ? "" : undefined}
+          >
+            <div
+              className={styles.sheetFeed}
+              id={listVisibility?.controls}
+              aria-hidden={listVisibility ? !listVisibility.open : undefined}
+              inert={listVisibility ? !listVisibility.open : undefined}
             >
-              {(interactions) => (
-                <Dialog
-                  visit
-                  open={shown}
-                  onOpenChange={(next) => {
-                    if (!next) dismiss();
-                  }}
-                  title={channel.name}
-                  closePlacement="start"
-                  headerActions={
-                    <InboxSheetActions
-                      key={tab.id}
-                      active={shown}
-                      panels={host.panels}
-                      context={{
-                        scope,
-                        channelId: channel.id,
-                        channelName: channel.name,
-                        viewer: session.viewer ?? "",
-                        relayUrl: navigationScope.communityOrigin
-                          .replace(/^https:/, "wss:")
-                          .replace(/^http:/, "ws:"),
-                        ...(target.threadId && { threadId: target.threadId }),
-                      }}
-                      interactions={interactions}
-                      onOpen={() => navigateConversation(target)}
+              <ConversationPresentation
+                value={
+                  presented &&
+                  (listVisibility
+                    ? listVisibility.open
+                    : !narrow || (!selected && !drafting))
+                }
+              >
+                <CollectionCreationAction
+                  value={
+                    <IconButton
+                      aria-label="New message"
+                      title="New message"
+                      onClick={expandDraft}
+                      icon={<PlusIcon size={20} aria-hidden="true" />}
                     />
-                  }
-                  identity={
-                    <ChannelMembersButton
-                      key={channel.id}
-                      session={session}
-                      channelId={channel.id}
-                      conversationName={channel.name}
-                      navigator={detailHost.navigation}
-                    />
-                  }
-                  backdrop="subtle"
-                  placement="bottom"
-                  anchor={composer}
-                  size="wide"
-                  height="stable"
-                  bodyLayout="flex"
-                  initialFocus="dialog"
-                  finalFocus={() =>
-                    trigger.current?.isConnected ? trigger.current : false
                   }
                 >
-                  <div ref={setFeedbackMount} />
-                  <ConversationTab
-                    key={tab.id}
-                    tab={tab}
-                    active={shown}
-                    visit={false}
-                    channel={channel}
-                    session={session}
-                    scope={scope}
-                    extensions={extensions}
-                    openLink={interactions.onOpenLink}
-                    canOpenLink={interactions.canOpenLink}
-                    openThread={(messageId, rootId, intent) => {
-                      open(
-                        { channelId: channel.id, threadId: rootId, messageId },
-                        undefined,
-                        intent === "reply",
-                      );
-                    }}
-                  />
-                </Dialog>
+                  {children(open, close, isOpen)}
+                </CollectionCreationAction>
+              </ConversationPresentation>
+              {controlledList && (
+                <div
+                  className={`${styles.collectionCreate} ${styles.listDismiss}`}
+                >
+                  <ConversationListToggle inList />
+                </div>
               )}
-            </ConversationHost>
-          </ConversationPresentation>
-        )}
-      </div>
+            </div>
+            <section
+              ref={reader}
+              className={styles.collectionDetail}
+              aria-label="Conversation detail"
+              tabIndex={-1}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Escape" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing &&
+                  !event.defaultPrevented &&
+                  (shown || drafting) &&
+                  event.currentTarget.contains(event.target as Node) &&
+                  !event.currentTarget.querySelector("[data-popup-open]")
+                ) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  dismiss();
+                }
+              }}
+            >
+              {detail ?? (
+                <PanelFrame scope={scope} companion={companion}>
+                  <div
+                    ref={setComposer}
+                    className={styles.draftContent}
+                    hidden={shown}
+                  >
+                    <PanelHeader
+                      title="New message"
+                      navigation={
+                        listVisibility ? (
+                          <ConversationListToggle />
+                        ) : (
+                          narrow && (
+                            <IconButton
+                              size="sm"
+                              variant="subtle"
+                              aria-label="Close new message"
+                              icon={<XIcon size={16} />}
+                              onClick={dismiss}
+                            />
+                          )
+                        )
+                      }
+                    />
+                    <ConversationPresentation
+                      value={
+                        presented &&
+                        !shown &&
+                        (!narrow || drafting || listVisibility?.open === false)
+                      }
+                    >
+                      <NewMessage
+                        layout="composer"
+                        expanded
+                        onAddressed={expandDraft}
+                        allowChannels
+                        session={session}
+                        scope={scope}
+                        channels={list.channels}
+                        host={detailHost}
+                        extensions={extensions}
+                        onStarted={showConversation}
+                        onOpenThread={(channelId, messageId, threadId) => {
+                          open({ channelId, messageId, threadId });
+                        }}
+                        onOpenChat={showConversation}
+                        renderSolo={(agent, focusRequest, onDraftChange) => (
+                          <SoloDraft
+                            key={agent}
+                            embedded
+                            draftPrefix="direct-message"
+                            onDraftChange={onDraftChange}
+                            agent={agent}
+                            focusRequest={focusRequest}
+                            session={session}
+                            scope={scope}
+                            extensions={extensions}
+                            onStarted={showConversation}
+                            onFailed={(_id, message, retry) =>
+                              notify(
+                                message,
+                                "error",
+                                retry
+                                  ? {
+                                      label: "Retry restoring message",
+                                      onClick: () => {
+                                        void retry();
+                                      },
+                                      timeout: Infinity,
+                                    }
+                                  : undefined,
+                              )
+                            }
+                          />
+                        )}
+                      />
+                    </ConversationPresentation>
+                  </div>
+                  {available && channel && target && tab && (
+                    <div
+                      className={styles.draftContent}
+                      hidden={!shown}
+                      data-conversation-reader=""
+                    >
+                      <ConversationPresentation value={presented && shown}>
+                        <ConversationHost
+                          host={detailHost}
+                          session={session}
+                          scope={scope}
+                          channelId={channel.id}
+                          channelName={channel.name}
+                          threadId={target.threadId}
+                        >
+                          {(interactions) => (
+                            <>
+                              <PanelHeader
+                                variant="conversation"
+                                title={channel.name}
+                                icon={
+                                  <ChannelMembersButton
+                                    key={channel.id}
+                                    session={session}
+                                    channelId={channel.id}
+                                    conversationName={channel.name}
+                                    navigator={detailHost.navigation}
+                                  />
+                                }
+                                navigation={
+                                  listVisibility ? (
+                                    <ConversationListToggle />
+                                  ) : (
+                                    <IconButton
+                                      size="sm"
+                                      variant="subtle"
+                                      aria-label="Close conversation"
+                                      title="Close conversation"
+                                      icon={<XIcon size={16} />}
+                                      onClick={dismiss}
+                                    />
+                                  )
+                                }
+                                actions={
+                                  <InboxSheetActions
+                                    key={tab.id}
+                                    active={shown}
+                                    panels={host.panels}
+                                    context={{
+                                      scope,
+                                      channelId: channel.id,
+                                      channelName: channel.name,
+                                      viewer: session.viewer ?? "",
+                                      relayUrl: navigationScope.communityOrigin
+                                        .replace(/^https:/, "wss:")
+                                        .replace(/^http:/, "ws:"),
+                                      ...(target.threadId && {
+                                        threadId: target.threadId,
+                                      }),
+                                    }}
+                                    interactions={interactions}
+                                    onOpen={() => navigateConversation(target)}
+                                  />
+                                }
+                              />
+                              <div ref={setFeedbackMount} />
+                              <ConversationTab
+                                key={tab.id}
+                                tab={tab}
+                                active={shown}
+                                visit={false}
+                                channel={channel}
+                                session={session}
+                                scope={scope}
+                                extensions={extensions}
+                                openLink={interactions.onOpenLink}
+                                canOpenLink={interactions.canOpenLink}
+                                openThread={(messageId, rootId, intent) => {
+                                  open(
+                                    {
+                                      channelId: channel.id,
+                                      threadId: rootId,
+                                      messageId,
+                                    },
+                                    undefined,
+                                    intent === "reply",
+                                  );
+                                }}
+                              />
+                            </>
+                          )}
+                        </ConversationHost>
+                      </ConversationPresentation>
+                    </div>
+                  )}
+                </PanelFrame>
+              )}
+            </section>
+          </div>
+        </div>
+      </ConversationDetailPane>
     </FeedbackMount>
   );
 }

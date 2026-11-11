@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
 import {
   AnimatePresence,
@@ -26,9 +27,19 @@ function positionAnchoredDialog(
   element: HTMLElement,
   anchor: HTMLElement,
   container?: HTMLElement | null,
-  placement?: "center" | "right" | "bottom" | "rail",
+  placement?: "center" | "right" | "bottom" | "rail" | "workspace",
 ) {
   const source = anchor.getBoundingClientRect();
+  if (placement === "workspace") {
+    for (const [name, value] of Object.entries({
+      left: source.left,
+      top: source.top,
+      width: source.width,
+      height: source.height,
+    }))
+      element.style.setProperty(`--dialog-workspace-${name}`, `${value}px`);
+    return;
+  }
   if (placement === "rail") {
     element.style.setProperty("--dialog-rail-top", `${source.top}px`);
     return;
@@ -77,7 +88,7 @@ export type DialogProps = {
   navigation?: { label: string; content: ReactNode };
   /** Position within a host; sectioned modals stay bounded. Null waits for its ref. */
   container?: HTMLElement | null;
-  /** Bottom sheets grow from this surface; rail cards align below its top edge. */
+  /** Bottom sheets grow from this surface; workspace panes fill its bounds. */
   anchor?: HTMLElement | null;
   /** Subtle dimming for anchored reading sheets; regular task modals keep default contrast. */
   backdrop?: "default" | "subtle";
@@ -92,10 +103,12 @@ export type DialogProps = {
   step?: { key: string; scale: number };
   leadingActions?: ReactNode;
   headerActions?: ReactNode;
+  /** Split hosts may place this dialog's chrome inside its conversation pane. */
+  headerContainer?: HTMLElement | null;
   /** Return true when an inner editor layer consumed Escape. */
   onEscape?: () => boolean;
-  /** Rail cards are non-modal and leave the surrounding workspace interactive. */
-  placement?: "center" | "right" | "bottom" | "rail";
+  /** Rail and workspace presentations leave the surrounding app interactive. */
+  placement?: "center" | "right" | "bottom" | "rail" | "workspace";
   dismissOnOutsideClick?: boolean;
   closeLabel?: string;
   closePlacement?: "start" | "end";
@@ -138,6 +151,7 @@ export function Dialog({
   step,
   leadingActions,
   headerActions,
+  headerContainer,
   onEscape,
   placement = "center",
   dismissOnOutsideClick = true,
@@ -158,25 +172,22 @@ export function Dialog({
   const focus = useFinalFocusUnlessMoved(finalFocus, undefined);
   const surface = useRef<HTMLDivElement>(null);
   const [popup, setPopup] = useState<HTMLElement | null>(null);
+  const modal = placement !== "rail" && placement !== "workspace";
+  const anchored =
+    placement === "bottom" || placement === "rail" || placement === "workspace";
   const popupRef = useCallback(
     (element: HTMLDivElement | null) => {
-      if (element && anchor && (placement === "bottom" || placement === "rail"))
+      if (element && anchor && anchored)
         positionAnchoredDialog(element, anchor, container, placement);
       surface.current = element;
       setPopup(element);
       focus.ref(element);
     },
-    [focus.ref, anchor, container, placement],
+    [focus.ref, anchor, container, placement, anchored],
   );
   useLayoutEffect(() => {
     const element = popup;
-    if (
-      !open ||
-      !anchor ||
-      !element ||
-      (placement !== "bottom" && placement !== "rail")
-    )
-      return;
+    if (!open || !anchor || !element || !anchored) return;
     const measure = () =>
       positionAnchoredDialog(element, anchor, container, placement);
     measure();
@@ -191,7 +202,7 @@ export function Dialog({
       observer?.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [open, anchor, container, placement, popup]);
+  }, [open, anchor, container, placement, popup, anchored]);
   const transition =
     motion === "none" || (!open && instantClose) ? "none" : "default";
   const closeControl = (
@@ -208,74 +219,72 @@ export function Dialog({
       }
     />
   );
+  const header =
+    presentation === "search" ? (
+      <>
+        {!step && (
+          <BaseDialog.Title className="sr-only">{title}</BaseDialog.Title>
+        )}
+        {description && !step && (
+          <BaseDialog.Description className="sr-only">
+            {description}
+          </BaseDialog.Description>
+        )}
+      </>
+    ) : (
+      <header
+        className="buzz-dialog-header"
+        data-chrome-spacing={chromeSpacing}
+        data-artwork={artwork != null || identity != null || undefined}
+        data-identity={identity != null || undefined}
+        data-close-placement={closePlacement}
+      >
+        <ScrollEdgeMaterial edge="top" className="buzz-dialog-bar-material" />
+        {closePlacement === "start" && (
+          <div className="buzz-dialog-header-start">{closeControl}</div>
+        )}
+        <div className="buzz-dialog-heading">
+          {identity != null && (
+            <div className="buzz-dialog-identity">{identity}</div>
+          )}
+          {artwork != null && (
+            <div className="buzz-dialog-artwork">{artwork}</div>
+          )}
+          {step ? (
+            <div className="text-label" aria-hidden="true">
+              {title}
+            </div>
+          ) : (
+            <BaseDialog.Title
+              className={
+                identity && closePlacement !== "start"
+                  ? "sr-only"
+                  : "text-label"
+              }
+            >
+              {title}
+            </BaseDialog.Title>
+          )}
+          {description &&
+            (step ? (
+              <p className="buzz-dialog-description" aria-hidden="true">
+                {description}
+              </p>
+            ) : (
+              <BaseDialog.Description className="buzz-dialog-description">
+                {description}
+              </BaseDialog.Description>
+            ))}
+        </div>
+        <div className="buzz-dialog-header-actions">
+          {headerActions}
+          {closePlacement === "end" && closeControl}
+        </div>
+      </header>
+    );
   const contents = (
     <>
-      {presentation === "search" ? (
-        <>
-          {!step && (
-            <BaseDialog.Title className="sr-only">{title}</BaseDialog.Title>
-          )}
-          {description && !step && (
-            <BaseDialog.Description className="sr-only">
-              {description}
-            </BaseDialog.Description>
-          )}
-        </>
-      ) : (
-        <header
-          className="buzz-dialog-header"
-          data-chrome-spacing={chromeSpacing}
-          data-artwork={artwork != null || identity != null || undefined}
-          data-identity={identity != null || undefined}
-          data-close-placement={closePlacement}
-        >
-          <ScrollEdgeMaterial edge="top" className="buzz-dialog-bar-material" />
-          {closePlacement === "start" && (
-            <div className="buzz-dialog-header-start">
-              {closeControl}
-              {identity != null && (
-                <div className="buzz-dialog-identity">{identity}</div>
-              )}
-              {identity != null && !step && (
-                <BaseDialog.Title className="text-label">
-                  {title}
-                </BaseDialog.Title>
-              )}
-            </div>
-          )}
-          <div className="buzz-dialog-heading">
-            {identity != null && closePlacement !== "start" && (
-              <div className="buzz-dialog-identity">{identity}</div>
-            )}
-            {artwork != null && (
-              <div className="buzz-dialog-artwork">{artwork}</div>
-            )}
-            {step ? (
-              <div className="text-label" aria-hidden="true">
-                {title}
-              </div>
-            ) : identity != null && closePlacement === "start" ? null : (
-              <BaseDialog.Title className={identity ? "sr-only" : "text-label"}>
-                {title}
-              </BaseDialog.Title>
-            )}
-            {description &&
-              (step ? (
-                <p className="buzz-dialog-description" aria-hidden="true">
-                  {description}
-                </p>
-              ) : (
-                <BaseDialog.Description className="buzz-dialog-description">
-                  {description}
-                </BaseDialog.Description>
-              ))}
-          </div>
-          <div className="buzz-dialog-header-actions">
-            {headerActions}
-            {closePlacement === "end" && closeControl}
-          </div>
-        </header>
-      )}
+      {headerContainer ? createPortal(header, headerContainer) : header}
       {((children != null && children !== false) || navigation) && (
         <div
           className="buzz-dialog-body buzz-dialog-content"
@@ -342,29 +351,21 @@ export function Dialog({
   );
   return (
     <BaseDialog.Root
-      modal={placement !== "rail"}
+      modal={modal}
       open={open}
       onOpenChangeComplete={onOpenChangeComplete}
       disablePointerDismissal={!dismissOnOutsideClick}
       onOpenChange={(next, details) => {
         if (
           !next &&
-          details.reason === "escape-key" &&
-          "shiftKey" in details.event &&
-          details.event.shiftKey
+          ((details.reason === "escape-key" &&
+            "shiftKey" in details.event &&
+            details.event.shiftKey) ||
+            preventClose ||
+            (details.reason === "outside-press" &&
+              windowDrag.wasWindowDrag()) ||
+            (details.reason === "escape-key" && onEscape?.()))
         ) {
-          details.cancel();
-          return;
-        }
-        if (
-          !next &&
-          (preventClose ||
-            (details.reason === "outside-press" && windowDrag.wasWindowDrag()))
-        ) {
-          details.cancel();
-          return;
-        }
-        if (!next && details.reason === "escape-key" && onEscape?.()) {
           details.cancel();
           return;
         }
@@ -373,7 +374,7 @@ export function Dialog({
       }}
     >
       <BaseDialog.Portal container={container} keepMounted={keepMounted}>
-        {placement !== "rail" && (
+        {modal && (
           <BaseDialog.Backdrop
             forceRender
             onPointerDown={windowDrag.onPointerDown}
@@ -403,7 +404,7 @@ export function Dialog({
           data-contained={container ? "" : undefined}
           data-anchored={anchor && placement === "bottom" ? "" : undefined}
           data-motion={transition}
-          aria-modal={placement !== "rail"}
+          aria-modal={modal}
           initialFocus={
             initialFocus === "dialog" ? () => surface.current : initialFocus
           }

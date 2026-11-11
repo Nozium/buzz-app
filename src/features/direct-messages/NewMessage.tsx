@@ -234,19 +234,31 @@ export function NewMessage({
     session.profiles.subscribe,
     session.profiles.snapshot,
   );
+  const agents = useAgentChoices(
+    session,
+    layout === "composer",
+    layout === "composer",
+  );
   const named = useMemo(
     () =>
       withVerifiedNames(
         recipients.map((person) => {
           const current = profiles.get(person.pubkey);
-          return current && !current.verified
-            ? { ...person, name: current.name }
-            : person;
+          const picture =
+            current?.picture ??
+            person.picture ??
+            agents.identities.find((agent) => agent.pubkey === person.pubkey)
+              ?.avatar;
+          return {
+            ...person,
+            ...(current && !current.verified ? { name: current.name } : {}),
+            ...(picture ? { picture } : {}),
+          };
         }),
         verified,
         profiles,
       ),
-    [recipients, verified, profiles],
+    [recipients, verified, profiles, agents.identities],
   );
   const recipientNames = named.map((person) => person.name).join(", ");
   const [inlineQuery, setInlineQuery] = useState<string>();
@@ -254,11 +266,6 @@ export function NewMessage({
     session,
     inlineQuery ?? "",
     layout === "composer" && inlineQuery !== undefined,
-  );
-  const agents = useAgentChoices(
-    session,
-    layout === "composer",
-    layout === "composer",
   );
   const inlinePeople = useMemo(() => {
     const eligible = new Set(
@@ -706,6 +713,19 @@ export function NewMessage({
     ) : undefined;
   const displayed = target ?? existing;
   const composerName = target ? `#${target.name}` : recipientNames;
+  const recipientArtwork = (solo: boolean) => (
+    <AvatarStack
+      animateEntrance
+      size="hero-large"
+      max={solo ? 1 : 5}
+      items={named.map((person) => ({
+        id: person.pubkey,
+        name: person.name,
+        src: avatarMedia(person.picture, session.media),
+        shape: solo || person.isAgent ? "squircle" : "circle",
+      }))}
+    />
+  );
   const content = (
     <section
       className={styles.page}
@@ -735,17 +755,7 @@ export function NewMessage({
         <>
           {(layout === "page" || expanded) && (
             <div className={styles.solo} data-new-message-body="">
-              <AvatarStack
-                animateEntrance
-                size="hero-large"
-                max={1}
-                items={named.map((person) => ({
-                  id: person.pubkey,
-                  name: person.name,
-                  src: avatarMedia(person.picture, session.media),
-                  shape: "squircle",
-                }))}
-              />
+              {recipientArtwork(true)}
               {recent.length > 0 && (
                 <nav
                   className={styles.recent}
@@ -804,17 +814,7 @@ export function NewMessage({
                 />
               ) : recipients.length > 0 ? (
                 <div className={styles.introduction}>
-                  <AvatarStack
-                    animateEntrance
-                    size="hero-large"
-                    max={5}
-                    items={named.map((person) => ({
-                      id: person.pubkey,
-                      name: person.name,
-                      src: avatarMedia(person.picture, session.media),
-                      shape: person.isAgent ? "squircle" : "circle",
-                    }))}
-                  />
+                  {recipientArtwork(false)}
                 </div>
               ) : null}
             </div>

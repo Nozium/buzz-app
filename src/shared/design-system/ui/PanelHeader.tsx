@@ -16,7 +16,7 @@ export function PanelHeader({
   icon?: ReactNode;
   navigation?: ReactNode;
   actions?: ReactNode;
-  variant?: "default" | "compact" | "card";
+  variant?: "default" | "compact" | "card" | "conversation";
   /** Keep the separator's space while omitting its visible line. */
   divider?: boolean;
 }) {

@@ -1,4 +1,4 @@
-import type { Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Tabs } from "../../shared/design-system/ui/Tabs";
 import {
@@ -56,14 +56,17 @@ const senders = [
 export function InboxViewFilter({
   view,
   onViewChange,
+  leadingAction,
 }: {
   view: ActivityFilter;
   onViewChange(view: ActivityFilter): void;
+  leadingAction?: ReactNode;
 }) {
   return (
     <Tabs
       label="Activity views"
       variant="buttons"
+      leadingAction={leadingAction}
       value={view}
       items={activityViews}
       onValueChange={onViewChange}

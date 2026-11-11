@@ -30,6 +30,8 @@ import type { TabDragHost } from "./useTabDrag";
 type Item = {
   id: string;
   label: string;
+  /** Conversation membership identity shown above its message scrollport. */
+  identity?: ReactNode;
   /** Conversation/thread content needs the bottom composer expansion. */
   composer?: boolean;
   icon?: ReactNode;
@@ -116,6 +118,7 @@ export function PanelWorkspace({
   value,
   select,
   actions,
+  leadingActions,
   identity,
   identityPlacement = "header",
   headerDivider = true,
@@ -140,6 +143,8 @@ export function PanelWorkspace({
   select(id: string): void;
   /** Header icon actions owned by the hosting page. */
   actions?: ReactNode;
+  /** Navigation at the leading edge, independent of centered membership artwork. */
+  leadingActions?: ReactNode;
   /** Interactive conversation identity; a lone permanent tab needs no tab strip. */
   identity?: ReactNode;
   /** The permanent conversation may present its identity above its scrollport. */
@@ -473,6 +478,20 @@ export function PanelWorkspace({
       )}
     </div>
   ) : undefined;
+  const conversationIdentity =
+    identityPlacement === "content" && selected === items[0]?.id
+      ? heading
+      : active && "identity" in active
+        ? active.identity
+        : undefined;
+  const conversationTitle =
+    identityPlacement === "content" ? items[0]?.label : active?.label;
+  const standaloneIdentity = !!conversationIdentity && identityOnly;
+  const tools = sheet ? undefined : conversationTools ? (
+    <ConversationHeaderTools actions={headerTools} />
+  ) : (
+    headerTools
+  );
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: Escape from descendant controls closes their active tab.
     <div
@@ -481,7 +500,7 @@ export function PanelWorkspace({
         : { "data-panel-workspace": "" })}
       data-active-tab-closable={!!active?.close || undefined}
       data-overlay-boundary=""
-      tabIndex={sheet ? -1 : undefined}
+      tabIndex={-1}
       className={styles.workspace}
       ref={(element) => {
         root.current = element;
@@ -525,26 +544,16 @@ export function PanelWorkspace({
         }
       }}
     >
-      {(!sheet || tabs.length > 1) && (
+      {(!sheet || tabs.length > 1) && !standaloneIdentity && (
         <PanelHeader
           divider={headerDivider}
-          icon={
-            identityPlacement === "content" && selected === items[0]?.id
-              ? heading
-              : undefined
-          }
           navigation={
-            !identityOnly && identityPlacement === "header"
+            leadingActions ??
+            (!identityOnly && identityPlacement === "header"
               ? heading
-              : undefined
+              : undefined)
           }
-          actions={
-            sheet ? undefined : conversationTools ? (
-              <ConversationHeaderTools actions={headerTools} />
-            ) : (
-              headerTools
-            )
-          }
+          actions={tools}
           title={
             identityOnly ? (
               identityPlacement === "header" ? (
@@ -620,6 +629,16 @@ export function PanelWorkspace({
               />
             )
           }
+        />
+      )}
+      {conversationIdentity && (
+        <PanelHeader
+          variant="conversation"
+          navigation={standaloneIdentity ? leadingActions : undefined}
+          title={conversationTitle ?? label}
+          icon={conversationIdentity}
+          actions={standaloneIdentity ? tools : undefined}
+          divider={false}
         />
       )}
       <div className={styles.workspaceBody}>

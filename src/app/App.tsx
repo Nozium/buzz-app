@@ -476,7 +476,7 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
         variant={variant}
         onClick={() => select("buzz.channels/channels")}
       >
-        Go to Messages
+        Go to Team
       </Button>
     ) : null;
   // A link or access failure returns to where the person came from; opened
@@ -609,9 +609,15 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
       <ChannelNavigationProvider relay={services.relay}>
         <AppShell
           creationInSidebar={!workspace.page?.sidebar}
-          creationAction={(open, onOpenChange, triggerContainer) => (
+          creationAction={(
+            open,
+            onOpenChange,
+            triggerContainer,
+            menuTriggerContainer,
+          ) => (
             <NewMenu
               triggerContainer={triggerContainer}
+              menuTriggerContainer={menuTriggerContainer}
               open={open}
               onOpenChange={onOpenChange}
               relay={services.relay}

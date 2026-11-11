@@ -317,7 +317,13 @@
     min-width: 0;
   }
   .shell-body {
-    @apply relative flex min-h-0 min-w-0 flex-1;
+    @apply relative grid min-h-0 min-w-0 flex-1;
+    /* One surface spans the reading track and its balancing gutter. Subgrid
+       keeps the content in its existing reading track. */
+    grid-column: 2 / -1;
+    grid-template-columns: subgrid;
+    background: transparent;
+    overflow: clip;
     padding: var(--space-panel-gap);
     padding-block-start: var(--space-4);
   }
@@ -329,9 +335,11 @@
      still blocks the whole window, including the header. */
   .shell-workspace {
     @apply relative grid min-h-0 min-w-0 flex-1;
+    --shell-container-radius: calc(var(--radius-container) + var(--space-1));
     background: var(--surface-panel);
-    border-start-start-radius: calc(var(--radius-container) + var(--space-1));
-    border-start-end-radius: calc(var(--radius-container) + var(--space-1));
+    border-radius: var(--shell-container-radius);
+    overflow: clip;
+    column-gap: 0;
     --shell-rail-width: var(--size-navigation-rail);
     /* Balance the rail when there is room for the reading column. Between
        wide and narrow layouts, give this gutter back to the content first. */
@@ -345,6 +353,7 @@
       );
   }
   .shell-body > div {
+    grid-column: 1;
     width: 100%;
     margin-inline: auto;
   }
@@ -352,7 +361,28 @@
   .shell-body:not(.shell-body-settings) > div {
     max-width: var(--size-conversation-frame);
   }
-  .shell-workspace:not([data-rail-open]) {
+  /* Split workspaces use the available canvas; readers retain their own measure. */
+  .shell-workspace:has([data-panel-dock]:not([hidden], [data-closing])),
+  .shell-workspace:has([data-detail-workspace]) {
+    --shell-balance-gutter: 0rem;
+  }
+  .shell-body:has([data-detail-workspace]) > div,
+  .shell-body:has([data-panel-dock]:not([hidden], [data-closing])) > div {
+    max-width: none;
+  }
+  /* Collection headers and rows own equal insets at both pane edges. */
+  .shell-body:has([data-detail-workspace]) {
+    padding-inline: 0;
+  }
+  /* A full-width reader owns its edge insets, just as it does beside the list. */
+  .shell-body:has([data-detail-workspace] > [data-list-open="false"]) {
+    grid-template-columns: minmax(0, 1fr);
+    padding-inline: 0;
+  }
+  .shell-workspace[data-rail-compact] {
+    --shell-rail-width: calc(var(--size-control) + var(--space-4));
+  }
+  .shell-workspace:not([data-rail-open], [data-rail-compact]) {
     grid-template-columns: minmax(0, 1fr);
   }
   @media (max-width: 650px) {
@@ -360,6 +390,10 @@
     .shell-workspace[data-feed-layout] {
       grid-template-columns: minmax(0, 1fr);
       column-gap: 0;
+    }
+    .shell-body {
+      grid-column: 1 / -1;
+      grid-template-columns: minmax(0, 1fr);
     }
   }
   .shell-dialog-frame {

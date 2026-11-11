@@ -69,7 +69,7 @@ afterEach(() => {
 // The sheet changes Activity's host placement/dismissal, while real session
 // readers, composers and drafts continue through the existing conversation owner.
 it.each([false, true])(
-  "Activity opens a composer sheet and restores its draft after dismissal (DM: %s)",
+  "Activity opens an inline reader and restores its draft after dismissal (DM: %s)",
   async (dm) => {
     const h = fixture({ sheet: true, withWriter: true, withDm: dm });
     render(h.view);
@@ -79,7 +79,7 @@ it.each([false, true])(
       name: /^Open /,
     });
     await userEvent.click(opener);
-    const dialog = await screen.findByRole("dialog");
+    const dialog = screen.getByRole("region", { name: "Conversation detail" });
     expect(
       within(dialog).getByRole("button", {
         name: `Manage members of ${dm ? "Alice" : "Design"}`,
@@ -96,21 +96,20 @@ it.each([false, true])(
       screen.queryByRole("tablist", { name: "Activity tabs" }),
     ).not.toBeInTheDocument();
     await userEvent.click(
-      within(dialog).getByRole("button", { name: "Close" }),
+      within(dialog).getByRole("button", { name: "Close conversation" }),
     );
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(queryReader()).not.toBeInTheDocument());
     expect(opener).toHaveFocus();
     await userEvent.click(opener);
-    const reopened = await screen.findByRole("dialog");
+    const reopened = screen.getByRole("region", {
+      name: "Conversation detail",
+    });
     expect(await within(reopened).findByRole("textbox")).toHaveTextContent(
       "Keep my Activity draft",
     );
+    within(reopened).getByRole("textbox").focus();
     await userEvent.keyboard("{Escape}");
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(queryReader()).not.toBeInTheDocument());
     expect(opener).toHaveFocus();
     expect(h.open).not.toHaveBeenCalled();
   },
@@ -291,8 +290,9 @@ it("includes ordinary channel activity in All and isolates it in Channels", asyn
   expect(await feed.findByText("An ordinary channel post")).toBeVisible();
   expect(feed.queryByText("A direct reply")).not.toBeInTheDocument();
   await userEvent.click(feed.getByRole("button", { name: /Design/ }));
-  const sheet = await screen.findByRole("dialog", {
-    name: "Design",
+  const sheet = screen.getByRole("region", { name: "Conversation detail" });
+  await within(sheet).findByRole("button", {
+    name: "Manage members of Design",
   });
   await userEvent.click(
     within(sheet).getByRole("button", { name: "Manage members of Design" }),
@@ -311,11 +311,9 @@ it("Activity retires an open sheet when channel membership is revoked", async ()
   await userEvent.click(
     within(rows()[0] as HTMLElement).getByRole("button", { name: /^Open / }),
   );
-  await within(await screen.findByRole("dialog")).findByRole("textbox");
+  await findReader();
   act(() => h.revokeRoom());
-  await waitFor(() =>
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
-  );
+  await waitFor(() => expect(queryReader()).not.toBeInTheDocument());
 });
 
 it.each([false, true])(
@@ -332,7 +330,7 @@ it.each([false, true])(
     if (!first) throw new Error("Missing fixture row");
     fireEvent.click(first);
     await findReader();
-    expect(await screen.findByRole("dialog")).toBeVisible();
+    expect(await findReader()).toBeVisible();
     // Another visible control, such as the app's sidebar, keeps its focus.
     const other = document.body.appendChild(document.createElement("button"));
     if (elsewhere) other.focus();
@@ -503,7 +501,7 @@ it("keeps a saved offset off a list the user refilters", async () => {
   expect(scroller()?.scrollTop).toBe(40);
 });
 
-it("the public page-tab host keeps a covered Activity list unmeasured until sheet dismissal", async () => {
+it("the public page-tab host retains Activity scroll beside its reader across remounting", async () => {
   const h = fixture({ sheet: false });
   const view = render(h.view);
   await waitFor(() => expect(rows()).toHaveLength(2));
@@ -514,33 +512,24 @@ it("the public page-tab host keeps a covered Activity list unmeasured until shee
   if (!first) throw new Error("Missing fixture row");
   fireEvent.click(within(first).getByRole("button", { name: /^Open / }));
   await findReader();
-  expect(await screen.findByRole("dialog")).toBeVisible();
-  // The covered list keeps its selected row, which an update would measure.
+  expect(
+    await screen.findByRole("tablist", { name: "Panel tabs" }),
+  ).toBeVisible();
+  // The visible list keeps its selection while the reader is open beside it.
   expect(list.querySelector("li[data-selected]")).not.toBeNull();
-  const measure = vi.spyOn(Element.prototype, "getBoundingClientRect");
-  try {
-    const mention = message(
-      h.alice,
-      "room",
-      "Fresh mention",
-      Math.floor(Date.now() / 1000) + 5,
-      [["p", h.viewer.pubkey]],
-    );
-    h.addEvent(mention);
-    act(() => h.emit([mention]));
-    await waitFor(() => expect(list).toHaveTextContent("Fresh mention"));
-    // Rows arriving above a scrolled, covered list can anchor it.
-    list.scrollTop = 160;
-    fireEvent.scroll(list);
-    expect(
-      measure.mock.contexts.filter(
-        (element) => element instanceof Node && list.contains(element),
-      ),
-    ).toEqual([]);
-  } finally {
-    measure.mockRestore();
-  }
-  // Remounting retains the sheet and the list offset until dismissal.
+  const mention = message(
+    h.alice,
+    "room",
+    "Fresh mention",
+    Math.floor(Date.now() / 1000) + 5,
+    [["p", h.viewer.pubkey]],
+  );
+  h.addEvent(mention);
+  act(() => h.emit([mention]));
+  await waitFor(() => expect(list).toHaveTextContent("Fresh mention"));
+  list.scrollTop = 160;
+  fireEvent.scroll(list);
+  // Remounting retains the reader and the list offset until dismissal.
   view.unmount();
   render(h.view);
   const returned = await screen.findByRole("list", {
@@ -550,14 +539,12 @@ it("the public page-tab host keeps a covered Activity list unmeasured until shee
   await waitFor(() => expect(returned).toHaveTextContent("Fresh mention"));
   const covered = returned.parentElement;
   if (!covered) throw new Error("Missing Activity scroller");
-  expect(
-    covered.closest('[aria-hidden="true"], [inert], [data-base-ui-inert]'),
-  ).not.toBeNull();
+  expect(returned).toBeVisible();
   expect(covered.scrollTop).toBe(160);
-  fireEvent.click(
-    within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }),
+  fireEvent.click(screen.getByRole("button", { name: /^Close .* tab$/ }));
+  await waitFor(() =>
+    expect(screen.queryByRole("tablist", { name: "Panel tabs" })).toBeNull(),
   );
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(
     covered.closest('[aria-hidden="true"], [inert], [data-base-ui-inert]'),
   ).toBeNull();
@@ -1778,9 +1765,13 @@ const sideTabs = () => {
     ? within(list)
         .getAllByRole("tab")
         .map((tab) => tab.textContent)
-    : screen
-        .queryAllByRole("dialog")
-        .map((dialog) => within(dialog).getByRole("heading").textContent);
+    : queryReader()
+      ? [
+          within(
+            screen.getByRole("region", { name: "Conversation detail" }),
+          ).getByRole("heading").textContent,
+        ]
+      : [];
 };
 /** A visit's presentation: every open, even of the same address, is a new object. */
 function visit(params?: InboxRoute): PageNavigation {
@@ -1814,9 +1805,8 @@ const savedFilters = (h: ReturnType<typeof fixture>) =>
   );
 function dismissReaderSync() {
   const conversation = queryReader();
-  const sheet = conversation?.closest<HTMLElement>('[role="dialog"]');
-  if (sheet)
-    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+  if (conversation)
+    fireEvent.click(screen.getByRole("button", { name: "Close conversation" }));
 }
 async function dismissReader() {
   dismissReaderSync();
@@ -2256,9 +2246,7 @@ it("reads a reopened row again after its tab closes", async () => {
   open();
   await findReader();
   await waitFor(() => expect(unread()).not.toBeInTheDocument());
-  fireEvent.click(
-    within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Close conversation" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   fireEvent.contextMenu(within(row()).getByRole("button", { name: /^Open / }));
   fireEvent.click(await screen.findByRole("menuitem", { name: "Mark unread" }));
@@ -2835,8 +2823,10 @@ it("opens local unread actions with the ContextMenu key without changing selecti
     ).not.toBeInTheDocument(),
   );
   fireEvent.click(
-    within(screen.getByRole("dialog", { name: "Design" })).getByRole("button", {
-      name: "Close",
+    within(
+      screen.getByRole("region", { name: "Conversation detail" }),
+    ).getByRole("button", {
+      name: "Close conversation",
     }),
   );
   expect(queryReader()).not.toBeInTheDocument();

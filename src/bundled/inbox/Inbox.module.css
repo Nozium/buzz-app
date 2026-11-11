@@ -123,57 +123,155 @@
 }
 
 .sheetHost {
-  width: 100%;
-  max-width: var(--size-conversation-frame);
-  margin-inline: auto;
-  container: activity / inline-size;
-  overflow-x: clip;
-  display: flex;
-  flex-direction: column;
   position: relative;
-  isolation: isolate;
+  width: 100%;
+  container: activity / inline-size;
+  overflow: clip;
   height: 100%;
   min-height: 0;
   min-width: 0;
 }
 
-.sheetFeed {
-  flex: 1;
+.collectionPanes {
+  display: grid;
+  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+  height: 100%;
   min-height: 0;
-  min-width: 0;
 }
 
-.newMessage {
-  display: flex;
-  flex-direction: column;
-  position: absolute;
-  inset-block-end: 0;
-  isolation: isolate;
-  width: 100%;
-  inset-inline-start: 50%;
-  transform: translateX(-50%);
-  min-width: 0;
-  background: var(--surface-panel);
-  border-radius: var(--radius-container) var(--radius-container) 0 0;
-}
-
-.newMessage[data-covered] {
-  height: var(--activity-composer-clearance);
-}
-
+.sheetFeed,
+.collectionDetail,
 .draftContent {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-width: 0;
+  height: 100%;
   min-height: 0;
+  min-width: 0;
 }
 
-.composerEdge {
-  --scroll-edge-surface: var(--surface-panel);
+.sheetFeed > :first-child {
+  flex: 1;
+  min-height: 0;
+}
+.sheetFeed {
+  --collection-content-inset: var(--space-4);
+}
+
+.collectionCreate {
+  display: flex;
+  gap: var(--space-2);
+  flex: none;
+  justify-content: center;
+  padding: var(--space-4);
+}
+
+.collectionDetail {
+  border-inline-start: 1px solid var(--border-standard);
+}
+
+.collectionDetail > * {
+  flex: 1;
+}
+
+.draftContent[hidden] {
+  display: none;
+}
+
+/* The list keeps a fixed width while the reader lays out once at its new size. */
+:where(.collectionPanes[data-list-controlled]) .sheetFeed {
+  display: flex;
+  width: min(22rem, 100%);
+  visibility: visible;
+  opacity: 1;
+  transform: translateX(0);
+  background: var(--surface-panel);
+  z-index: 2;
+}
+:where(.collectionPanes[data-list-controlled][data-list-animate]) .sheetFeed {
+  transition:
+    transform var(--time-panel-enter) var(--ease-enter),
+    opacity var(--time-panel-enter) var(--ease-enter),
+    visibility 0s;
+}
+:where(.collectionPanes[data-list-controlled][data-list-open="false"])
+  .sheetFeed {
   position: absolute;
-  inset-inline: 0;
-  inset-block-end: 100%;
-  height: var(--space-8);
+  inset: 0 auto 0 0;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateX(-100%);
   pointer-events: none;
+}
+:where(
+    .collectionPanes[data-list-controlled][data-list-animate][data-list-open="false"]
+  )
+  .sheetFeed {
+  transition-duration: var(--time-fast), var(--time-fast), 0s;
+  transition-delay: 0s, 0s, var(--time-fast);
+}
+:where(html[data-keyboard-input] .collectionPanes[data-list-controlled])
+  .sheetFeed {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(.collectionPanes[data-list-controlled][data-list-animate]) .sheetFeed {
+    transition: none;
+  }
+}
+
+.collectionPanes[data-list-open="false"] .collectionDetail {
+  border-inline-start: 0;
+}
+
+.sheetHost[data-narrow] .collectionPanes {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.sheetHost[data-narrow]
+  .collectionPanes:not([data-detail-selected])
+  .sheetFeed {
+  width: 100%;
+}
+
+.sheetHost[data-narrow] .collectionDetail {
+  border-inline-start: 0;
+}
+
+.sheetHost[data-narrow]
+  .collectionPanes:not([data-detail-selected])
+  .collectionDetail,
+.sheetHost[data-narrow]
+  .collectionPanes:not([data-list-controlled])[data-detail-selected]
+  .sheetFeed {
+  display: none;
+}
+
+/* Collapsing the list changes layout without retiring the selected conversation. */
+.collectionPanes[data-list-open="false"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.listDismiss {
+  display: none;
+}
+.sheetHost[data-narrow]
+  .collectionPanes[data-list-controlled]:is(
+    [data-detail-selected],
+    [data-list-open="false"]
+  )
+  .collectionDetail {
+  display: flex;
+}
+.sheetHost[data-narrow]
+  .collectionPanes[data-list-controlled][data-list-open="true"][data-detail-selected]
+  .sheetFeed {
+  display: flex;
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: min(22rem, 100%);
+  z-index: 2;
+  background: var(--surface-panel);
+  box-shadow: var(--elevation-dock);
+}
+.sheetHost[data-narrow] .collectionPanes[data-detail-selected] .listDismiss {
+  display: flex;
 }

@@ -1,8 +1,23 @@
 import { defineIcon } from "./createDecorativeIcon";
+import TablerGripHorizontalIcon from "@tabler/icons-react/dist/esm/icons/IconGripHorizontal.mjs";
+export const GripHorizontalIcon = defineIcon(
+  "tabler",
+  TablerGripHorizontalIcon,
+);
 import TablerPinIcon from "@tabler/icons-react/dist/esm/icons/IconPin.mjs";
 export const PinIcon = defineIcon("tabler", TablerPinIcon);
 import TablerMenuIcon from "@tabler/icons-react/dist/esm/icons/IconMenu2.mjs";
 export const MenuIcon = defineIcon("tabler", TablerMenuIcon);
+import TablerLayoutSidebarLeftCollapseIcon from "@tabler/icons-react/dist/esm/icons/IconLayoutSidebarLeftCollapse.mjs";
+export const LayoutSidebarLeftCollapseIcon = defineIcon(
+  "tabler",
+  TablerLayoutSidebarLeftCollapseIcon,
+);
+import TablerLayoutSidebarLeftExpandIcon from "@tabler/icons-react/dist/esm/icons/IconLayoutSidebarLeftExpand.mjs";
+export const LayoutSidebarLeftExpandIcon = defineIcon(
+  "tabler",
+  TablerLayoutSidebarLeftExpandIcon,
+);
 export type { DefinedIcon } from "./createDecorativeIcon";
 import { BestieMarkArtwork } from "./BestieMark";
 import { BlockLogoArtwork } from "./BlockLogo";

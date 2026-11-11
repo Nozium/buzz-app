@@ -46,7 +46,7 @@ export function PanelCard({
         }
       }}
     >
-      <Panel as="div" joined={sheet} flat={sheet}>
+      <Panel as="div" joined flat>
         <PanelSubviewHost close={props.close}>
           <div className={styles.card}>
             {!tabbed && !sheet && (

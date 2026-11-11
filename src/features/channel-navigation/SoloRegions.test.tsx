@@ -552,7 +552,6 @@ it("replaces personal filing with a reveal chip and rejects a move selected just
     screen.queryByRole("button", { name: "Workspace: Personal" }),
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Conversation actions" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Chat actions" }));
   expect(
     await screen.findByRole("menuitem", { name: "Chat settings" }),
   ).toBeInTheDocument();
@@ -572,9 +571,8 @@ it("replaces personal filing with a reveal chip and rejects a move selected just
   expect(
     screen.queryByRole("menuitem", { name: /Convert/ }),
   ).not.toBeInTheDocument();
-  fireEvent.keyDown(screen.getByRole("menuitem", { name: "Chat settings" }), {
-    key: "Escape",
-  });
+  await userEvent.keyboard("{Escape}");
+  fireEvent.click(screen.getByRole("button", { name: "Conversation actions" }));
   fireEvent.click(screen.getByRole("button", { name: "In Work" }));
   expect(reveal).toHaveBeenCalledWith("owned", true);
   await act(() => h.roster([{ ...channel, labels: ["buzz.solo"] }]));
@@ -591,6 +589,9 @@ it("replaces personal filing with a reveal chip and rejects a move selected just
   });
   expect(assign).not.toHaveBeenCalled();
   expect(data.assignments).toEqual({ owned: "personal" });
+  const overflow = screen.getByRole("button", { name: "Conversation actions" });
+  if (overflow.getAttribute("aria-expanded") === "false")
+    fireEvent.click(overflow);
   expect(screen.getByRole("button", { name: "In Work" })).toBeInTheDocument();
   stop();
 });

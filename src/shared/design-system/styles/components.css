@@ -36,7 +36,8 @@
     cursor: pointer;
     transition:
       background-color var(--duration-state) var(--easing-state),
-      color var(--duration-state) var(--easing-state);
+      color var(--duration-state) var(--easing-state),
+      scale var(--press-duration, 0ms) var(--press-easing, var(--easing-enter));
   }
   .buzz-button[data-button-shape="control"] {
     border-radius: var(--radius-control);
@@ -1512,14 +1513,14 @@
     border-block-end: 1px solid var(--border-standard);
     position: relative;
     display: flex;
-    min-height: calc(var(--size-control-sm) + 2 * var(--space-4));
+    min-height: var(--size-panel-header);
     width: 100%;
     flex: 0 0 auto;
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
-    padding: var(--space-4) var(--space-panel-inset);
+    padding: var(--space-4) var(--space-5);
   }
 
   /* Keep toolbar geometry while the conversation identity lives in content. */
@@ -1532,11 +1533,9 @@
     translate: 0 -1px;
   }
 
-  .panel-header[data-variant="compact"],
-  .panel-header[data-variant="card"] {
+  .panel-header[data-variant="compact"] {
     min-height: var(--size-panel-header);
-    padding-block: 0;
-    padding-inline: var(--space-1);
+    padding: var(--space-4) var(--space-5);
   }
 
   .panel-header-title,
@@ -1570,6 +1569,9 @@
 
   /* Floating agent cards keep actions beside a truncating title. */
   .panel-header[data-variant="card"] {
+    min-height: var(--size-panel-header);
+    padding-block: 0;
+    padding-inline: var(--space-1);
     border-block-end: 0;
     min-width: 0;
     flex-wrap: nowrap;
@@ -1585,6 +1587,23 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Chat identity and toolbar controls share a top edge. */
+  .panel-header[data-variant="conversation"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .panel-header[data-variant="conversation"] > .panel-header-title {
+    grid-area: 1 / 2;
+    flex-direction: column;
+    text-align: center;
+    gap: 0;
+  }
+  .panel-header[data-variant="conversation"] > .panel-header-actions {
+    grid-area: 1 / 3;
+    justify-self: end;
   }
 
   /* Conversation identity composes PanelHeader; only its inner content lives here. */
@@ -2078,7 +2097,8 @@
     user-select: none;
     transition:
       color var(--duration-state) var(--easing-state),
-      background-color var(--duration-state) var(--easing-state);
+      background-color var(--duration-state) var(--easing-state),
+      scale var(--press-duration, 0ms) var(--press-easing, var(--easing-enter));
   }
 
   /* Hover is the lightest acknowledgement; selection is a persistent, one-step
@@ -2109,6 +2129,10 @@
     --text-metadata: var(--interaction-selected-metadata);
     background: var(--interaction-selected);
     color: var(--navigation-item-text, var(--text-standard));
+  }
+  /* Avatar destinations supply their identity-colored selection ring. */
+  .navigation-item[data-selected][data-variant="avatar"] {
+    background: transparent;
   }
 
   /* Route navigation shares flat chrome, not Tabs' focus/tabpanel contract. */
@@ -2163,7 +2187,8 @@
   }
   .navigation-item[data-variant="option"] {
     padding: var(--space-2);
-    transition: none;
+    transition: scale var(--press-duration, 0ms)
+      var(--press-easing, var(--easing-enter));
   }
   .navigation-item[data-variant="option"]:focus-visible {
     background: var(--affordance-floating-hover);
@@ -2342,6 +2367,11 @@
     /* Split the header’s separator evenly to keep controls centered.
        The scrollbar track reserves that separator pixel in scrollbars.css. */
     padding-block: calc(var(--space-1) - 0.5px) 0;
+  }
+  .panel-header .buzz-tabs[data-variant="navigation"] .buzz-tabs-list {
+    height: var(--size-control-sm);
+    align-items: center;
+    padding-block: 0;
   }
   .buzz-tabs[data-variant="navigation"] .buzz-tabs-item {
     display: flex;
@@ -2623,7 +2653,8 @@
   .buzz-menu-popup[data-size="compact"] .buzz-menu-item,
   .buzz-popover-popup[data-size="compact"] .navigation-item {
     border-radius: var(--floating-inner-radius);
-    transition: none;
+    transition: scale var(--press-duration, 0ms)
+      var(--press-easing, var(--easing-enter));
   }
   .buzz-popover-popup[data-size="compact"] .navigation-item:focus-visible {
     background: var(--interaction-row-hover);

@@ -80,9 +80,7 @@ function fixture(events = [note("Icons"), note("Guide", ned)]) {
 }
 // One open note uses the rail's title and a region; multiple notes expose tabs.
 function noteView(name: string) {
-  return (
-    screen.queryByRole("tab", { name }) ?? screen.getByRole("region", { name })
-  );
+  return screen.getByRole("tab", { name });
 }
 function queryNoteView(name: string) {
   return (
@@ -272,7 +270,7 @@ it("scopes reads to all owned identities, including archived ones, and opens ind
   expect(screen.getByRole("heading", { name: "Icons content" })).toBeVisible();
   await user.click(screen.getByRole("button", { name: /Open Guide by Carl/ }));
   expect(noteView("Icons")).toBeInTheDocument();
-  expect(screen.getByRole("dialog", { name: "Guide" })).toBeVisible();
+  expect(screen.getByRole("tabpanel", { name: "Guide" })).toBeVisible();
   await user.click(noteView("Icons"));
   expect(screen.getByRole("heading", { name: "Icons content" })).toBeVisible();
   fireEvent.keyDown(noteView("Icons"), {
@@ -365,7 +363,7 @@ it.each(["icons", "", "two\nlines"])(
       await user.click(
         screen.getByRole("button", { name: "Open Guide by Carl" }),
       );
-      expect(screen.getByRole("dialog", { name: "Guide" })).toBeVisible();
+      expect(screen.getByRole("tabpanel", { name: "Guide" })).toBeVisible();
       act(() => navigator.back());
       expect(
         await screen.findByRole("button", { name: "Open Carl folder" }),
@@ -377,7 +375,7 @@ it.each(["icons", "", "two\nlines"])(
       expect(
         await screen.findByRole("button", { name: "Open Icons by Carl" }),
       ).toBeVisible();
-      expect(screen.getByRole("dialog", { name: "Guide" })).toBeVisible();
+      expect(screen.getByRole("tabpanel", { name: "Guide" })).toBeVisible();
       await user.click(screen.getByRole("button", { name: "Back to folders" }));
       expect(noteView("Icons")).toBeVisible();
       await enterFolder("Ned");
@@ -433,7 +431,7 @@ it("opens the registered author profile beside notes and retires it with its plu
     );
     expect(noteView("Icons")).toBeVisible();
     expect(
-      screen.getByRole("dialog", { name: "Carl · Profile" }),
+      screen.getByRole("tabpanel", { name: "Carl · Profile" }),
     ).toBeVisible();
     expect(
       screen.getByText(`Profile for buzz:agent-profile:${carl}`),
@@ -442,7 +440,7 @@ it("opens the registered author profile beside notes and retires it with its plu
       await scope.dispose();
     });
     expect(queryNoteView("Carl · Profile")).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Icons" })).toBeVisible();
+    expect(screen.getByRole("tabpanel", { name: "Icons" })).toBeVisible();
   } finally {
     view.unmount();
     await ctx.fiber.dispose();
@@ -475,12 +473,12 @@ it("toggles existing note tabs from cards without closing other notes", async ()
   // Clicking an already-open card closes its tab even when another tab is active.
   await user.click(icons);
   expect(queryNoteView("Icons")).not.toBeInTheDocument();
-  expect(screen.getByRole("dialog", { name: "Guide" })).toBeVisible();
+  expect(screen.getByRole("tabpanel", { name: "Guide" })).toBeVisible();
   expect(icons).toHaveAttribute("aria-pressed", "false");
   await user.click(icons);
-  expect(screen.getByRole("dialog", { name: "Icons" })).toBeVisible();
+  expect(screen.getByRole("tabpanel", { name: "Icons" })).toBeVisible();
   await user.click(icons);
-  expect(screen.getByRole("dialog", { name: "Guide" })).toBeVisible();
+  expect(screen.getByRole("tabpanel", { name: "Guide" })).toBeVisible();
   await user.click(guide);
   expect(
     screen.queryByRole("region", { name: "Note details" }),
@@ -538,7 +536,7 @@ it("shows owned notes on the index, filters by agent, and retains reader tabs ac
   expect(noteView("Icons")).toBeVisible();
   await user.click(screen.getByRole("button", { name: /Open Archive by Ned/ }));
   expect(noteView("Icons")).toBeVisible();
-  expect(screen.getByRole("dialog", { name: "Archive" })).toBeVisible();
+  expect(screen.getByRole("tabpanel", { name: "Archive" })).toBeVisible();
 });
 
 it("shows only agents with loaded notes and returns to folders when the open folder disappears", async () => {
@@ -608,7 +606,9 @@ it("keeps loading distinct from empty, retries failures and updates open note re
   });
   await user.click(screen.getByRole("button", { name: "Retry notes" }));
   expect(
-    await within(noteView("Icons")).findByText("Updated recipe"),
+    await within(screen.getByRole("tabpanel", { name: "Icons" })).findByText(
+      "Updated recipe",
+    ),
   ).toBeVisible();
   expect(
     within(
@@ -946,7 +946,11 @@ it("loads older pages independently, keeps heads and open tabs, and refreshes fr
     until: 20,
     before_id: recent.id,
   });
-  expect(within(noteView("Recent")).getByText("Recent content")).toBeVisible();
+  expect(
+    within(screen.getByRole("tabpanel", { name: "Recent" })).getByText(
+      "Recent content",
+    ),
+  ).toBeVisible();
   await userEvent.click(
     screen.getByRole("button", { name: "Back to folders" }),
   );

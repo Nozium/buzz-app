@@ -5,7 +5,7 @@ test.use({
   productionBroker: true,
   readState: true,
   inboxDm: true,
-  enabledPlugins: ["buzz.bestie"],
+  enabledPlugins: ["buzz.bestie", "buzz.workflows"],
   channelIds: ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"],
   historyCounts: { alpha: 4, beta: 3, gamma: 1, delta: 1, epsilon: 1, zeta: 1 },
 });
@@ -37,21 +37,180 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   await expect(
     page.getByRole("complementary", { name: "Discover", exact: true }),
   ).toHaveCount(0);
-  const community = await page
+  const railHeader = rail
+    .locator("header")
+    .filter({ has: page.getByRole("heading", { name: "Buzz", exact: true }) });
+  const community = await railHeader
     .getByRole("button", { name: /^Community switcher:/ })
     .boundingBox();
-  const profile = await page
-    .getByRole("button", { name: "Your profile", exact: true })
+  const buzz = await railHeader
+    .getByRole("heading", { name: "Buzz", exact: true })
     .boundingBox();
-  expect(community.x + community.width).toBeLessThanOrEqual(profile.x);
-  expect(community.y).toBeCloseTo(profile.y, 0);
+  const headerNew = railHeader.getByRole("button", {
+    name: "Create",
+    exact: true,
+  });
+  await expect
+    .poll(() =>
+      headerNew.evaluate((button) =>
+        button.checkVisibility({ opacityProperty: true }),
+      ),
+    )
+    .toBe(true);
+  const plus = await headerNew.boundingBox();
+  expect(community.x + community.width).toBeLessThanOrEqual(buzz.x);
+  expect(plus.x).toBeGreaterThan(buzz.x + buzz.width);
+  await headerNew.click();
+  for (const action of [
+    "New chat",
+    "New workspace",
+    "New DM",
+    "New channel",
+    "New section",
+  ])
+    await expect(
+      page.getByRole("menuitem", { name: action, exact: true }),
+    ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(headerNew).toBeFocused();
+  await headerNew.click();
+  await page.getByRole("menuitem", { name: "New DM", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "New message", exact: true }),
+  ).toBeVisible();
+  await page.goBack();
+  await expect(
+    page.getByRole("region", { name: "Activity", exact: true }),
+  ).toBeVisible();
+  const headerSearch = railHeader.getByRole("button", {
+    name: "Search",
+    exact: true,
+  });
+  await headerSearch.click();
+  await expect(
+    page.getByRole("dialog", { name: "Search Buzz", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("dialog", { name: "Search Buzz", exact: true }),
+  ).toHaveCount(0);
+  await expect(headerSearch).toBeFocused();
+
+  // App wiring: sorting precedes the four-row cap and survives a reload.
+  const newestAt =
+    Math.max(
+      ...[...app.histories.values()].flat().map((event) => event.created_at),
+    ) + 1;
+  app.append(
+    "primary",
+    "alpha",
+    "Newest Alpha activity",
+    true,
+    false,
+    undefined,
+    undefined,
+    [],
+    newestAt,
+  );
+  const cardRows = rail
+    .getByRole("list", { name: "Recent conversations" })
+    .getByRole("button");
+  await expect(cardRows.nth(0)).toHaveAccessibleName("Alpha");
+  const messageCard = rail.locator('[data-rail-section="messages"]');
+  const sortMessages = rail.getByRole("button", {
+    name: "Filter and sort Team card",
+  });
+  await page.mouse.move(1300, 20);
+  await expect
+    .poll(() =>
+      sortMessages.evaluate((button) =>
+        button.checkVisibility({ opacityProperty: true }),
+      ),
+    )
+    .toBe(false);
+  await messageCard.hover();
+  await expect
+    .poll(() =>
+      sortMessages.evaluate((button) =>
+        button.checkVisibility({ opacityProperty: true }),
+      ),
+    )
+    .toBe(true);
+  await sortMessages.click();
+  await page.mouse.move(1300, 20);
+  await expect
+    .poll(() =>
+      sortMessages.evaluate((button) =>
+        button.checkVisibility({ opacityProperty: true }),
+      ),
+    )
+    .toBe(true);
+  const cardMenu = page.getByRole("menu").filter({
+    has: page.getByRole("menuitemradio", { name: "A–Z", exact: true }),
+  });
+  await expect(cardMenu).toBeVisible();
+  await cardMenu.evaluate((element) =>
+    Promise.all(
+      element
+        .getAnimations({ subtree: true })
+        .map((animation) => animation.finished),
+    ),
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("messages-card-filter-menu.png"),
+  });
+  await page.getByRole("menuitemradio", { name: "A–Z", exact: true }).click();
+  for (const [i, label] of [
+    "Alice Fixture",
+    "Alpha",
+    "Beta",
+    "delta",
+  ].entries())
+    await expect(cardRows.nth(i)).toHaveAccessibleName(label);
+  await page.reload();
+  await messageCard.hover();
+  await sortMessages.click();
+  await expect(
+    page.getByRole("menuitemradio", { name: "A–Z", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menuitemradio", { name: "Recent activity" }).click();
+  await expect(cardRows.nth(0)).toHaveAccessibleName("Alpha");
+
+  await sortMessages.click();
+  await page
+    .getByRole("menuitemradio", { name: "Direct", exact: true })
+    .click();
+  await expect(
+    messageCard.getByRole("button", { name: "Alice Fixture", exact: true }),
+  ).toBeVisible();
+  await expect(
+    messageCard.getByRole("button", { name: "Alpha", exact: true }),
+  ).toHaveCount(0);
+  await page.reload();
+  await messageCard.hover();
+  await sortMessages.click();
+  await expect(
+    page.getByRole("menuitemradio", { name: "Direct", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  for (const view of ["Threads", "Working", "Waiting"]) {
+    await messageCard.hover();
+    await sortMessages.click();
+    await page.getByRole("menuitemradio", { name: view, exact: true }).click();
+    await expect(
+      messageCard.getByText("No matching conversations.", { exact: true }),
+    ).toBeVisible();
+  }
+  await messageCard.hover();
+  await sortMessages.click();
+  await page.getByRole("menuitemradio", { name: "All", exact: true }).click();
 
   await rail
-    .getByRole("button", { name: "View more messages", exact: true })
+    .getByRole("button", { name: "View more team", exact: true })
     .click();
-  const index = page.getByRole("region", { name: "Messages", exact: true });
+  const index = page.getByRole("region", { name: "Team", exact: true });
   await expect(
-    index.getByRole("heading", { name: "Messages", level: 2 }),
+    index.getByRole("heading", { name: "Team", level: 2 }),
   ).toBeVisible();
   // Real geometry: view chips share the rows' leading content edge.
   const firstRow = index
@@ -67,6 +226,81 @@ test("the combined rail pins destinations and opens centered Messages", async ({
     .getByRole("tab", { name: "All", exact: true })
     .boundingBox();
   expect(firstFilter.x).toBeCloseTo(contentLeft, 0);
+  // Both hosts must project the same objects before the card's four-row cap.
+  // This catches received-only ranking, fixed plugin priority, and split filters.
+  const expectMatchingMessages = async () => {
+    await page.mouse.move(1300, 20);
+    await expect
+      .poll(async () => {
+        const full = await index
+          .locator("[data-activity-row]")
+          .evaluateAll((rows) =>
+            rows
+              .map((row) => row.getAttribute("data-activity-row"))
+              .slice(0, 4),
+          );
+        const compact = await cardRows.evaluateAll((rows) =>
+          rows.map((row) => row.getAttribute("data-rail-channel")),
+        );
+        return {
+          full,
+          compact,
+          matches:
+            full.length > 0 && JSON.stringify(full) === JSON.stringify(compact),
+        };
+      })
+      .toMatchObject({ matches: true });
+  };
+  await expectMatchingMessages();
+  await index
+    .getByRole("button", { name: "Filter and sort conversations", exact: true })
+    .click();
+  await page.getByRole("menuitemradio", { name: "A–Z", exact: true }).click();
+  await expectMatchingMessages();
+  await messageCard.hover();
+  await sortMessages.click();
+  await expect(
+    page.getByRole("menuitemradio", { name: "A–Z", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+  await page
+    .getByRole("menuitemradio", { name: "Recent activity", exact: true })
+    .click();
+  await expectMatchingMessages();
+  await index.getByRole("tab", { name: "Direct", exact: true }).click();
+  await expectMatchingMessages();
+  await messageCard.hover();
+  await sortMessages.click();
+  await expect(
+    page.getByRole("menuitemradio", { name: "Direct", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await index.getByRole("tab", { name: "All", exact: true }).click();
+  await index
+    .getByRole("button", { name: "Filter and sort conversations", exact: true })
+    .click();
+  await page
+    .getByRole("menuitemradio", { name: "Unread only", exact: true })
+    .click();
+  await expectMatchingMessages();
+  await messageCard.hover();
+  await sortMessages.click();
+  const unreadCardChoice = page.getByRole("menuitemcheckbox", {
+    name: "Unread only",
+    exact: true,
+  });
+  await expect(unreadCardChoice).toHaveAttribute("aria-checked", "true");
+  await unreadCardChoice.click();
+  await page.keyboard.press("Escape");
+  await expect(
+    index.getByRole("button", {
+      name: "Filter and sort conversations",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expectMatchingMessages();
+  await page.screenshot({
+    path: testInfo.outputPath("messages-card-page-parity.png"),
+  });
   const beta = index.locator('[data-activity-row="beta"]');
   const recentBeta = rail
     .getByRole("list", { name: "Recent conversations" })
@@ -88,7 +322,7 @@ test("the combined rail pins destinations and opens centered Messages", async ({
     .getByRole("list", { name: "Recent conversations" })
     .getByRole("button", { name: "Alpha", exact: true });
   // Rail destinations open the full conversation for pinning and navigation;
-  // collection-row sheet visits are exercised in messages-sheet.spec.mjs.
+  // collection-row navigation is exercised in messages-sheet.spec.mjs.
   await recentAlpha.click();
   const conversation = page.getByRole("article", {
     name: "Conversation",
@@ -152,7 +386,7 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   ).toHaveCount(0);
 
   await rail
-    .getByRole("button", { name: "View more messages", exact: true })
+    .getByRole("button", { name: "View more team", exact: true })
     .click();
   await index.getByRole("tab", { name: "Direct", exact: true }).click();
   await expect(
@@ -315,6 +549,9 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     primary.getByRole("button", { name: "View all plugins", exact: true }),
   ).toBeVisible();
   await expect(
+    primary.getByRole("button", { name: "View all plugins", exact: true }),
+  ).toHaveText("View more");
+  await expect(
     rail.getByRole("heading", { name: "Plugins", exact: true }),
   ).toBeVisible();
   await expect(beta.getByRole("img", { name: "Unread" })).toBeVisible();
@@ -340,7 +577,21 @@ test("rail sections and rows can be arranged and a drop creates a named section"
       .evaluateAll((nodes) => nodes.map((node) => node.dataset.railSection));
   const navigation = rail.locator('[data-rail-section="navigation"]');
   const pins = rail.locator('[data-rail-section="pins"]');
-  await startDrag(pins.getByRole("heading", { name: "Pins", exact: true }));
+  await pins.hover();
+  const pinGrabber = pins.getByRole("button", {
+    name: "Move Pins section",
+    exact: true,
+  });
+  await pinGrabber.hover();
+  await expect
+    .poll(() =>
+      pinGrabber.evaluate((button) =>
+        button.checkVisibility({ opacityProperty: true }),
+      ),
+    )
+    .toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("rail-card-grabber.png") });
+  await startDrag(pinGrabber);
   await dropOn(
     navigation.getByRole("heading", { name: "Plugins", exact: true }),
   );
@@ -352,9 +603,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     .poll(order)
     .toEqual(["pins", "navigation", "messages", "solo", "agents"]);
   await startDrag(agents.getByRole("heading", { name: "Agents", exact: true }));
-  await dropOn(
-    messages.getByRole("heading", { name: "Messages", exact: true }),
-  );
+  await dropOn(messages.getByRole("heading", { name: "Team", exact: true }));
   await expect
     .poll(order)
     .toEqual(["pins", "navigation", "agents", "messages", "solo"]);
@@ -452,6 +701,104 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await page.screenshot({
     path: testInfo.outputPath("rail-arranged-dark.png"),
   });
+
+  // Collapse retains the saved card order as usable destinations, including
+  // custom cards. Real layout must leave room beside the dock for content.
+  const expandedRail = await rail.boundingBox();
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  await expect(rail).toBeVisible();
+  const dock = rail.getByRole("region", {
+    name: "Sidebar sections",
+    exact: true,
+  });
+  const dockIcons = dock.getByRole("button");
+  await expect(dockIcons).toHaveCount(6);
+  for (const [index, name] of [
+    "Pins",
+    "Plugins",
+    "Agents",
+    "Messages",
+    "Solo",
+    "Project chats",
+  ].entries())
+    await expect(dockIcons.nth(index)).toHaveAccessibleName(name);
+  const compactRail = await rail.boundingBox();
+  expect(compactRail.width).toBeLessThan(expandedRail.width / 2);
+  await dock
+    .getByRole("button", { name: "Project chats", exact: true })
+    .click();
+  const sectionPage = page.getByRole("region", {
+    name: "Project chats",
+    exact: true,
+  });
+  await expect(
+    sectionPage.locator('[data-activity-row="beta"] [data-conversation-row]'),
+  ).toBeVisible();
+  expect((await sectionPage.boundingBox()).x).toBeGreaterThanOrEqual(
+    compactRail.x + compactRail.width,
+  );
+  await expect(
+    dock.getByRole("button", { name: "Project chats", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  await page.screenshot({ path: testInfo.outputPath("rail-compact-dark.png") });
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-color-mode",
+    "light",
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("rail-compact-light.png"),
+  });
+  await page.setViewportSize({ width: 800, height: 950 });
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "125%";
+  });
+  for (const icon of await dockIcons.all()) await expect(icon).toBeInViewport();
+  await expect(sectionPage).toBeInViewport();
+  await page.screenshot({
+    path: testInfo.outputPath("rail-compact-enlarged.png"),
+  });
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "";
+  });
+  await dock.getByRole("button", { name: "Agents", exact: true }).focus();
+  await page.keyboard.press("Tab");
+  await expect(
+    dock.getByRole("button", { name: "Team", exact: true }),
+  ).toBeFocused();
+  await expect(
+    page.getByRole("tooltip", { name: "Team", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("region", { name: "Team", exact: true }),
+  ).toBeVisible();
+  await expect(dock).toBeVisible();
+  await page.goBack();
+  await expect(sectionPage).toBeVisible();
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await expect(
+    custom.getByRole("button", { name: "Beta", exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(order)
+    .toEqual([
+      "pins",
+      "navigation",
+      "agents",
+      "messages",
+      "solo",
+      await custom.getAttribute("data-rail-section"),
+    ]);
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  await page.keyboard.press("ControlOrMeta+n");
+  await expect(
+    page.getByRole("region", { name: "New message", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Hide sidebar", exact: true }),
+  ).toHaveAttribute("aria-expanded", "true");
   await page.setViewportSize({ width: 480, height: 900 });
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "125%";
@@ -484,14 +831,14 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await custom
     .getByRole("button", { name: "Beta", exact: true })
     .click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Messages", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Team", exact: true }).click();
   await messages.getByRole("button", { name: /^View more Messages$/i }).click();
   const messagesPage = page.getByRole("region", {
-    name: "Messages",
+    name: "Team",
     exact: true,
   });
   await expect(
-    messagesPage.getByRole("button", { name: "Beta", exact: true }),
+    messagesPage.locator('[data-activity-row="beta"] [data-conversation-row]'),
   ).toBeVisible();
   await expect(messages.locator("[data-rail-row]")).toHaveCount(4);
   await page.goBack();
@@ -499,28 +846,24 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     custom.getByRole("button", { name: "Beta", exact: true }),
   ).toHaveCount(0);
   await custom
-    .getByRole("button", { name: "Arrange Project chats", exact: true })
-    .click();
+    .getByRole("heading", { name: "Project chats", exact: true })
+    .click({ button: "right" });
   await page
     .getByRole("menuitem", { name: "Remove section", exact: true })
     .click();
   await expect(custom).toHaveCount(0);
 
   await agents
-    .getByRole("button", { name: "Arrange Agents", exact: true })
+    .getByRole("button", { name: "Move Agents section", exact: true })
     .focus();
-  await page.keyboard.press("Enter");
-  await page
-    .getByRole("menuitem", { name: "Move section down", exact: true })
-    .click();
+  await page.keyboard.press("ArrowDown");
   await expect
     .poll(order)
     .toEqual(["pins", "navigation", "messages", "agents", "solo"]);
   await messages.getByRole("button", { name: /^View more Messages$/i }).click();
-  const fullBeta = messagesPage.getByRole("button", {
-    name: "Beta",
-    exact: true,
-  });
+  const fullBeta = messagesPage.locator(
+    '[data-activity-row="beta"] [data-conversation-row]',
+  );
   await fullBeta.focus();
   await page.keyboard.press("Shift+F10");
   await expect(
@@ -561,15 +904,13 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await page.screenshot({
     path: testInfo.outputPath("page-header-agents.png"),
   });
-  await primary
-    .getByRole("button", { name: "Smart sections", exact: true })
-    .click();
+  await primary.getByRole("button", { name: "Workflows", exact: true }).click();
   const pluginPage = page.getByRole("region", {
-    name: "Smart sections",
+    name: "Workflows",
     exact: true,
   });
   await expect(
-    pluginPage.getByRole("heading", { name: "Smart sections", exact: true }),
+    pluginPage.getByRole("heading", { name: "Workflows", exact: true }),
   ).toBeInViewport();
   await page.screenshot({
     path: testInfo.outputPath("page-header-plugin.png"),
@@ -660,6 +1001,19 @@ test.describe("Solo rail", () => {
     await expect(
       messages.getByRole("button", { name: "Alpha", exact: true }),
     ).toHaveCount(0);
+    await messages
+      .getByRole("button", { name: "View more team", exact: true })
+      .click();
+    const messagePage = page.getByRole("region", {
+      name: "Team",
+      exact: true,
+    });
+    await expect(
+      messagePage.locator('[data-activity-row="beta"]'),
+    ).toBeVisible();
+    await expect(
+      messagePage.locator('[data-activity-row="alpha"]'),
+    ).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("solo-card.png") });
   });
 });
@@ -667,6 +1021,38 @@ test.describe("Solo rail", () => {
 test.describe("Sidebar row limits", () => {
   const chats = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"];
   test.use({ soloChannels: chats, ownSoloChannels: chats });
+  // App routing must retain the collection as the inline draft becomes addressable.
+  test("Solo new-message drafts keep their collection after reload", async ({
+    page,
+    app,
+  }) => {
+    await page.goto(app.origin);
+    const rail = page.getByRole("navigation", { name: "Apps", exact: true });
+    await rail
+      .getByRole("button", { name: "View more Solo", exact: true })
+      .click();
+    const collection = page.getByRole("region", { name: "Solo", exact: true });
+    await collection
+      .getByRole("button", { name: "New message", exact: true })
+      .click();
+    const draft = collection.getByRole("region", {
+      name: "New message",
+      exact: true,
+    });
+    await draft.getByRole("textbox").fill("Keep this Solo draft");
+    await expect
+      .poll(() => decodeURIComponent(new URL(page.url()).hash))
+      .toContain('"collection":"solo"');
+    await page.reload();
+    await expect(draft.getByRole("textbox")).toHaveText("Keep this Solo draft");
+    await collection
+      .getByRole("button", { name: "Show Solo list", exact: true })
+      .click();
+    await expect(
+      collection.getByRole("region", { name: "Solo list", exact: true }),
+    ).toBeVisible();
+  });
+
   test("Solo opens a full list with history while Pins stays uncapped", async ({
     page,
     app,
@@ -683,17 +1069,66 @@ test.describe("Sidebar row limits", () => {
     await page.keyboard.press("Enter");
     const list = page.getByRole("region", { name: "Solo", exact: true });
     await expect(list.locator("[data-rail-row]")).toHaveCount(6);
+    const previewText =
+      "Solo preview stays on one line even when this message is long. "
+        .repeat(12)
+        .trim();
+    app.append("primary", "alpha", previewText, true, false);
+    const preview = list.getByText(/^Solo preview stays on one line/);
+    await expect(preview).toBeVisible();
+    expect(
+      await preview.evaluate(
+        (element) =>
+          element.getBoundingClientRect().height /
+          parseFloat(getComputedStyle(element).lineHeight),
+      ),
+    ).toBeLessThanOrEqual(1.05);
+    await list
+      .getByRole("button", {
+        name: "Filter and sort conversations",
+        exact: true,
+      })
+      .click();
+    await page.getByRole("menuitemradio", { name: "A–Z", exact: true }).click();
+    await page.screenshot({
+      path: testInfo.outputPath("solo-full-list-previews.png"),
+    });
     await expect(solo.locator("[data-rail-row]")).toHaveCount(4);
     await expect(rail.getByRole("button", { name: /^View less/ })).toHaveCount(
       0,
     );
-    await list.getByRole("button", { name: "Alpha", exact: true }).click();
+    await list
+      .locator('[data-activity-row="alpha"] [data-conversation-row]')
+      .click();
     await expect(
       page.getByRole("region", {
         name: "Channel message history",
         exact: true,
       }),
     ).toBeVisible();
+    await expect(list.locator("[data-rail-row]")).toHaveCount(6);
+    const selectedRow = list.locator('[data-activity-row="alpha"]');
+    await expect(selectedRow).toBeVisible();
+    const reader = list.getByRole("region", {
+      name: "Conversation detail",
+      exact: true,
+    });
+    const rowBox = await selectedRow.boundingBox();
+    const readerBox = await reader.boundingBox();
+    expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(readerBox.x);
+    await page.screenshot({
+      path: testInfo.outputPath("solo-master-detail.png"),
+    });
+    const selectedUrl = page.url();
+    await reader
+      .getByRole("button", { name: "Hide Solo list", exact: true })
+      .click();
+    await expect(selectedRow).toBeHidden();
+    await expect(page).toHaveURL(selectedUrl);
+    await reader
+      .getByRole("button", { name: "Show Solo list", exact: true })
+      .click();
+    await expect(selectedRow).toBeVisible();
     await page.goBack();
     await expect(list.locator("[data-rail-row]")).toHaveCount(6);
     await page.reload();
@@ -822,10 +1257,46 @@ test("Messages and Activity expose aligned view filters", async ({
         element.getBoundingClientRect().left +
         Number.parseFloat(getComputedStyle(element).paddingInlineStart),
     );
-    const filter = await view
+    const filter = await (view === activity
+      ? view.getByRole("button", { name: "From anyone", exact: true })
+      : view.getByRole("button", {
+          name: "Filter and sort conversations",
+          exact: true,
+        })
+    ).boundingBox();
+    expect(filter.x).toBeCloseTo(contentLeft, 0);
+    const all = await view
       .getByRole("tab", { name: "All", exact: true })
       .boundingBox();
-    expect(filter.x).toBeCloseTo(contentLeft, 0);
+    expect(filter.x + filter.width).toBeLessThan(all.x);
+    const create = view.getByRole("button", {
+      name: "New message",
+      exact: true,
+    });
+    await expect(create).toHaveCount(1);
+    await expect(
+      view
+        .locator(".buzz-content-header")
+        .getByRole("button", { name: "New message", exact: true }),
+    ).toBeVisible();
+    const insets = await row.evaluate((element) => {
+      const canvas = element.closest(".shell-body").getBoundingClientRect();
+      const workspace = element.closest("[data-detail-workspace]");
+      const reader = workspace.querySelector(
+        '[aria-label="Conversation detail"]',
+      );
+      const readerBox = reader.getBoundingClientRect();
+      const edge = readerBox.width
+        ? readerBox.left
+        : workspace.getBoundingClientRect().right;
+      const box = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        left: box.left - canvas.left + parseFloat(style.paddingInlineStart),
+        right: edge - box.right + parseFloat(style.paddingInlineEnd),
+      };
+    });
+    expect(insets.right).toBeCloseTo(insets.left, 0);
   };
   const activityViews = activity.getByRole("tablist", {
     name: "Activity views",
@@ -848,10 +1319,29 @@ test("Messages and Activity expose aligned view filters", async ({
   await page.screenshot({
     path: testInfo.outputPath("activity-visible-filters.png"),
   });
-  await rail
-    .getByRole("button", { name: "View more messages", exact: true })
+  await activity
+    .getByRole("button", { name: "New message", exact: true })
     .click();
-  const messages = page.getByRole("region", { name: "Messages", exact: true });
+  const activityDraft = activity.getByRole("region", {
+    name: "New message",
+    exact: true,
+  });
+  await expect(activityDraft.getByRole("textbox")).toBeEditable();
+  await rail
+    .getByRole("button", { name: "View more team", exact: true })
+    .click();
+  const messages = page.getByRole("region", { name: "Team", exact: true });
+  const previewText =
+    "Messages preview stays on one line even when this message is long. "
+      .repeat(12)
+      .trim();
+  app.append("primary", "alpha", previewText, true, false);
+  const preview = messages.getByText(/^Messages preview stays on one line/);
+  await expect(preview).toBeVisible();
+  await messages
+    .getByRole("button", { name: "Filter and sort conversations", exact: true })
+    .click();
+  await page.getByRole("menuitemradio", { name: "A–Z", exact: true }).click();
   for (const [width, theme] of [
     [1440, "light"],
     [760, "dark"],
@@ -860,6 +1350,13 @@ test("Messages and Activity expose aligned view filters", async ({
     await page.setViewportSize({ width, height: 950 });
     await page.emulateMedia({ colorScheme: theme });
     await checkAlignment(messages);
+    expect(
+      await preview.evaluate(
+        (element) =>
+          element.getBoundingClientRect().height /
+          parseFloat(getComputedStyle(element).lineHeight),
+      ),
+    ).toBeLessThanOrEqual(1.05);
     await page.screenshot({
       path: testInfo.outputPath(`message-filters-${width}-${theme}.png`),
     });
@@ -868,5 +1365,138 @@ test("Messages and Activity expose aligned view filters", async ({
   await checkAlignment(messages);
   await page.screenshot({
     path: testInfo.outputPath("message-filters-enlarged.png"),
+  });
+});
+
+// Real pointer geometry and CSS paint keep hidden grabbers discoverable without
+// revealing them just because the pointer rests elsewhere on a card.
+test("rail card controls fade quietly and grabbers only reveal nearby", async ({
+  page,
+  app,
+}) => {
+  await page.goto(app.origin);
+  const rail = page.getByRole("navigation", { name: "Apps", exact: true });
+  const card = rail.locator('[data-rail-section="pins"]');
+  const actions = card.locator("[data-rail-card-actions]");
+  const grabber = card.getByRole("button", {
+    name: "Move Pins section",
+    exact: true,
+  });
+  const grip = grabber.locator("..");
+  await expect(actions).toHaveCSS("opacity", "0");
+  await expect(grip).toHaveCSS("opacity", "0");
+  await card.evaluate((element) => {
+    element.addEventListener(
+      "pointerenter",
+      () => {
+        const actions = element.querySelector("[data-rail-card-actions]");
+        getComputedStyle(actions).opacity;
+        const fade = actions
+          .getAnimations()
+          .find((item) => item.transitionProperty === "opacity");
+        if (!fade) throw new Error("Missing action fade");
+        fade.pause();
+        fade.currentTime = Number(fade.effect.getTiming().duration) / 2;
+      },
+      { once: true },
+    );
+  });
+  await page.clock.install();
+  await card.getByRole("heading", { name: "Pins", exact: true }).hover();
+  const halfway = await actions.evaluate((element) =>
+    Number(getComputedStyle(element).opacity),
+  );
+  expect(halfway).toBeGreaterThan(0);
+  expect(halfway).toBeLessThan(1);
+  await page.clock.runFor(2000);
+  await expect(grip).toHaveCSS("opacity", "0");
+  const bounds = await grabber.boundingBox();
+  const centerY = bounds.y + bounds.height / 2;
+  // The previous, broader proximity zone stays hidden, even after the old timeout.
+  await page.mouse.move(bounds.x + bounds.width * 2.5, centerY);
+  await expect(grip).toHaveCSS("opacity", "0");
+  await page.mouse.move(bounds.x + bounds.width * 1.75, centerY);
+  const approaching = await grip.evaluate((element) =>
+    Number(getComputedStyle(element).opacity),
+  );
+  expect(approaching).toBeGreaterThan(0);
+  expect(approaching).toBeLessThan(1);
+  await page.mouse.move(bounds.x + bounds.width * 1.25, centerY);
+  expect(
+    await grip.evaluate((element) => Number(getComputedStyle(element).opacity)),
+  ).toBeGreaterThan(approaching);
+  await grabber.hover();
+  await expect(grip).toHaveCSS("opacity", "1");
+  await rail.getByRole("button", { name: "Search", exact: true }).hover();
+  await expect(grip).toHaveCSS("opacity", "0");
+  const focused = await grabber.evaluate((button) => {
+    button.focus();
+    return getComputedStyle(button.parentElement).opacity;
+  });
+  expect(focused).toBe("1");
+  await expect(grabber).toBeFocused();
+});
+
+test.describe("group DM pins", () => {
+  test.use({
+    dmLabels: true,
+    dmMembers: { "dm-peer": [0], "dm-group": [0, 1] },
+  });
+
+  // Built-app wiring: a live conversation's participants supply the pin artwork
+  // after creation and reload; the pin still opens its exact conversation.
+  test("pinned group DMs show both participants and keep their destination", async ({
+    page,
+    app,
+  }, testInfo) => {
+    await page.goto(
+      `${app.origin}/#buzz=${encodeURIComponent(
+        JSON.stringify({
+          version: 1,
+          kind: "conversation",
+          channelId: "dm-group",
+          scope: {
+            viewer: app.viewer,
+            communityOrigin: "https://primary.example",
+          },
+        }),
+      )}`,
+    );
+    await expect(
+      page.locator('[data-channel-timeline="dm-group"]'),
+    ).toBeVisible();
+    const rail = page.getByRole("navigation", { name: "Apps", exact: true });
+    await rail.getByRole("button", { name: "Add pin", exact: true }).click();
+    const picker = page.getByRole("dialog", {
+      name: "Add a pin",
+      exact: true,
+    });
+    await picker
+      .getByRole("textbox", { name: "Find something to pin" })
+      .fill("Alice");
+    await picker
+      .getByRole("button", {
+        name: "Pin Alice Fixture, Bob Fixture",
+        exact: true,
+      })
+      .click();
+    await expect(picker).toHaveCount(0);
+    const pin = rail
+      .locator('[data-rail-section="pins"]')
+      .getByRole("button", { name: "Alice Fixture, Bob Fixture", exact: true });
+    const avatars = pin.locator("[data-avatar-stack]").last();
+    await expect(avatars.locator('[title="Alice Fixture"]')).toHaveCount(1);
+    await expect(avatars.locator('[title="Bob Fixture"]')).toHaveCount(1);
+    await page.screenshot({
+      path: testInfo.outputPath("pinned-group-avatars.png"),
+    });
+    await page.reload();
+    await expect(avatars.locator('[title="Alice Fixture"]')).toHaveCount(1);
+    await expect(avatars.locator('[title="Bob Fixture"]')).toHaveCount(1);
+    await rail.getByRole("button", { name: "Activity", exact: true }).click();
+    await pin.click();
+    await expect(
+      page.locator('[data-channel-timeline="dm-group"]'),
+    ).toBeVisible();
   });
 });

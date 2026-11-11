@@ -330,6 +330,8 @@ it("Messages header reopens unfiling recovery after confirmed metadata and a fai
 async function headerAction(name: string) {
   const action = screen.queryByRole("button", { name });
   if (action) return action;
+  if (name === "Channel actions" || name === "Chat actions")
+    return screen.findByRole("button", { name: "Conversation actions" });
   await userEvent.click(
     await screen.findByRole("button", { name: "Conversation actions" }),
   );

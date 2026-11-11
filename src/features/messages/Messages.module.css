@@ -719,6 +719,7 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   box-shadow: var(--shadow-xs);
   padding: var(--space-3) var(--space-1h) var(--space-1h);
   width: calc(100% - 2 * var(--space-3));
+  max-width: calc(var(--size-conversation-frame) - 2 * var(--space-3));
   margin: 0 auto var(--space-4);
   display: flex;
   flex-shrink: 0;
@@ -774,6 +775,7 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   padding-inline-start: var(--space-1);
 }
 .composerInput {
+  @apply text-message;
   box-sizing: border-box;
   position: relative;
   min-width: 0;

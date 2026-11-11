@@ -1,3 +1,4 @@
+import { ConversationListToggle } from "../../features/conversation/ConversationListToggle";
 import { useInlineReply } from "../../features/messages/use-inline-reply";
 import { useChannelHistoryFocus } from "./useChannelHistoryFocus";
 import type { Conversation } from "../../features/conversation/service";
@@ -1405,7 +1406,12 @@ function ChannelWorkspace({
           '[inert], [hidden], [aria-hidden="true"], [role="menu"], [role="dialog"][data-closed]',
         );
       if (!preserved) {
+        const composerTrigger = secondary.panelTrigger.current;
         const target =
+          (composerTrigger?.isConnected &&
+          composerTrigger.matches('[role="textbox"]')
+            ? composerTrigger
+            : undefined) ??
           channelConversation.current
             ?.closest("[data-main-workspace]")
             ?.querySelector<HTMLElement>(
@@ -2159,6 +2165,7 @@ function ChannelWorkspace({
         )}
     </div>
   );
+  const listToggle = <ConversationListToggle />;
   const workspace = (
     <div
       data-channel-workspace={currentId ?? ""}
@@ -2322,6 +2329,7 @@ function ChannelWorkspace({
             <>
               {current && solo ? (
                 <SoloHeading
+                  leadingActions={listToggle}
                   chatMenus={chatMenus}
                   key={`${current.id}:${navigation?.entryId ?? ""}`}
                   session={queries}
@@ -2368,6 +2376,7 @@ function ChannelWorkspace({
                 <div className={styles.mainWorkspace}>
                   <PanelWorkspace
                     main
+                    leadingActions={current ? listToggle : undefined}
                     identityPlacement="content"
                     headerDivider={false}
                     tabMenu={tabMenu}

@@ -750,12 +750,13 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     slug: "panel-header",
     name: "PanelHeader",
     purpose:
-      "Give a panel the Messages-style title/action header, with shared panel gutters, a 4rem minimum row and no divider by default. Compact conversation toolbars and model cards retain their smaller geometry; the panel content stays with its caller.",
+      "Give a workspace compact title/action chrome with shared panel gutters and no divider by default. Conversation headers center large membership avatars above the name; content stays with its caller.",
     behavior: "Semantic native header.",
     variants: [
       "default",
       "compact",
       "card",
+      "conversation",
       "divider: false (retains header geometry)",
     ],
     status: "proposed",

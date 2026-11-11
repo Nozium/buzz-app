@@ -28,20 +28,21 @@ import { NavigationSection } from "../../shared/design-system/ui/NavigationSecti
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { Button } from "../../shared/design-system/ui/Button";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
+import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import {
   ContextMenuRoot,
   ContextMenuTrigger,
-  MenuRoot,
-  MenuTrigger,
   MenuPopup,
   MenuItem,
   MenuGroup,
   MenuGroupLabel,
 } from "../../shared/design-system/ui/Menu";
 import {
-  DotsThreeIcon,
   PlusIcon,
   ChatCircleIcon,
+  ArrowRightIcon,
+  GripHorizontalIcon,
+  SquaresFourIcon,
 } from "../../shared/design-system/icons";
 import { CreateSidebarSection } from "../../bundled/channels/CreateSidebarSection";
 import type { RailEntry } from "./rail-pins";
@@ -54,6 +55,7 @@ import feedStyles from "../../features/conversation/FeedList.module.css";
 type Group = {
   id: string;
   title: string;
+  icon?: ReactElement;
   content: ReactNode;
 };
 type Arrangement = {
@@ -62,11 +64,20 @@ type Arrangement = {
   openSection(id: string): void;
   groups: { id: string; title: string }[];
   placements: ReturnType<typeof useRailLayout>["layout"]["placements"];
+  assignedEntryIds: ReadonlySet<string>;
   move(entry: RailEntry, section: string): void;
   reorder(id: string, over: string): void;
   create(entry: RailEntry): void;
   remove(id: string): void;
   renderEntry(entry: RailEntry, section?: string): ReactNode;
+  renderSectionList?:
+    | ((
+        id: string,
+        title: string,
+        entries: readonly RailEntry[],
+        action: ReactNode,
+      ) => ReactNode)
+    | undefined;
   renderRowActions?:
     | ((entry: RailEntry, close: () => void, focus: () => void) => ReactNode)
     | undefined;
@@ -88,16 +99,26 @@ export function RailArrangement({
   partition,
   sections,
   renderEntry,
+  renderSectionList,
   renderRowActions,
   isPinned,
   onTogglePin,
   pageSection,
   selectedSection,
   openSection,
+  compact = false,
 }: {
   partition: string;
   sections: Group[];
   renderEntry(entry: RailEntry, section?: string): ReactNode;
+  renderSectionList?:
+    | ((
+        id: string,
+        title: string,
+        entries: readonly RailEntry[],
+        action: ReactNode,
+      ) => ReactNode)
+    | undefined;
   renderRowActions?:
     | ((entry: RailEntry, close: () => void, focus: () => void) => ReactNode)
     | undefined;
@@ -106,6 +127,7 @@ export function RailArrangement({
   pageSection?: string | undefined;
   selectedSection?: string | undefined;
   openSection(id: string): void;
+  compact?: boolean;
 }) {
   const { layout, move, reorder, create, remove } = useRailLayout(partition);
   const reducedMotion = useReducedMotion();
@@ -113,35 +135,27 @@ export function RailArrangement({
   const [error, setError] = useState("");
   const [creating, setCreating] = useState<RailEntry | null>();
   const newSectionButton = useRef<HTMLButtonElement>(null);
-  const [dragging, setDragging] = useState<{
-    label: string;
-    section: boolean;
-  }>();
+  const [dragging, setDragging] = useState<{ label: string }>();
   const sensors = useSensors(
     useSensor(MouseSensor, pointerOptions),
     useSensor(TouchSensor, touchOptions),
   );
-  const groups = [
+  const groups: Group[] = [
     ...sections,
     ...layout.sections.map((section) => ({
       ...section,
       content: <RailGroup id={section.id} title={section.title} />,
     })),
   ];
-  const defaultOrder = groups.map((group) => group.id);
-  groups.sort((a, b) => {
-    const position = (id: string) =>
-      layout.order.includes(id)
-        ? layout.order.indexOf(id)
-        : layout.order.length + defaultOrder.indexOf(id);
-    return position(a.id) - position(b.id);
-  });
+  const order = [...layout.order, ...groups.map((group) => group.id)];
+  groups.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   const saved = (ok: boolean) => {
     setError(ok ? "" : "Couldn’t save the sidebar on this device. Try again.");
     return ok;
   };
   const value: Arrangement = {
     pageSection,
+    renderSectionList,
     selectedSection,
     openSection,
     groups: groups.map((group) => ({
@@ -149,6 +163,11 @@ export function RailArrangement({
       title: group.title,
     })),
     placements: layout.placements,
+    assignedEntryIds: new Set(
+      layout.placements
+        .filter((item) => groups.some((group) => group.id === item.section))
+        .map((item) => item.entry.id),
+    ),
     move: (entry, section) => {
       saved(move(entry, section));
     },
@@ -179,7 +198,6 @@ export function RailArrangement({
         onDragStart={({ active }) =>
           setDragging({
             label: active.data.current?.label ?? "",
-            section: !!active.data.current?.section,
           })
         }
         onDragCancel={() => {
@@ -216,43 +234,68 @@ export function RailArrangement({
           ))
         ) : (
           <>
-            <div
-              className={styles.groups}
-              onKeyDownCapture={(event) => {
-                // Escape belongs to the active move before the shell's rail dismissal.
-                if (dragging && event.key === "Escape") event.preventDefault();
-              }}
-            >
-              {groups.map((group) => (
-                <motion.div
-                  key={group.id}
-                  layout="position"
-                  layoutDependency={layout}
-                  initial={false}
-                  transition={{
-                    layout: animateDrop.current
-                      ? { type: "spring", duration: 0.28, bounce: 0.15 }
-                      : { duration: 0 },
-                  }}
-                  onLayoutAnimationComplete={() => {
-                    animateDrop.current = false;
-                  }}
-                >
-                  {group.content}
-                </motion.div>
-              ))}
-            </div>
-            <div className={styles.createSection}>
-              <Button
-                ref={newSectionButton}
-                size="sm"
-                variant="subtle"
-                onClick={() => setCreating(null)}
+            {compact && (
+              <section className={styles.dock} aria-label="Sidebar sections">
+                {groups.map((group) => (
+                  <div key={group.id} className={styles.dockTile}>
+                    <Tooltip content={group.title} hint="dock" side="right">
+                      <IconButton
+                        size="md"
+                        aria-label={group.title}
+                        aria-current={
+                          selectedSection === group.id ? "page" : undefined
+                        }
+                        data-selected={
+                          selectedSection === group.id || undefined
+                        }
+                        icon={group.icon ?? <SquaresFourIcon size={22} />}
+                        onClick={() => openSection(group.id)}
+                      />
+                    </Tooltip>
+                  </div>
+                ))}
+              </section>
+            )}
+            <div hidden={compact}>
+              <div
+                className={styles.groups}
+                onKeyDownCapture={(event) => {
+                  // Escape belongs to the active move before the shell's rail dismissal.
+                  if (dragging && event.key === "Escape")
+                    event.preventDefault();
+                }}
               >
-                New section
-              </Button>
+                {groups.map((group) => (
+                  <motion.div
+                    key={group.id}
+                    layout="position"
+                    layoutDependency={layout}
+                    initial={false}
+                    transition={{
+                      layout: animateDrop.current
+                        ? { type: "spring", duration: 0.28, bounce: 0.15 }
+                        : { duration: 0 },
+                    }}
+                    onLayoutAnimationComplete={() => {
+                      animateDrop.current = false;
+                    }}
+                  >
+                    {group.content}
+                  </motion.div>
+                ))}
+              </div>
+              <div className={styles.createSection}>
+                <Button
+                  ref={newSectionButton}
+                  size="sm"
+                  variant="subtle"
+                  onClick={() => setCreating(null)}
+                >
+                  New section
+                </Button>
+              </div>
+              <NewSectionTarget />
             </div>
-            <NewSectionTarget />
           </>
         )}
         {createPortal(
@@ -310,6 +353,8 @@ export function RailGroup({
   rowsLabel,
   unlimited = false,
   trailingEntryId,
+  sortEntries,
+  pageContent,
 }: {
   id: string;
   title: string;
@@ -319,6 +364,8 @@ export function RailGroup({
   rowsLabel?: string;
   unlimited?: boolean;
   trailingEntryId?: string;
+  sortEntries?: (a: RailEntry, b: RailEntry) => number;
+  pageContent?: ReactNode;
 }) {
   const arrangement = useContext(ArrangementContext);
   const { active } = useDndContext();
@@ -330,8 +377,9 @@ export function RailGroup({
     id: `section:${id}`,
     data: { section: id, label: title },
   });
+  const grabber = useRef<HTMLSpanElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuAnchor = useRef<HTMLButtonElement>(null);
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement>();
   const movableGroups = arrangement?.groups ?? [];
   const index = movableGroups.findIndex((group) => group.id === id);
   const sectionDrag = !!active?.data.current?.section;
@@ -353,13 +401,7 @@ export function RailGroup({
       child.props.entry &&
       child.props.section === id
     ) {
-      if (
-        !arrangement?.placements.some(
-          (item) =>
-            item.entry.id === child.props.entry.id &&
-            arrangement.groups.some((group) => group.id === item.section),
-        )
-      )
+      if (!arrangement?.assignedEntryIds.has(child.props.entry.id))
         rows.push(child);
     } else notes.push(child);
   }
@@ -367,10 +409,12 @@ export function RailGroup({
     arrangement?.placements.filter((item) => item.section === id) ?? [];
   for (const { entry } of placed)
     rows.push(
-      <MovableRow key={entry.id} entry={entry} section={id}>
+      <RailDestinationRow key={entry.id} entry={entry} section={id}>
         {arrangement?.renderEntry(entry, id)}
-      </MovableRow>,
+      </RailDestinationRow>,
     );
+  if (sortEntries)
+    rows.sort((a, b) => sortEntries(a.props.entry, b.props.entry));
   if (trailingEntryId)
     rows.sort(
       (a, b) =>
@@ -380,6 +424,18 @@ export function RailGroup({
   const limited = id !== "pins" && !unlimited;
   const shown = limited ? rows.slice(0, 4) : rows;
   const more = limited && rows.length > 4 && (!footer || placed.length > 0);
+  if (arrangement?.pageSection === id && pageContent) return pageContent;
+  if (
+    arrangement?.pageSection === id &&
+    arrangement.renderSectionList &&
+    (id === "pins" || id.startsWith("custom:"))
+  )
+    return arrangement.renderSectionList(
+      id,
+      title,
+      rows.map((row) => row.props.entry),
+      action,
+    );
   if (arrangement?.pageSection === id)
     return (
       <section className={feedStyles.page} aria-label={title}>
@@ -394,103 +450,130 @@ export function RailGroup({
         </div>
       </section>
     );
-  return (
+  const card = (
     <div
       ref={(node) => {
         drop.setNodeRef(node);
         drag.setNodeRef(node);
       }}
       className={styles.group}
+      onPointerMove={(event) => {
+        if (event.pointerType !== "mouse" || !grabber.current) return;
+        const bounds = grabber.current.getBoundingClientRect();
+        const distance = Math.hypot(
+          Math.max(
+            bounds.left - event.clientX,
+            0,
+            event.clientX - bounds.right,
+          ),
+          Math.max(
+            bounds.top - event.clientY,
+            0,
+            event.clientY - bounds.bottom,
+          ),
+        );
+        // Brighten within one handle width without rerendering the rail on movement.
+        const opacity = Math.max(0, 1 - distance / bounds.width);
+        event.currentTarget.style.setProperty(
+          "--rail-grabber-proximity",
+          String(opacity),
+        );
+      }}
+      onPointerLeave={(event) => {
+        event.currentTarget.style.removeProperty("--rail-grabber-proximity");
+      }}
       data-rail-section={id}
       data-drop-target={target || undefined}
       data-section-drag={sectionDrag || undefined}
       data-insertion-edge={insertionEdge}
       data-dragging={drag.isDragging || undefined}
     >
-      <MenuRoot open={menuOpen} onOpenChange={setMenuOpen}>
-        <NavigationSection
-          label={
-            <Button
-              ref={menuAnchor}
-              {...drag.listeners}
-              variant="plain"
-              size="text"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen(true)}
-            >
-              {title}
-            </Button>
-          }
-          action={
-            <>
-              <span className={styles.handle}>
-                <MenuTrigger
-                  render={
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      aria-label={`Arrange ${title}`}
-                      icon={<DotsThreeIcon size={16} strokeWidth={2} />}
-                    />
-                  }
-                />
-              </span>
-              {action}
-            </>
-          }
-        >
-          {rowsLabel ? (
-            <ul aria-label={rowsLabel} className={styles.rows}>
-              {shown.map((row) => (
-                <li key={row.key}>{row}</li>
-              ))}
-            </ul>
-          ) : id === "pins" ? (
-            <div className={styles.pinsGrid} data-pins-grid="">
-              {shown}
-            </div>
-          ) : (
-            shown
-          )}
-          {notes}
-          {more && (
-            <NavigationItem
-              label="View more"
-              aria-label={`View more ${title}`}
-              selected={arrangement?.selectedSection === id}
-              onClick={() => arrangement?.openSection(id)}
+      <span ref={grabber} className={styles.grabber}>
+        <IconButton
+          ref={drag.setActivatorNodeRef}
+          {...drag.listeners}
+          aria-label={`Move ${title} section`}
+          icon={
+            <GripHorizontalIcon
+              size={24}
+              strokeWidth={2}
+              fill="currentColor"
+              className={`${styles.grabDots} text-subtle`}
             />
-          )}
-          {!more && footer}
-        </NavigationSection>
-        <MenuPopup anchor={menuAnchor}>
-          <MenuItem
-            disabled={index <= 0}
-            onClick={() => {
-              const previous = movableGroups[index - 1];
-              if (previous) arrangement?.reorder(id, previous.id);
-            }}
-          >
-            Move section up
-          </MenuItem>
-          <MenuItem
-            disabled={!arrangement || index === movableGroups.length - 1}
-            onClick={() => {
-              const next = movableGroups[index + 1];
-              if (next) arrangement?.reorder(id, next.id);
-            }}
-          >
-            Move section down
-          </MenuItem>
-          {id.startsWith("custom:") && (
-            <MenuItem onClick={() => arrangement?.remove(id)}>
-              Remove section
-            </MenuItem>
-          )}
-        </MenuPopup>
-      </MenuRoot>
+          }
+          aria-keyshortcuts="ArrowUp ArrowDown"
+          aria-description="Use the Up and Down arrow keys to move this section."
+          onKeyDown={(event) => {
+            const offset =
+              event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+            if (!offset) return;
+            event.preventDefault();
+            const neighbor = movableGroups[index + offset];
+            if (neighbor) arrangement?.reorder(id, neighbor.id);
+          }}
+        />
+      </span>
+      <NavigationSection
+        label={
+          <Button {...drag.listeners} variant="plain" size="text">
+            {title}
+          </Button>
+        }
+        action={action && <span data-rail-card-actions="">{action}</span>}
+      >
+        {rowsLabel ? (
+          <ul aria-label={rowsLabel} className={styles.rows}>
+            {shown.map((row) => (
+              <li key={row.key}>{row}</li>
+            ))}
+          </ul>
+        ) : id === "pins" ? (
+          <div className={styles.pinsGrid} data-pins-grid="">
+            {shown}
+          </div>
+        ) : (
+          shown
+        )}
+        {notes}
+        {more && (
+          <NavigationItem
+            label="View more"
+            data-rail-view-more=""
+            aria-label={`View more ${title}`}
+            icon={<ArrowRightIcon size={18} />}
+            selected={arrangement?.selectedSection === id}
+            onClick={() => arrangement?.openSection(id)}
+          />
+        )}
+        {!more && footer}
+      </NavigationSection>
     </div>
+  );
+  return id.startsWith("custom:") ? (
+    <ContextMenuRoot open={menuOpen} onOpenChange={setMenuOpen}>
+      <ContextMenuTrigger
+        onContextMenu={() => setMenuAnchor(undefined)}
+        onKeyDown={(event) => {
+          if (
+            event.key === "ContextMenu" ||
+            (event.shiftKey && event.key === "F10")
+          ) {
+            event.preventDefault();
+            setMenuAnchor(event.currentTarget);
+            setMenuOpen(true);
+          }
+        }}
+      >
+        {card}
+      </ContextMenuTrigger>
+      <MenuPopup anchor={menuAnchor}>
+        <MenuItem onClick={() => arrangement?.remove(id)}>
+          Remove section
+        </MenuItem>
+      </MenuPopup>
+    </ContextMenuRoot>
+  ) : (
+    card
   );
 }
 
@@ -505,21 +588,14 @@ export function RailSourceRow({
   children: ReactNode;
 }) {
   const arrangement = useContext(ArrangementContext);
-  if (
-    arrangement?.placements.some(
-      (item) =>
-        item.entry.id === entry.id &&
-        arrangement.groups.some((group) => group.id === item.section),
-    )
-  )
-    return null;
+  if (arrangement?.assignedEntryIds.has(entry.id)) return null;
   return (
-    <MovableRow entry={entry} section={section}>
+    <RailDestinationRow entry={entry} section={section}>
       {children}
-    </MovableRow>
+    </RailDestinationRow>
   );
 }
-function MovableRow({
+export function RailDestinationRow({
   entry,
   section,
   children,

@@ -415,7 +415,7 @@ it("retains contributed-sidebar width across leaving, remounting and its fallbac
       pageId: "channels",
     });
   });
-  expect(await screen.findByRole("region", { name: "Messages" })).toBeVisible();
+  expect(await screen.findByRole("region", { name: "Team" })).toBeVisible();
   expect(
     screen.queryByRole("separator", { name: "Resize sidebar" }),
   ).toBeNull();

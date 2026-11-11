@@ -1,34 +1,62 @@
-import { useRef, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { DotsThreeIcon } from "../../shared/design-system/icons";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
-  PopoverRoot,
-  PopoverTrigger,
-  PopoverPopup,
-} from "../../shared/design-system/ui/Popover";
+  MenuRoot,
+  MenuTrigger,
+  MenuPopup,
+} from "../../shared/design-system/ui/Menu";
 import { ActionList } from "../../shared/design-system/ui/ActionList";
+
+const HeaderToolsMenu = createContext<{
+  trigger: RefObject<HTMLButtonElement | null>;
+  finalFocus: RefObject<(() => HTMLElement | false) | undefined>;
+  open: boolean;
+  close(): void;
+} | null>(null);
+export const useHeaderToolsMenu = () => useContext(HeaderToolsMenu);
 
 /** Retain each tool's own interaction inside the header's overflow popover. */
 export function ConversationHeaderTools({
   actions,
   label = "Conversation actions",
+  triggerRef,
 }: {
   actions: ReactNode;
   label?: string;
+  triggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const popup = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
+  const localTrigger = useRef<HTMLButtonElement>(null);
+  const trigger = triggerRef ?? localTrigger;
+  const finalFocus = useRef<(() => HTMLElement | false) | undefined>(undefined);
+  const [open, setOpen] = useState(false);
+  const [visited, setVisited] = useState(false);
   if (!actions) return null;
   return (
-    <PopoverRoot
+    <MenuRoot
+      open={open}
       onOpenChange={(open, details) => {
+        if (open) {
+          setVisited(true);
+          finalFocus.current = undefined;
+        }
         if (
           open ||
           (details.reason !== "focus-out" &&
             details.reason !== "outside-press" &&
             details.reason !== "escape-key")
-        )
+        ) {
+          setOpen(open);
           return;
+        }
         // Dialogs belong to the action's existing page/provider owner, so they
         // can be siblings in React. Keep their actual return trigger mounted.
         const target =
@@ -47,9 +75,10 @@ export function ConversationHeaderTools({
           !dialog.contains(trigger.current)
         )
           details.cancel();
+        else setOpen(open);
       }}
     >
-      <PopoverTrigger
+      <MenuTrigger
         render={
           <IconButton
             ref={trigger}
@@ -61,15 +90,26 @@ export function ConversationHeaderTools({
           />
         }
       />
-      <PopoverPopup
+      <MenuPopup
         ref={popup}
         align="end"
         size="compact"
-        padding="list"
+        keepMounted={visited}
+        finalFocus={() =>
+          finalFocus.current ? finalFocus.current() : (trigger.current ?? false)
+        }
         aria-label={label}
+        onKeyDown={(event) => {
+          // Plugin buttons and the menu list share the native Tab order.
+          if (event.key === "Tab") event.preventBaseUIHandler();
+        }}
       >
-        <ActionList>{actions}</ActionList>
-      </PopoverPopup>
-    </PopoverRoot>
+        <HeaderToolsMenu
+          value={{ trigger, finalFocus, open, close: () => setOpen(false) }}
+        >
+          <ActionList>{actions}</ActionList>
+        </HeaderToolsMenu>
+      </MenuPopup>
+    </MenuRoot>
   );
 }

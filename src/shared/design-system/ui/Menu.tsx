@@ -87,6 +87,7 @@ export function ContextMenuTrigger(
   );
 }
 export const MenuGroup = BaseMenu.Group;
+export const MenuList = BaseMenu.List;
 export const MenuRadioGroup = BaseMenu.RadioGroup;
 
 export type MenuPosition = Pick<
@@ -106,9 +107,12 @@ type PopupProps = Omit<ComponentProps<typeof BaseMenu.Popup>, "className"> &
     children: ReactNode;
     /** Compact is for short action lists; larger choices retain panel corners. */
     size?: "compact" | "default" | "wide";
+    /** Retain action-owned dialogs after their menu closes. */
+    keepMounted?: boolean;
   };
 
-function PositionedPopup({
+/** An anchored action menu with collision handling and shared floating-surface styling. */
+export function MenuPopup({
   align = "start",
   alignOffset,
   anchor,
@@ -120,13 +124,14 @@ function PositionedPopup({
   sideOffset = 4,
   sticky,
   finalFocus,
+  keepMounted,
   ref,
   ...props
 }: PopupProps) {
   const focus = useFinalFocusUnlessMoved(finalFocus, ref);
   const contextMenu = useContext(ContextMenuPresence) !== null;
   return (
-    <BaseMenu.Portal>
+    <BaseMenu.Portal keepMounted={keepMounted}>
       <BaseMenu.Positioner
         className="buzz-menu-positioner"
         align={align}
@@ -154,11 +159,6 @@ function PositionedPopup({
   );
 }
 
-/** An anchored action menu with collision handling and shared floating-surface styling. */
-export function MenuPopup(props: PopupProps) {
-  return <PositionedPopup {...props} />;
-}
-
 export function MenuSubmenu(
   props: ComponentProps<typeof BaseMenu.SubmenuRoot>,
 ) {
@@ -170,7 +170,7 @@ export function MenuSubmenu(
 }
 
 export function MenuSubmenuPopup(props: PopupProps) {
-  return <PositionedPopup side="right" align="start" {...props} />;
+  return <MenuPopup side="right" align="start" {...props} />;
 }
 
 type ItemProps = Omit<ComponentProps<typeof BaseMenu.Item>, "className"> & {

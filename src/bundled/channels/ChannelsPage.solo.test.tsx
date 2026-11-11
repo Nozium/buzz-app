@@ -1216,6 +1216,17 @@ it("offers the header's chat actions from the sidebar row, plus inline Rename", 
   const header = await items("Chat actions");
   expect(header).toEqual([
     "Chat settings",
+    "Work",
+    "New workspace",
+    "Share access",
+    "Copy link",
+    "Convert to channel",
+    "Archive chat",
+    "Delete chat",
+  ]);
+  expect(await items("Actions for Planning")).toEqual([
+    "Rename",
+    "Chat settings",
     "Move to",
     "Share access",
     "Copy link",
@@ -1223,7 +1234,6 @@ it("offers the header's chat actions from the sidebar row, plus inline Rename", 
     "Archive chat",
     "Delete chat",
   ]);
-  expect(await items("Actions for Planning")).toEqual(["Rename", ...header]);
 });
 
 it("runs the header's own chat actions and returns focus to Chat actions", async () => {
@@ -1234,8 +1244,6 @@ it("runs the header's own chat actions and returns focus to Chat actions", async
   const user = userEvent.setup();
   const trigger = await headerAction("Chat actions");
   await user.click(trigger);
-  (await screen.findByRole("menuitem", { name: "Move to" })).focus();
-  await user.keyboard("{ArrowRight}");
   await user.click(await screen.findByRole("menuitem", { name: "Work" }));
   expect(assign).toHaveBeenCalledExactlyOnceWith(id, "work");
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
@@ -1294,8 +1302,6 @@ it("reports a failed header move beside the header and retries it", async () => 
   expect(screen.queryByText("Chat wasn’t moved")).toBeNull();
   act(() => publish(base));
   await user.click(await headerAction("Chat actions"));
-  (await screen.findByRole("menuitem", { name: "Move to" })).focus();
-  await user.keyboard("{ArrowRight}");
   await user.click(await screen.findByRole("menuitem", { name: "Work" }));
   expect(await screen.findByText("Chat wasn’t moved")).toBeVisible();
   // Toasts own swipe gestures, so press their buttons without a pointer.
@@ -1571,6 +1577,8 @@ it("leaves Escape to a text field outside the composer", async () => {
 async function headerAction(name: string) {
   const action = screen.queryByRole("button", { name });
   if (action) return action;
+  if (name === "Channel actions" || name === "Chat actions")
+    return screen.findByRole("button", { name: "Conversation actions" });
   await userEvent.click(
     await screen.findByRole("button", { name: "Conversation actions" }),
   );

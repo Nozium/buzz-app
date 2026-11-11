@@ -6,7 +6,7 @@ import { PanelSheet } from "./PanelSheet";
  * Retain closing content only until its own transitions finish, without timers.
  * Selection, focus restoration, and page lifetime remain with the callers. */
 export function PanelDock({
-  presentation = "sheet",
+  presentation = "inline",
   title,
   close,
   ...props

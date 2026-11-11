@@ -19,6 +19,7 @@ import { messageAuthor } from "../../features/relay/fold";
 import type { Navigation } from "../../features/navigation/controller";
 import { useIdentityNames } from "../../features/identity-names/react";
 import { channelIcon } from "../channels/channel-icon";
+import { ChannelAvatar } from "../channels/ChannelAvatar";
 import { avatarMedia } from "../../shared/avatar-source";
 import { relativeTimestamp } from "../../shared/relative-timestamp";
 import {
@@ -593,18 +594,24 @@ function ScopedPage({
           setNotice(undefined);
         }}
         avatar={
-          <Avatar
-            size="fill"
-            alt=""
-            fallback={place.title}
-            src={
-              destinationIcon
-                ? undefined
-                : avatarMedia(profile?.picture, session.media)
-            }
-            fallbackContent={destinationIcon ? <Icon size={16} /> : undefined}
-            shape={destinationIcon || profile?.isAgent ? "squircle" : "circle"}
-          />
+          place.kind === "channel" ? (
+            <ChannelAvatar name={place.title} size="fill" shape="squircle" />
+          ) : (
+            <Avatar
+              size="fill"
+              alt=""
+              fallback={place.title}
+              src={
+                destinationIcon
+                  ? undefined
+                  : avatarMedia(profile?.picture, session.media)
+              }
+              fallbackContent={destinationIcon ? <Icon size={16} /> : undefined}
+              shape={
+                destinationIcon || profile?.isAgent ? "squircle" : "circle"
+              }
+            />
+          )
         }
         sender={<span className={styles.destinationName}>{place.title}</span>}
         source={context}

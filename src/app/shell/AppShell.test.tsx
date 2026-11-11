@@ -322,9 +322,12 @@ it("opens the header's community switcher from Messages in Personal space", asyn
   );
   // Focus returns to the header trigger after the contextual opener closes.
   expect(
-    within(screen.getByRole("banner")).getByRole("button", {
-      name: /^Community switcher: /,
-    }),
+    within(screen.getByRole("navigation", { name: "Apps" })).getByRole(
+      "button",
+      {
+        name: /^Community switcher: /,
+      },
+    ),
   ).toHaveFocus();
 });
 
@@ -559,9 +562,12 @@ it("shows global routes in the rail and keeps the conversation mounted across se
   const draft = screen.getByRole("textbox", { name: "Message draft" });
   await user.type(draft, "Keep this draft");
   const rail = screen.getByRole("navigation", { name: "Apps" });
-  const header = screen.getByRole("banner");
+  const header = screen
+    .getByRole("button", { name: "Your profile" })
+    .closest("header");
+  if (!header) throw new Error("Missing application toolbar");
   expect(
-    within(header).getByRole("button", { name: /^Community switcher:/ }),
+    within(rail).getByRole("button", { name: /^Community switcher:/ }),
   ).toBeVisible();
   const profile = within(header).getByRole("button", { name: "Your profile" });
   expect(profile).toBeVisible();
@@ -570,9 +576,10 @@ it("shows global routes in the rail and keeps the conversation mounted across se
   ).toBeVisible();
   const inbox = within(rail).getByRole("button", { name: "Inbox" });
   expect(within(rail).getByRole("button", { name: "Bestie" })).toBeVisible();
-  expect(
-    within(rail).getByRole("button", { name: "Messages" }),
-  ).toHaveAttribute("aria-current", "page");
+  expect(within(rail).getByRole("button", { name: "Team" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
   expect(screen.getByRole("main")).toContainElement(draft);
   inbox.focus();
   await user.keyboard("{Enter}");
@@ -590,7 +597,7 @@ it("shows global routes in the rail and keeps the conversation mounted across se
 
 it.each([
   // Conversations open Messages; each plugin page keeps its own route row.
-  ["a conversation", "buzz.channels/channels", "Messages"],
+  ["a conversation", "buzz.channels/channels", "Team"],
   ["Drafts & sent", "buzz.drafts-and-sent/drafts-sent", "Drafts & sent"],
   // A third-party page with `primary: true` and no `placement` or `sidebar`.
   ["a third-party plugin page", "example.pr-status/pr-status", "PR status"],
@@ -634,7 +641,7 @@ it.each([
       </ToastProvider>,
     );
     const rail = screen.getByRole("navigation", { name: "Apps" });
-    const messages = within(rail).getByRole("button", { name: "Messages" });
+    const messages = within(rail).getByRole("button", { name: "Team" });
     const destination = within(rail).getByRole("button", { name: row });
     expect(destination).toHaveAttribute("aria-current", "page");
     expect(
@@ -702,7 +709,7 @@ it("keeps a contributed sidebar alongside its current rail route", async () => {
     </ToastProvider>,
   );
   const rail = screen.getByRole("navigation", { name: "Apps" });
-  const messages = within(rail).getByRole("button", { name: "Messages" });
+  const messages = within(rail).getByRole("button", { name: "Team" });
   expect(
     within(rail).getByRole("button", { name: "Sidebar playground" }),
   ).toHaveAttribute("aria-current", "page");

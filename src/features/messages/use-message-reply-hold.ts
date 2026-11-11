@@ -43,12 +43,19 @@ export function useMessageReplyHold(
         doc.removeEventListener("pointermove", move);
         doc.removeEventListener("pointerup", release);
         doc.removeEventListener("pointercancel", abort);
+        doc.removeEventListener("keydown", cancelOnEscape, true);
         win?.removeEventListener("blur", abort);
         hold.current = undefined;
       };
       const abort = () => {
         clear();
         preview?.cancel();
+      };
+      const cancelOnEscape = (next: KeyboardEvent) => {
+        if (next.key !== "Escape" || next.isComposing) return;
+        next.preventDefault();
+        next.stopPropagation();
+        abort();
       };
       const selectionChanged = () => {
         if (!doc.getSelection()?.isCollapsed) abort();
@@ -77,6 +84,7 @@ export function useMessageReplyHold(
       doc.addEventListener("pointermove", move);
       doc.addEventListener("pointerup", release);
       doc.addEventListener("pointercancel", abort);
+      doc.addEventListener("keydown", cancelOnEscape, true);
       win?.addEventListener("blur", abort);
     },
     onPointerLeave: cancel,

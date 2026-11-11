@@ -347,6 +347,43 @@ it("keeps a selected agent Team draft and pending DM in Team across remounts", a
   expect(t.messages.send).toHaveBeenCalledOnce();
 });
 
+it("restores recipient hero artwork from current profiles and agent choices", async () => {
+  const t = setup();
+  const person = people[0];
+  const agent = t.control.snapshot().agents[0];
+  assert(person && agent);
+  t.profiles.set(person.pubkey, {
+    ...person,
+    picture: "https://example.org/person.png",
+  });
+  t.updateControl({
+    status: "ready",
+    agents: [{ ...agent, picture: "https://example.org/agent.png" }],
+  });
+  localStorage.setItem(
+    `buzz-view.v1:${JSON.stringify([scope, "direct-message:recipients"])}`,
+    JSON.stringify([
+      person,
+      { pubkey: agent.pubkey, name: agent.name, isAgent: true },
+    ]),
+  );
+  const view = t.mount();
+  const hero = view.container.querySelector(
+    "[data-new-message-body] [data-avatar-stack]",
+  );
+  assert(hero);
+  await waitFor(() => {
+    expect(hero.querySelector(`[title="${person.name}"] img`)).toHaveAttribute(
+      "src",
+      "https://example.org/person.png",
+    );
+    expect(hero.querySelector(`[title="${agent.name}"] img`)).toHaveAttribute(
+      "src",
+      "https://example.org/agent.png",
+    );
+  });
+});
+
 it("the Activity composer starts without stealing focus and keeps delivery with NewMessage", async () => {
   const t = setup();
   t.profiles.set(people[0]?.pubkey, people[0]);

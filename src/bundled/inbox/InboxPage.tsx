@@ -54,10 +54,7 @@ import {
   type SenderFilter,
 } from "./InboxFilters";
 import { FullPageSurface } from "../../shared/design-system/ui/FullPageSurface";
-import {
-  PanelHeader,
-  PanelHeaderLabel,
-} from "../../shared/design-system/ui/PanelHeader";
+import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
 import { BellIcon, CheckIcon } from "../../shared/design-system/icons";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { communityRefusalTitle } from "../../features/federated-identity/CommunitySignIn";
@@ -237,14 +234,7 @@ export function InboxPage({
           />
         ) : (
           <div data-buzz-ui="" className={`${feedStyles.page} ${styles.page}`}>
-            <PanelHeader
-              title={
-                <PanelHeaderLabel
-                  title="Activity"
-                  icon={<BellIcon size="1rem" />}
-                />
-              }
-            />
+            <PanelHeader title="Activity" />
             <div className={styles.notice} role="status">
               <p className="text-body text-subtle">
                 {connection.status === "connecting"
@@ -557,8 +547,10 @@ const InboxList = memo(function InboxList({
         (!selected && !selectedReaction && inbox.status !== "loading"))
     ) {
       // Restoring the channel does not reopen its conversation.
-      if (selectedRetired && opened && closeTab(opened))
+      if (selectedRetired && opened) {
+        closeTab(opened);
         retiredFocus.current = true;
+      }
       // A closed tab ends its visit, so reopening the row reads it again.
       if (selectedRetired || !showing) {
         intentRevision.current++;
@@ -1070,7 +1062,7 @@ const InboxList = memo(function InboxList({
     retryFocus.current = false;
     if (failure || pending || document.activeElement !== document.body) return;
     const editor = feedbackMount
-      ?.closest('[role="dialog"]')
+      ?.closest("[data-conversation-reader]")
       ?.querySelector<HTMLElement>('[role="textbox"]');
     if (editor) editor.focus();
     else focusToolbar();
@@ -1198,22 +1190,19 @@ const InboxList = memo(function InboxList({
       <div ref={workspace} className={styles.workspace}>
         <div className={styles.listPane}>
           <div className={styles.listHeading}>
-            <CollectionFilters
-              title="Activity"
-              icon={<BellIcon size={24} />}
-              actions={
-                <InboxFilters
-                  sender={senderFilter}
-                  unreadOnly={unreadOnly}
-                  triggerRef={fallbackControl}
-                  onSenderChange={(sender) => setFilter({ sender })}
-                  onUnreadChange={(checked) =>
-                    setFilter({ attention: checked ? "unread" : "all" })
-                  }
-                />
-              }
-            >
+            <CollectionFilters title="Activity">
               <InboxViewFilter
+                leadingAction={
+                  <InboxFilters
+                    sender={senderFilter}
+                    unreadOnly={unreadOnly}
+                    triggerRef={fallbackControl}
+                    onSenderChange={(sender) => setFilter({ sender })}
+                    onUnreadChange={(checked) =>
+                      setFilter({ attention: checked ? "unread" : "all" })
+                    }
+                  />
+                }
                 view={activity}
                 onViewChange={(view) => setFilter({ activity: view })}
               />

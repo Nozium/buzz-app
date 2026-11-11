@@ -29,6 +29,7 @@ import {
 import { parseBuzzLink } from "../../features/navigation/buzz-links";
 import { useIdentityNames } from "../../features/identity-names/react";
 import { dmLabel } from "../inbox/dm-label";
+import { ChannelMembersButton } from "./ChannelMembersDialog";
 import { ConversationTab } from "./ConversationTab";
 import { TabSlot, useTabNodes } from "./TabHosts";
 import { createPortal, flushSync } from "react-dom";
@@ -827,6 +828,24 @@ export function useConversationTabs({
     return {
       id: tab.id,
       composer: true,
+      ...(tab.kind === "conversation" &&
+        target && {
+          identity: (
+            <ChannelMembersButton
+              session={queries}
+              channelId={target.id}
+              conversationName={target.name}
+              canOpenLink={canOpenLink}
+              onOpenLink={(url) => openConversationLink(target.id, url)}
+              onOpenConversation={(id) =>
+                openConversationLink(
+                  target.id,
+                  `buzz://channel/${encodeURIComponent(id)}`,
+                )
+              }
+            />
+          ),
+        }),
       label:
         tab.kind === "thread"
           ? threadLabel(tab, target?.name)

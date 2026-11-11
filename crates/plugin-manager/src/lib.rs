@@ -440,10 +440,6 @@ pub fn bundled_manifests() -> Vec<Manifest> {
     });
     vec![
         serde_json::from_str(include_str!(
-            "../../../src/bundled/smart-sections/manifest.json"
-        ))
-        .expect("smart sections manifest"),
-        serde_json::from_str(include_str!(
             "../../../src/bundled/mesh-compute/manifest.json"
         ))
         .expect("mesh manifest"),
@@ -544,7 +540,6 @@ fn enabled_by_default(id: &str) -> bool {
     matches!(
         id,
         "buzz.channels"
-            | "buzz.smart-sections"
             | "buzz.feedback"
             | "buzz.diffs"
             | "buzz.mermaid"

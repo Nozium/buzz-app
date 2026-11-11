@@ -148,6 +148,10 @@ function setup(
     notify: (listener) => listener(),
   });
   previewOwners.push(previews.dispose);
+  const sidebar = {
+    status: "ready" as const,
+    data: { sections: [], assignments: {}, starred: [], muted: [] },
+  };
   const session: RelaySession = {
     ...base,
     channelPreviews: previews.capability,
@@ -161,10 +165,7 @@ function setup(
     },
     sidebarPreferences: {
       ...base.sidebarPreferences,
-      snapshot: () => ({
-        status: "ready" as const,
-        data: { sections: [], assignments: {}, starred: [], muted: [] },
-      }),
+      snapshot: () => sidebar,
     },
     profiles: {
       ...base.profiles,
@@ -496,9 +497,9 @@ test("a DM row is titled with its people, not DM", async () => {
   expect(row).not.toHaveTextContent(/^DM/);
 });
 
-test("a channel keeps its channel icon after your latest message", () => {
+test("a channel keeps its monogram after your latest message", () => {
   setup([], { new: { createdAt: 600, content: "my post", authorId: viewer } });
-  expect(faceOf("new")).toBe("");
+  expect(faceOf("new")).toBe("FR");
   expect(screen.getByText("my post")).toBeInTheDocument();
   expect(screen.queryByText(/You/)).not.toBeInTheDocument();
 });

@@ -894,7 +894,7 @@ test("header openings keep focus while a main-pane thread is retained", async ({
   const main = page.locator("[data-main-workspace]");
   const topbar = page.getByRole("navigation", { name: "Apps dock" });
   const messages = topbar.getByRole("tab", {
-    name: "Messages",
+    name: "Team",
     exact: true,
   });
   const projects = topbar.getByRole("tab", { name: "Workflows", exact: true });

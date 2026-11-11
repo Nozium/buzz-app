@@ -27,7 +27,6 @@ test("primary destinations keep their headers and bodies in one column", async (
       ["Activity", "buzz.inbox", "inbox"],
       ["Reminders", "buzz.reminders", "reminders"],
       ["Drafts & sent", "buzz.drafts-and-sent", "drafts-sent"],
-      ["Smart sections", "buzz.smart-sections", "sections"],
     ]) {
       await page.evaluate(
         (target) => {

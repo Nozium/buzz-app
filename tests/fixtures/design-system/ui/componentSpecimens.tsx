@@ -1242,6 +1242,19 @@ function PanelHeaderSpecimen() {
         />
       </SpecimenGroup>
       <SpecimenGroup
+        label="Conversation — centered avatars above the name"
+        code={
+          '<PanelHeader variant="conversation" title="Alice" icon={<Avatar size="large" alt="" fallback="Alice" />} actions={actions} />'
+        }
+      >
+        <PanelHeader
+          variant="conversation"
+          title="Alice"
+          icon={<Avatar size="large" alt="" fallback="Alice" />}
+          actions={actions}
+        />
+      </SpecimenGroup>
+      <SpecimenGroup
         label="Compact — title and IconButton action"
         code={`<PanelHeader variant="compact" title="Thread" actions={actions} />`}
       >

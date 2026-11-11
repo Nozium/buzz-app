@@ -33,7 +33,7 @@
 }
 .avatarState {
   position: absolute;
-  inset-block-end: 0;
+  inset-block-start: 0;
   inset-inline-end: 0;
   display: flex;
 }
@@ -171,6 +171,9 @@
   height: var(--space-2);
   border-radius: var(--radius-pill);
   background: var(--text-navigation-unread);
+}
+.avatarState .unreadDot {
+  box-shadow: 0 0 0 var(--space-half) var(--surface-rail-card);
 }
 
 /* Unread changes nothing but the dot: a read row looks the same without it. */

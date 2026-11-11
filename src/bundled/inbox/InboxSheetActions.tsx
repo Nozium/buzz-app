@@ -5,17 +5,8 @@ import type {
   Panels,
 } from "../../features/panels/service";
 import { Button } from "../../shared/design-system/ui/Button";
-import { IconButton } from "../../shared/design-system/ui/IconButton";
-import {
-  PopoverRoot,
-  PopoverTrigger,
-  PopoverPopup,
-} from "../../shared/design-system/ui/Popover";
-import {
-  ArrowUpRightIcon,
-  DotsThreeIcon,
-} from "../../shared/design-system/icons";
-import { ActionList } from "../../shared/design-system/ui/ActionList";
+import { ConversationHeaderTools } from "../../features/conversation/ConversationHeaderTools";
+import { ArrowUpRightIcon } from "../../shared/design-system/icons";
 
 /** Keep plugin controls intact: they own confirmation, shortcuts and call state. */
 export function InboxSheetActions({
@@ -41,26 +32,10 @@ export function InboxSheetActions({
     };
   }, [active]);
   return (
-    <PopoverRoot>
-      <PopoverTrigger
-        render={
-          <IconButton
-            ref={trigger}
-            size="sm"
-            variant="subtle"
-            aria-label="Conversation actions"
-            title="Conversation actions"
-            icon={<DotsThreeIcon size="1rem" />}
-          />
-        }
-      />
-      <PopoverPopup
-        align="end"
-        size="compact"
-        padding="list"
-        aria-label="Conversation actions"
-      >
-        <ActionList>
+    <ConversationHeaderTools
+      triggerRef={trigger}
+      actions={
+        <>
           {contributions.map((panel) => {
             const Launcher = panel.channelLauncher;
             if (!Launcher) return null;
@@ -86,10 +61,10 @@ export function InboxSheetActions({
             );
           })}
           <Button size="sm" variant="ghost" onClick={onOpen}>
-            <ArrowUpRightIcon size="1rem" /> Open in Messages
+            <ArrowUpRightIcon size="1rem" /> Open in Team
           </Button>
-        </ActionList>
-      </PopoverPopup>
-    </PopoverRoot>
+        </>
+      }
+    />
   );
 }

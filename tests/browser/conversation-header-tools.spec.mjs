@@ -1,11 +1,12 @@
 import { test, expect } from "./fixture.mjs";
+import { animationsSettled } from "./animations.mjs";
 test.use({
   productionBroker: true,
   readState: true,
   enabledPlugins: ["buzz.todos"],
   historyCounts: { alpha: 3 },
 });
-// Browser-only: header placement, nested portalled menu focus, and stable history geometry.
+// Browser-only: header placement, flat menu keyboard focus, and stable history geometry.
 test("conversation header opens its tools without moving history", async ({
   page,
   app,
@@ -25,11 +26,16 @@ test("conversation header opens its tools without moving history", async ({
     name: "Conversation actions",
     exact: true,
   });
-  const actions = page.getByRole("button", {
-    name: "Channel actions",
+  const actions = page.getByRole("menuitem", {
+    name: "View channel details",
     exact: true,
   });
   await expect(identity).toBeVisible();
+  const editor = pane.getByRole("textbox", {
+    name: "Message #Alpha",
+    exact: true,
+  });
+  await editor.fill("Keep my draft when returning to Messages");
   const title = pane.getByRole("heading", {
     name: "Alpha",
     level: 2,
@@ -43,22 +49,41 @@ test("conversation header opens its tools without moving history", async ({
   const before = await history.boundingBox();
   const identityBox = await identity.boundingBox();
   const titleBox = await title.boundingBox();
-  expect(identityBox.x + identityBox.width).toBeLessThan(titleBox.x);
-  expect(identityBox.y + identityBox.height / 2).toBeCloseTo(
-    titleBox.y + titleBox.height / 2,
+  const paneBox = await pane.boundingBox();
+  expect(identityBox.x + identityBox.width / 2).toBeCloseTo(
+    paneBox.x + paneBox.width / 2,
     0,
   );
+  expect(titleBox.x + titleBox.width / 2).toBeCloseTo(
+    paneBox.x + paneBox.width / 2,
+    0,
+  );
+  expect(titleBox.y).toBeGreaterThanOrEqual(identityBox.y + identityBox.height);
   const triggerBox = await trigger.boundingBox();
+  expect(identityBox.y).toBeCloseTo(triggerBox.y, 0);
+  expect(titleBox.y - (identityBox.y + identityBox.height)).toBeLessThanOrEqual(
+    4,
+  );
   expect(triggerBox.x).toBeGreaterThan(identityBox.x + identityBox.width);
   await trigger.click();
   await expect(actions).toBeVisible();
+  await animationsSettled(page.locator(".buzz-menu-popup:visible"), {
+    subtree: true,
+  });
   expect((await history.boundingBox()).y).toBe(before.y);
   await page.screenshot({ path: testInfo.outputPath("header-tools.png") });
   await page.emulateMedia({ colorScheme: "dark" });
   await page.screenshot({ path: testInfo.outputPath("header-tools-dark.png") });
-  await actions.click();
-  await expect(page.getByRole("menu").last()).toBeVisible();
-  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("button", { name: "Channel actions", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator(".buzz-menu-popup:visible")).toHaveCount(1);
+  await actions.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(
+    page.getByRole("button", { name: "Toggle channel todos", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(actions).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(trigger).toBeFocused();
@@ -70,5 +95,41 @@ test("conversation header opens its tools without moving history", async ({
   await expect(actions).toBeInViewport();
   await page.screenshot({
     path: testInfo.outputPath("header-tools-narrow.png"),
+  });
+  await page.keyboard.press("Escape");
+  await pane
+    .getByRole("button", { name: "Show Team list", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Team", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("region", { name: "Team", exact: true })
+    .getByRole("button", { name: "Hide Team list", exact: true })
+    .first()
+    .click();
+  await expect(editor).toHaveText("Keep my draft when returning to Messages");
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page
+    .getByRole("navigation", { name: "Apps", exact: true })
+    .getByRole("button", { name: "Activity", exact: true })
+    .click();
+  const activity = page.getByRole("region", { name: "Activity", exact: true });
+  await activity.getByRole("tab", { name: "Channels", exact: true }).click();
+  await activity
+    .locator('[data-activity-row="alpha"] [data-conversation-row]')
+    .click();
+  await activity
+    .getByRole("button", { name: "Conversation actions", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Open in Team", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".buzz-menu-popup:visible")).toHaveCount(1);
+  await animationsSettled(page.locator(".buzz-menu-popup:visible"), {
+    subtree: true,
+  });
+  await page.screenshot({
+    path: testInfo.outputPath("activity-header-tools.png"),
   });
 });
