@@ -10,6 +10,7 @@ export type ReviewLane = Readonly<{
   id: string;
   name: string;
   instructions: string;
+  reviewers: readonly string[];
 }>;
 export type ReviewConfig = Readonly<{
   version: 1;
@@ -78,7 +79,23 @@ export function validateConfig(value: unknown): ReviewConfig {
       throw new Error("Lane names must be unique.");
     ids.add(lane.id);
     names.add(name.toLowerCase());
-    return { id: lane.id, name, instructions: lane.instructions.trim() };
+    // Early draft configurations may not yet have reviewer selections.
+    const reviewers: unknown = lane.reviewers ?? [];
+    if (
+      !Array.isArray(reviewers) ||
+      reviewers.length > 20 ||
+      reviewers.some(
+        (key) => typeof key !== "string" || !/^[0-9a-f]{64}$/.test(key),
+      ) ||
+      new Set(reviewers).size !== reviewers.length
+    )
+      throw new Error("Choose up to 20 distinct reviewer agents per lane.");
+    return {
+      id: lane.id,
+      name,
+      instructions: lane.instructions.trim(),
+      reviewers: reviewers as string[],
+    };
   });
   const config: ReviewConfig = {
     version: 1,

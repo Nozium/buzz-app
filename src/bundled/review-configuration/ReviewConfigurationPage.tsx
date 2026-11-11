@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useAgentChoices } from "../../features/agents/use-choices";
+import { LaneReviewers } from "./LaneReviewers";
 import { useChannelList, useRelayConnection } from "../../features/relay/react";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
@@ -260,7 +262,14 @@ function ChannelConfiguration({
             {rows.map((row) => (
               <tr key={row.artifactId}>
                 <th scope="row">{row.config.repository}</th>
-                <td>{row.config.lanes.map((lane) => lane.name).join(", ")}</td>
+                <td>
+                  {row.config.lanes
+                    .map(
+                      (lane) =>
+                        `${lane.name} (${lane.reviewers.length} ${lane.reviewers.length === 1 ? "reviewer" : "reviewers"})`,
+                    )
+                    .join(", ")}
+                </td>
                 <td>
                   <Button
                     aria-label={`Edit ${row.config.repository}`}
@@ -333,13 +342,23 @@ function ConfigurationEditor({
   onCancel: () => void;
   onSaved: (saved: SavedReviewConfig) => void;
 }) {
+  const choices = useAgentChoices(session, true, true);
+  const [refreshingAgents, setRefreshingAgents] = useState(false);
+  const [agentRefreshError, setAgentRefreshError] = useState("");
   const [draft, setDraft] = useState<ReviewConfig>(
     () =>
       previous?.config ?? {
         version: 1,
         repository: "",
         reminderMinutes: 15,
-        lanes: [{ id: crypto.randomUUID(), name: "General", instructions: "" }],
+        lanes: [
+          {
+            id: crypto.randomUUID(),
+            name: "General",
+            instructions: "",
+            reviewers: [],
+          },
+        ],
       },
   );
   const [busy, setBusy] = useState(false);
@@ -408,6 +427,45 @@ function ConfigurationEditor({
           />
         </Field>
       </SettingsGroup>
+      {choices.pending && <p role="status">Loading reviewer agents…</p>}
+      {!choices.pending && !choices.selectable.length && (
+        <p>
+          No reviewer agents are available in this session. Create or connect an
+          agent in Agents, then refresh this list.
+        </p>
+      )}
+      {choices.error && (
+        <p role="alert">Some agents could not be loaded: {choices.error}</p>
+      )}
+      {choices.archives.error && (
+        <p role="alert">
+          Archived agents could not be checked: {choices.archives.error}
+        </p>
+      )}
+      {agentRefreshError && <p role="alert">{agentRefreshError}</p>}
+      <div>
+        <Button
+          disabled={busy || refreshingAgents}
+          loading={refreshingAgents}
+          onClick={async () => {
+            setRefreshingAgents(true);
+            setAgentRefreshError("");
+            try {
+              await session.agentChoices.refresh(true);
+            } catch (reason) {
+              setAgentRefreshError(
+                reason instanceof Error
+                  ? reason.message
+                  : "Could not refresh agents.",
+              );
+            } finally {
+              setRefreshingAgents(false);
+            }
+          }}
+        >
+          Refresh agents
+        </Button>
+      </div>
       {draft.lanes.map((lane, index) => (
         <section key={lane.id} className="review-config-lane">
           <div className="review-config-actions">
@@ -441,6 +499,20 @@ function ConfigurationEditor({
                 }
               />
             </Field>
+            <LaneReviewers
+              lane={index + 1}
+              reviewers={lane.reviewers}
+              choices={choices}
+              disabled={busy}
+              onChange={(reviewers) =>
+                setDraft({
+                  ...draft,
+                  lanes: draft.lanes.map((item) =>
+                    item.id === lane.id ? { ...item, reviewers } : item,
+                  ),
+                })
+              }
+            />
             <Field
               label={`Lane ${index + 1} instructions`}
               description="Save the instructions reviewers should receive for this lane."
@@ -474,7 +546,12 @@ function ConfigurationEditor({
               ...draft,
               lanes: [
                 ...draft.lanes,
-                { id: crypto.randomUUID(), name: "", instructions: "" },
+                {
+                  id: crypto.randomUUID(),
+                  name: "",
+                  instructions: "",
+                  reviewers: [],
+                },
               ],
             })
           }
@@ -483,8 +560,8 @@ function ConfigurationEditor({
         </Button>
       </div>
       <p>
-        Reminder interval: 15 minutes. Reviewer selection, routing, and reminder
-        delivery will be available in a later version.
+        Reminder interval: 15 minutes. Routing and reminder delivery will be
+        available in a later version.
       </p>
       {error && <p role="alert">{error}</p>}
       <div className="review-config-actions">

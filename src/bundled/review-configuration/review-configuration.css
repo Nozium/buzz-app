@@ -16,7 +16,8 @@
 }
 .review-config-content,
 .review-config-form,
-.review-config-lane {
+.review-config-lane,
+.review-config-reviewers {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -24,6 +25,10 @@
 }
 .review-config-content p {
   margin: 0;
+}
+.review-config-reviewers span {
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 .review-config-actions {
   display: flex;

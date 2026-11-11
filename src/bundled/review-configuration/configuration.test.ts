@@ -23,6 +23,7 @@ const config: ReviewConfig = {
       id: "general",
       name: "General",
       instructions: "Check authorization and tests.",
+      reviewers: ["a".repeat(64)],
     },
   ],
 };
@@ -73,7 +74,7 @@ it("creates and reloads a signed configuration, then updates the loaded revision
     ...config,
     lanes: [
       {
-        ...{ id: "general", name: "General", instructions: "" },
+        ...{ id: "general", name: "General", instructions: "", reviewers: [] },
         instructions: "Check keyboard navigation.",
       },
     ],
@@ -223,4 +224,27 @@ it("isolates unreadable rows and signals a truncated result", async () => {
   expect(
     (await loadConfigurations(test.session, channel, signal())).truncated,
   ).toBe(true);
+});
+
+it("validates reviewer identities and reads earlier drafts without reviewers", () => {
+  expect(() =>
+    validateConfig({
+      ...config,
+      lanes: [{ ...config.lanes[0], reviewers: ["not-a-key"] }],
+    }),
+  ).toThrow("reviewer agents");
+  expect(() =>
+    validateConfig({
+      ...config,
+      lanes: [
+        { ...config.lanes[0], reviewers: ["a".repeat(64), "a".repeat(64)] },
+      ],
+    }),
+  ).toThrow("distinct");
+  expect(
+    validateConfig({
+      ...config,
+      lanes: [{ ...config.lanes[0], reviewers: undefined }],
+    }).lanes[0]?.reviewers,
+  ).toEqual([]);
 });

@@ -21,12 +21,48 @@ function fixture() {
     ],
   };
   const listeners = new Set<() => void>();
+  const agents = [
+    { pubkey: "a".repeat(64), name: "Backend reviewer", managed: true },
+    { pubkey: "b".repeat(64), name: "UI reviewer", managed: true },
+  ];
+  let choices = {
+    error: undefined as string | undefined,
+    status: "ready",
+    pending: false,
+    complete: true,
+    identities: agents,
+    selectable: agents,
+    archives: {
+      status: "ready",
+      archived: [],
+      error: undefined as string | undefined,
+    },
+    definitions: [],
+  };
   const snapshotRead = vi.fn(async () => events);
   const publish = vi.fn(async (event: EventData) => {
     events = [event];
     return event.id;
   });
   const session = {
+    agentChoices: {
+      snapshot: () => choices,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      ensure() {},
+      refresh: vi.fn(async () => {
+        choices = {
+          ...choices,
+          error: undefined,
+          selectable: agents,
+          archives: { ...choices.archives, error: undefined },
+        };
+        for (const listener of listeners) listener();
+      }),
+      retain: () => () => {},
+    },
     channels: {
       ensureList() {},
       list: () => list,
@@ -45,6 +81,19 @@ function fixture() {
     session,
     publish,
     snapshotRead,
+    failAgents() {
+      choices = {
+        ...choices,
+        error: "Inventory unavailable",
+        selectable: [],
+        archives: { ...choices.archives, error: "Archive read failed" },
+      };
+      for (const listener of listeners) listener();
+    },
+    hideAgents() {
+      choices = { ...choices, selectable: [] };
+      for (const listener of listeners) listener();
+    },
     metadataCached(cached: boolean) {
       list = {
         ...list,
@@ -245,4 +294,70 @@ it("counts unreadable records toward the limit when a new repository is saved", 
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(true);
+});
+
+it("saves multiple lane reviewers, reloads their identities, and preserves unavailable selections", async () => {
+  const test = fixture();
+  render(<ReviewConfigurationCommunity session={test.session} />);
+  const user = await openDraft();
+  await user.click(screen.getByRole("combobox", { name: "Lane 1 reviewers" }));
+  await user.click(
+    await screen.findByRole("option", { name: "Backend reviewer (aaaaaaaa)" }),
+  );
+  await user.click(screen.getByRole("combobox", { name: "Lane 1 reviewers" }));
+  await user.click(
+    await screen.findByRole("option", { name: "UI reviewer (bbbbbbbb)" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Save settings" }));
+  await screen.findByText(
+    "Saved example-org/project. Reviews are not enabled yet.",
+  );
+  const content = test.publish.mock.calls[0]?.[0].content;
+  expect(JSON.parse(content ?? "{}").lanes[0].reviewers).toEqual([
+    "a".repeat(64),
+    "b".repeat(64),
+  ]);
+  await user.click(screen.getByRole("button", { name: "Reload" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Edit example-org/project" }),
+  );
+  await screen.findByRole("button", {
+    name: "Remove Backend reviewer from lane 1",
+  });
+  act(() => test.hideAgents());
+  await screen.findByText("Backend reviewer — unavailable in this session");
+  await user.click(
+    screen.getByRole("button", { name: "Remove Backend reviewer from lane 1" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Save settings" }));
+  await screen.findByText(
+    "Saved example-org/project. Reviews are not enabled yet.",
+  );
+  expect(
+    JSON.parse(test.publish.mock.calls[1]?.[0].content ?? "{}").lanes[0]
+      .reviewers,
+  ).toEqual(["b".repeat(64)]);
+});
+
+it("refreshes failed agent and archive reads without discarding the draft", async () => {
+  const test = fixture();
+  test.failAgents();
+  render(<ReviewConfigurationCommunity session={test.session} />);
+  const user = await openDraft();
+  expect(screen.getByText(/Inventory unavailable/)).toBeTruthy();
+  expect(screen.getByText(/Archive read failed/)).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Refresh agents" }));
+  expect(test.session.agentChoices.refresh).toHaveBeenCalledWith(true);
+  await user.click(screen.getByRole("combobox", { name: "Lane 1 reviewers" }));
+  await user.click(
+    await screen.findByRole("option", { name: "Backend reviewer (aaaaaaaa)" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Save settings" }));
+  await screen.findByText(
+    "Saved example-org/project. Reviews are not enabled yet.",
+  );
+  expect(
+    JSON.parse(test.publish.mock.calls[0]?.[0].content ?? "null").lanes[0]
+      .reviewers,
+  ).toEqual(["a".repeat(64)]);
 });

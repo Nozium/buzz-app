@@ -94,6 +94,7 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
           "buzz.focus",
           "buzz.charts",
           "buzz.drafts-and-sent",
+          "buzz.review-configuration",
         ].includes(plugin.manifest.id),
         plugin.manifest.id,
       );
@@ -102,12 +103,40 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       "buzz.reminders",
       "buzz.workflows",
       "buzz.drafts-and-sent",
+      "buzz.review-configuration",
     ]) {
       assert.equal(
         services.pages.snapshot().some((page) => page.pluginId === id),
         false,
       );
     }
+    await services.plugins.change("enable", "buzz.review-configuration");
+    await vi.waitFor(() =>
+      assert.ok(
+        services.pages
+          .snapshot()
+          .some(
+            (page) => page.key === "buzz.review-configuration/configuration",
+          ),
+      ),
+    );
+    const reviewConfiguration = services.pages
+      .snapshot()
+      .find((page) => page.pluginId === "buzz.review-configuration");
+    assert.equal(reviewConfiguration.title, "Review Configuration");
+    assert.equal(reviewConfiguration.primary, true);
+    assert.equal(reviewConfiguration.placement, "sidebar");
+    assert.match(
+      renderToStaticMarkup(createElement(reviewConfiguration.component)),
+      /Connect to a community to configure reviews/,
+    );
+    await services.plugins.change("disable", "buzz.review-configuration");
+    assert.equal(
+      services.pages
+        .snapshot()
+        .some((page) => page.pluginId === "buzz.review-configuration"),
+      false,
+    );
     await services.plugins.change("enable", "buzz.reminders");
     await vi.waitFor(() =>
       assert.ok(
