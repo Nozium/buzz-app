@@ -149,6 +149,7 @@ export type {
   Agents,
   AgentAddedTab,
   AgentHandle,
+  AgentInstructions,
   AgentType,
   AgentSession,
   AgentSessions,
