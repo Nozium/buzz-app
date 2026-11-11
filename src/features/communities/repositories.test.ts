@@ -84,7 +84,24 @@ it("lists the partition's configured folder and refuses a listing that outlived 
   await expect(
     repositoryFolders(partition, controller.signal, list),
   ).rejects.toThrow();
+  // A stalled listing ends with the signal's reason, and the listener goes.
+  const pending = new AbortController();
+  const remove = vi.spyOn(pending.signal, "removeEventListener");
+  const stalled = repositoryFolders(
+    partition,
+    pending.signal,
+    () => new Promise(() => {}),
+  );
+  pending.abort(new Error("cancelled"));
+  await expect(stalled).rejects.toThrow("cancelled");
+  expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
   list.mockClear();
+  const stopped = new AbortController();
+  stopped.abort(new Error("stopped"));
+  await expect(
+    repositoryFolders(partition, stopped.signal, list),
+  ).rejects.toThrow("stopped");
+  expect(list).not.toHaveBeenCalled();
   await expect(repositoryFolders("none", signal, list)).rejects.toThrow(
     "community and account",
   );

@@ -76,7 +76,19 @@ export async function repositoryFolders(
   list: (path: string) => Promise<readonly RepositoryFolder[]>,
 ) {
   const path = repositoriesFolder(partition);
-  const rows = await list(path);
+  signal.throwIfAborted();
+  // A stalled listing must not hold the caller past its signal.
+  let abort = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  let rows: readonly RepositoryFolder[];
+  try {
+    rows = await Promise.race([list(path), aborted]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
   signal.throwIfAborted();
   if (repositoriesFolder(partition) !== path)
     throw new Error("The repositories folder changed. Try again.");
