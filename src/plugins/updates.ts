@@ -708,6 +708,7 @@ export function createPluginUpdates(
         lastCheck = undefined;
         lastErrors = false;
         retry = true;
+        forceNext = true;
       }
     } finally {
       checking = false;
