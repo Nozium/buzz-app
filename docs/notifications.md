@@ -27,6 +27,9 @@ restoring settings never plays a preview. Silent stops the current preview. The
 Sound switch turns playback off without disabling alerts. Each category also offers
 Silent, which is saved like other sound choices and suppresses that category’s
 audio without changing its desktop alerts. Silent has no audio preview.
+Alerts and previews use one-shot Web Audio buffers, not resumable media elements,
+so notification clips do not take over the system’s play/pause controls. Each
+playback closes its audio context on completion, cancellation or failure.
 
 ```ts
 export const inject = ["notifications"];
