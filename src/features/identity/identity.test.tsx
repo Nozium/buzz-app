@@ -8625,6 +8625,22 @@ it("revealing a device key with no backup, or a failed copy, doesn't enable Repl
   identity.dispose();
 });
 
+it("a second replace question starts over: Replace disabled and “I have my key” unchecked and disabled", async () => {
+  anotherKeyOnDevice(false);
+  const identity = createIdentity();
+  const user = userEvent.setup();
+  await relaunchToAnotherAccount(user, identity);
+  await copyDeviceKey(user);
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  await user.click(await screen.findByRole("button", { name: SIGN_IN }));
+  expect(await replaceDialog()).toHaveTextContent(MAYBE_NOT_BACKED_UP);
+  expect(replaceKeyButton()).toBeDisabled();
+  expect(haveKeyBox()).not.toBeChecked();
+  expect(haveKeyBox()).toHaveAttribute("aria-disabled", "true");
+  expect(signOuts()).toEqual([]);
+  identity.dispose();
+});
+
 it("Replace waits until a device key with no backup is copied and the user has it, then signs it out to restart and sign in again", async () => {
   anotherKeyOnDevice(false);
   const identity = createIdentity();
