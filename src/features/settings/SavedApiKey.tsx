@@ -33,6 +33,7 @@ export function SavedApiKey({
   description = "Saved securely on this computer.",
   label,
   labelVisibility = "hidden",
+  renderReplacement,
 }: {
   credential: {
     subscribe(listener: () => void): () => void;
@@ -48,6 +49,12 @@ export function SavedApiKey({
   description?: ReactNode;
   label?: string;
   labelVisibility?: "visible" | "hidden";
+  /** A credential can supply its own editor when replacement needs more fields. */
+  renderReplacement?: (controls: {
+    onCancel(): void;
+    onSaved(): void;
+    onSavingChange(saving: boolean): void;
+  }) => ReactNode;
 }) {
   const [replacing, setReplacing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -57,6 +64,8 @@ export function SavedApiKey({
   const request = useRef(0);
   const writing = useRef(false);
   const input = useRef<HTMLInputElement>(null);
+  const editor = useRef<HTMLDivElement>(null);
+  const restoring = useRef(false);
   const menu = useRef<HTMLDivElement>(null);
   const notify = useToastNotification();
   const editing = !conceal && replacing;
@@ -79,8 +88,14 @@ export function SavedApiKey({
     };
   }, [credential, conceal, reset]);
   useEffect(() => {
-    if (editing) input.current?.focus();
-  }, [editing]);
+    if (editing)
+      (editor.current?.querySelector("input") ?? input.current)?.focus();
+    else if (restoring.current) {
+      restoring.current = false;
+      trigger.current?.focus();
+      input.current?.focus();
+    }
+  }, [editing, trigger]);
   // MenuTrigger establishes the popup anchor and keyboard focus.
   const openActions = () => {
     if (!menuOpen && !editing && active() && !disabled && !conceal && !saving)
@@ -133,6 +148,28 @@ export function SavedApiKey({
         input.current?.focus();
     }
   };
+  if (editing && renderReplacement)
+    return (
+      <div ref={editor} aria-busy={saving}>
+        {renderReplacement({
+          onCancel: () => {
+            restoring.current = true;
+            reset();
+          },
+          onSaved: () => {
+            restoring.current = true;
+            reset();
+            notify("Saved", "success");
+            void onSaved?.().catch(() => undefined);
+          },
+          onSavingChange: (pending) => {
+            writing.current = pending;
+            setSaving(pending);
+            onSavingChange(pending);
+          },
+        })}
+      </div>
+    );
   return (
     <div aria-busy={saving}>
       <Field
