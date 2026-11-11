@@ -231,6 +231,25 @@ test("Stop in a message's activity ends its local work quietly", async ({
     .locator(`[data-message-id="${event.id}"]`)
     .getByRole("button", { name: /^View agent activity:/ });
   await expect(activity).toHaveAccessibleName(/Local tester/);
+  // A step with no readable label leaves only the dots, centered in the
+  // bubble that leaves room for Stop rather than against its left edge.
+  await page.evaluate(
+    (id) => window.localAgentFixture.step(id, "send"),
+    event.id,
+  );
+  await expect
+    .poll(() =>
+      activity.evaluate((button) => {
+        const bubble = button.getBoundingClientRect();
+        const dots = button
+          .querySelector("[data-state][data-size]")
+          .getBoundingClientRect();
+        return Math.abs(
+          dots.x + dots.width / 2 - (bubble.x + bubble.width / 2),
+        );
+      }),
+    )
+    .toBeLessThanOrEqual(1);
   // A long step stays on one line and ends in an ellipsis.
   await page.evaluate(
     (id) =>
