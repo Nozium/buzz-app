@@ -189,6 +189,42 @@ test("terminal placement moves the retained shell and syncs across windows", asy
         () => window.retainedTerminal === document.querySelector(".xterm"),
       ),
     ).toBe(true);
+    // Retained tabs keep their opening context while the launcher follows threads.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page
+      .getByRole("button", { name: "Terminal settings", exact: true })
+      .click();
+    await settings.getByRole("radio", { name: "Tab", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await expect(settings).toBeHidden();
+    await page
+      .getByRole("button", { name: "Switch thread", exact: true })
+      .click();
+    await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
+    await page.getByRole("button", { name: "Restart", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => window.terminalPanel.spawns()))
+      .toBe(2);
+    await expect(page.locator(".xterm-rows")).toContainText(
+      "FIXTURE_SHELL_READY",
+    );
+    await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+    await page
+      .getByRole("button", { name: "End session", exact: true })
+      .click();
+    const start = page.getByRole("button", {
+      name: "Start session",
+      exact: true,
+    });
+    await expect(start).toBeEnabled();
+    await start.click();
+    await expect
+      .poll(() => page.evaluate(() => window.terminalPanel.spawns()))
+      .toBe(3);
+    await expect(page.locator(".xterm-rows")).toContainText(
+      "FIXTURE_SHELL_READY",
+    );
+    await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
     expect(errors.flatMap((error) => error.unexplained())).toEqual([]);
   } finally {
     await server.close();

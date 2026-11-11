@@ -283,6 +283,7 @@ function PlacementFixture() {
 function PlacementWorkspace({ current }: { current: ChannelSummary }) {
   useKeyboardFocusVisibility();
   const [settings, showSettings] = useState(false);
+  const [threadId, setThreadId] = useState(context.threadId);
   const state = useChannelTabState(session, current.id);
   const workspace = useConversationTabs({
     state,
@@ -290,6 +291,7 @@ function PlacementWorkspace({ current }: { current: ChannelSummary }) {
     session,
     panels,
     current,
+    threadId,
     channels,
     profiles: new Map(),
     scope: context.scope,
@@ -313,6 +315,14 @@ function PlacementWorkspace({ current }: { current: ChannelSummary }) {
     >
       <button type="button" onClick={() => showSettings(true)}>
         Terminal settings
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setThreadId((value) => (value ? undefined : context.threadId))
+        }
+      >
+        Switch thread
       </button>
       <button
         type="button"

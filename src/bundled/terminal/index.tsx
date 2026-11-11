@@ -22,6 +22,8 @@ import {
 
 export const inject = ["panels", "shortcuts", "relay", "settingsCards"];
 const TOGGLE_BINDING = { key: "j", mod: true } as const;
+const focusTarget = (context: ChannelLauncherProps["context"]) =>
+  JSON.stringify([context.scope, context.channelId]);
 export const apply: PluginModule["apply"] = (ctx) => {
   // No unusable launcher or reserved shortcut in a browser-only host.
   if (!nativeBridge.available) return;
@@ -41,6 +43,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         toggle(): void;
         available(): boolean;
         target: string;
+        focus: string;
         pressed: boolean;
       }
     | undefined;
@@ -87,28 +90,31 @@ export const apply: PluginModule["apply"] = (ctx) => {
     revision,
   }: ChannelLauncherProps & { revision: number }) {
     const target = JSON.stringify(context);
+    const focus = focusTarget(context);
     const toggleWithFocus = useCallback(() => {
-      focusRequest = pressed ? undefined : target;
+      focusRequest = pressed ? undefined : focus;
       toggle(target);
-    }, [pressed, target, toggle]);
+    }, [pressed, target, toggle, focus]);
     useLayoutEffect(
       () => () => {
-        if (focusRequest === target) focusRequest = undefined;
+        if (binding?.target === target && focusRequest === focus)
+          focusRequest = undefined;
       },
-      [target],
+      [target, focus],
     );
     useLayoutEffect(() => {
       const current = {
         toggle: toggleWithFocus,
         available,
         target,
+        focus,
         pressed,
       };
       binding = current;
       return () => {
         if (binding === current) binding = undefined;
       };
-    }, [toggleWithFocus, target, available, pressed]);
+    }, [toggleWithFocus, target, focus, available, pressed]);
     useEffect(() => {
       const current = binding;
       // Let the host retire the old opening before opening the new contribution.
@@ -136,11 +142,10 @@ export const apply: PluginModule["apply"] = (ctx) => {
     );
   }
   const requestFocus = (context: ChannelLauncherProps["context"]) => {
-    if (binding?.target === JSON.stringify(context))
-      focusRequest = binding.target;
+    if (binding?.focus === focusTarget(context)) focusRequest = binding.focus;
   };
   const focusRequested = (context: ChannelLauncherProps["context"]) => {
-    if (focusRequest !== JSON.stringify(context)) return false;
+    if (focusRequest !== focusTarget(context)) return false;
     focusRequest = undefined;
     return true;
   };
