@@ -5,6 +5,10 @@ import { parseBuzzLink } from "../navigation/buzz-links";
 import { safeLinkUrl } from "../relay/message-content";
 import type { RelaySession } from "../relay/session";
 import { labelText } from "./label-text";
+import styles from "./SafeMarkdown.module.css";
+
+/** The class a `SafeMarkdown` container takes for its document styles. */
+export const safeMarkdownClass = styles.document;
 
 /** The remark plugins `SafeMarkdown` renders with; guards parse with the same. */
 export const safeMarkdownPlugins = [remarkGfm];

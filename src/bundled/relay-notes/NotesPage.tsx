@@ -10,7 +10,10 @@ import {
   type Ref,
 } from "react";
 import { useAgentChoices } from "../../features/agents/use-choices";
-import { SafeMarkdown } from "../../features/messages/SafeMarkdown";
+import {
+  SafeMarkdown,
+  safeMarkdownClass,
+} from "../../features/messages/SafeMarkdown";
 import { useIdentityNames } from "../../features/identity-names/react";
 import {
   MAX_MARKDOWN_LENGTH,
@@ -987,7 +990,7 @@ function NoteBody({
         Updated <NoteTime note={note} />
         <NoteIdentifier note={note} />
       </p>
-      <div className={styles.markdown}>
+      <div className={safeMarkdownClass}>
         {plain ? (
           <pre>{note.content}</pre>
         ) : (

@@ -1,0 +1,132 @@
+/* A SafeMarkdown document: Canvas and Notes. The base reset strips element
+   defaults, so every element the renderer emits gets its role here. */
+.document {
+  overflow-wrap: anywhere;
+}
+.document > * {
+  margin-block: 0;
+}
+.document > * + * {
+  margin-block-start: var(--space-4);
+}
+.document :where(h1, h2, h3, h4, h5, h6) {
+  color: var(--text-standard);
+  font-weight: var(--type-weight-medium);
+}
+.document > :where(h1, h2, h3, h4, h5, h6) + * {
+  margin-block-start: var(--space-2);
+}
+.document h1 {
+  font-size: var(--text-title);
+  line-height: var(--text-title--line-height);
+  letter-spacing: var(--text-title--letter-spacing);
+}
+.document h2 {
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  letter-spacing: var(--text-heading--letter-spacing);
+}
+.document h3 {
+  font-size: var(--text-body-lg);
+  line-height: var(--text-body-lg--line-height);
+  letter-spacing: var(--text-body-lg--letter-spacing);
+}
+.document :where(h4, h5, h6) {
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+.document :where(h5, h6) {
+  color: var(--text-secondary);
+}
+.document :where(ul, ol) {
+  padding-inline-start: var(--space-6);
+}
+.document ul {
+  list-style: disc;
+}
+.document ul ul {
+  list-style: circle;
+}
+.document ul ul ul {
+  list-style: square;
+}
+.document ol {
+  list-style: decimal;
+}
+.document li + li,
+.document li > :where(p, ul, ol) {
+  margin-block-start: var(--space-1);
+}
+/* A GFM task item shows its checkbox in place of the bullet. */
+.document li:has(> input[type="checkbox"]),
+.document li:has(> p:first-child > input[type="checkbox"]) {
+  list-style: none;
+}
+.document input[type="checkbox"] {
+  width: 1em;
+  height: 1em;
+  margin: 0 var(--space-1h) var(--space-half) 0;
+  vertical-align: middle;
+  accent-color: var(--affordance-prominent);
+}
+.document blockquote {
+  padding-inline-start: var(--space-3);
+  border-inline-start: 3px solid var(--border-prominent);
+  color: var(--text-secondary);
+}
+.document blockquote > * + * {
+  margin-block-start: var(--space-2);
+}
+.document hr {
+  border: 0;
+  border-top: 1px solid var(--border-standard);
+}
+.document code {
+  border-radius: var(--radius-chip);
+  background: var(--affordance-subtle);
+  padding: var(--space-half) var(--space-1h);
+  font-family: var(--font-system-mono);
+  font-size: var(--text-mono-sm);
+  line-height: var(--text-mono-sm--line-height);
+  letter-spacing: var(--text-mono-sm--letter-spacing);
+}
+.document pre {
+  overflow: auto;
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-row);
+  background: var(--surface-panel);
+  padding: var(--space-3);
+  white-space: pre-wrap;
+}
+.document pre code {
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+.document del {
+  text-decoration: line-through;
+}
+/* General inline links: the neutral link role with a persistent underline.
+   A chat chip keeps its own treatment. */
+.document a:not([data-solo-link]) {
+  color: var(--text-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.document table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+}
+.document :where(th, td) {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-standard);
+  text-align: start;
+  vertical-align: top;
+}
+.document th {
+  background: var(--affordance-subtle);
+  font-weight: var(--type-weight-medium);
+}

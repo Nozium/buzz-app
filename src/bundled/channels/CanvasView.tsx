@@ -2,6 +2,7 @@ import { memo, type Ref } from "react";
 import { fromMarkdown, type Options } from "mdast-util-from-markdown";
 import {
   SafeMarkdown,
+  safeMarkdownClass,
   safeMarkdownPlugins,
 } from "../../features/messages/SafeMarkdown";
 import { LIVE_CANVAS_BYTES } from "../../features/channel-templates/model";
@@ -124,7 +125,7 @@ export function CanvasView({
         tabIndex={-1}
         data-tab-focus={active || undefined}
         aria-label="Saved Canvas"
-        className={styles.markdown}
+        className={safeMarkdownClass}
       >
         {!loaded ? null : content ? (
           <CanvasMarkdown content={content} openLink={openLink} />
