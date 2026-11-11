@@ -289,7 +289,6 @@ export function createPluginUpdates(
   let checking = false;
   let lastCheck: number | undefined;
   let lastSources = "";
-  let lastErrors = false;
   let freshnessTimer: ReturnType<typeof setTimeout> | undefined;
   let revision = 0;
   const dismissed = new Set<string>();
@@ -378,7 +377,7 @@ export function createPluginUpdates(
       getSources() !== lastSources
     )
       return "stale";
-    return lastErrors ? "error" : "fresh";
+    return updates.some((update) => update.error) ? "error" : "fresh";
   };
   const makeSnapshot = (): PluginUpdateSnapshot => {
     return freezeSnapshot({
@@ -625,7 +624,6 @@ export function createPluginUpdates(
         : [];
     });
     checking = true;
-    lastErrors = false;
     publish();
     try {
       const repositories = new Map<string, Promise<ImportPreview | null>>();
@@ -712,7 +710,6 @@ export function createPluginUpdates(
         } catch (reason) {
           update.error =
             reason instanceof Error ? reason.message : String(reason);
-          lastErrors = true;
         }
         if (!current(update)) continue;
         checked.set(id, { identity, at: Date.now() });
@@ -752,7 +749,6 @@ export function createPluginUpdates(
       lastCheck = Date.now();
       if (getSources() !== sources) {
         lastCheck = undefined;
-        lastErrors = false;
         retry = true;
         forceNext = true;
       }

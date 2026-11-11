@@ -2405,3 +2405,59 @@ it.each(
     }
   },
 );
+
+it.each(["new", "old"])(
+  "reconciles public checker health after an explicit failure and recovery to %s",
+  async (revision) => {
+    const f = fixture();
+    const updates = createPluginUpdates(f.manager, f.authorize);
+    const checks = sharedPluginUpdateChecks(f.manager.imports);
+    try {
+      await updates.check();
+      expect(updates.capability.getSnapshot().status).toBe("fresh");
+      f.checkGit.mockRejectedValueOnce(new Error("explicit read failed"));
+      await checks.check(f.plugin, f.authorize);
+      expect(updates.capability.getSnapshot()).toMatchObject({
+        status: "error",
+        errors: [
+          { id: f.plugin.manifest.id, message: "Error: explicit read failed" },
+        ],
+      });
+      f.candidate.revision = revision;
+      await checks.check(f.plugin, f.authorize);
+      expect(updates.capability.getSnapshot()).toMatchObject({
+        status: "fresh",
+        errors: [],
+      });
+      expect(updates.snapshot()).toHaveLength(
+        revision === f.plugin.revision ? 0 : 1,
+      );
+    } finally {
+      updates.dispose();
+    }
+  },
+);
+
+it.each(["new", "old"])(
+  "clears aggregate error health after explicit recovery to %s",
+  async (revision) => {
+    const f = fixture();
+    f.checkGit.mockRejectedValueOnce(new Error("background read failed"));
+    const updates = createPluginUpdates(f.manager, f.authorize);
+    try {
+      await updates.check();
+      expect(updates.capability.getSnapshot().status).toBe("error");
+      f.candidate.revision = revision;
+      await sharedPluginUpdateChecks(f.manager.imports).check(
+        f.plugin,
+        f.authorize,
+      );
+      expect(updates.capability.getSnapshot()).toMatchObject({
+        status: "fresh",
+        errors: [],
+      });
+    } finally {
+      updates.dispose();
+    }
+  },
+);
