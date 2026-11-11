@@ -409,7 +409,7 @@ export function createUnread({
     operation: () => Promise<T>,
   ): Promise<T> {
     const ordered = [...new Set(channelIds)].sort();
-    // Cross-channel actions reserve locks in one order to avoid cyclic waits.
+    // Keep multi-channel queue admission deterministic.
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -2988,13 +2988,13 @@ export function createUnread({
             !deleted(event) &&
             channelOf(event) === channelId,
         );
-      const fence = reads.captureLocalUnread([
-        ...selected.map(({ id }) => `msg:${id}`),
-        ...channelIds.map(messageForceKey),
-      ]);
       const messageKeys = selected.map(({ id }) => `msg:${id}`);
       return serializeChannels(channelIds, async () => {
         if (!valid()) throw new Error("Unread channel visit expired");
+        const fence = reads.captureLocalUnread([
+          ...selected.map(({ id }) => `msg:${id}`),
+          ...channelIds.map(messageForceKey),
+        ]);
         const result = await reads.readMessages(
           selected
             .filter(({ event }) => event.pubkey !== viewer)
@@ -3014,16 +3014,26 @@ export function createUnread({
           messageKeys,
           { preserveCapturedSet: true },
         );
-        // The fenced save succeeded; newer same-window marks wait behind these
-        // channel locks, so only this captured overlay can be removed here.
+        // The save succeeded; do not clear overlays from a visit that ended
+        // while storage was committing.
         const changed = new Set<string>();
-        for (const { id, channelId } of selected) {
+        for (const { id, event, channelId } of selected) {
+          if (
+            closed ||
+            generation !== epoch ||
+            !channelValid.get(channelId)?.() ||
+            (visits.get(channelId) ?? 0) !== visit.get(channelId) ||
+            events.get(id) !== event ||
+            deleted(event) ||
+            channelOf(event) !== channelId
+          )
+            continue;
           const forced = forcedMessages.get(channelId);
           forced?.delete(id);
           if (!forced?.size) forcedMessages.delete(channelId);
           changed.add(channelId);
         }
-        publish(changed);
+        if (changed.size) publish(changed);
         return result;
       });
     },

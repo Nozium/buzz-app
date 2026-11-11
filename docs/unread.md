@@ -481,9 +481,11 @@ advance a channel/thread prefix, or include later arrivals. After the saved
 action succeeds, only those IDs' visit-local forced-unread overlays are cleared;
 the shared message-force hint and independent channel, root, and thread marks
 remain. If local read-state retention would need to raise its device-wide floor
-for these marks, the save rejects unchanged rather than reading unselected older
-messages. Older hosts may omit this capability, so callers must check it before
-invoking it.
+for these marks, the save rejects unchanged with `CapturedReadWouldWidenError`
+rather than reading unselected older messages; retry only after another accepted
+read has moved that floor. A newer shared message-force hint can also fence a
+save, so retry the same explicit set after preserving the newer intent. Older
+hosts may omit this capability, so callers must check it before invoking it.
 
 `prepareChannelRead(channelId, rootId?)` captures the channel's existing
 prefix/time cut and owned local-mark keys once. Invoke its returned function to

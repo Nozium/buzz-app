@@ -86,6 +86,12 @@ class ObservationExpired extends Error {
     super("Reading observation expired");
   }
 }
+export class CapturedReadWouldWidenError extends Error {
+  constructor() {
+    super("Exact captured read would widen the retained read set");
+    this.name = "CapturedReadWouldWidenError";
+  }
+}
 const same = (a: unknown, b: unknown): boolean => {
   if (Object.is(a, b)) return true;
   if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
@@ -1478,9 +1484,7 @@ export function createReadState({
               kept.floor > (current.floor ?? 0)
             ) {
               // The local floor reads every older message, beyond the captured set.
-              throw new Error(
-                "Exact captured read would widen the retained read set",
-              );
+              throw new CapturedReadWouldWidenError();
             }
             return {
               ...current,
