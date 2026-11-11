@@ -2187,9 +2187,13 @@ it.each(["candidate", "error"] as const)(
   },
 );
 
-it.each(["same", "revision", "publisher"] as const)(
-  "reconciles a recovered active review only for the original candidate (%s)",
-  async (change) => {
+it.each(
+  (["same", "revision", "publisher"] as const).flatMap((change) =>
+    (["explicit", "background"] as const).map((via) => ({ change, via })),
+  ),
+)(
+  "reconciles a recovered active review only for the original candidate ($change, $via)",
+  async ({ change, via }) => {
     const f = fixture();
     const updates = createPluginUpdates(f.manager, f.authorize);
     try {
@@ -2206,7 +2210,15 @@ it.each(["same", "revision", "publisher"] as const)(
         ...(change === "revision" ? { revision: "newer" } : {}),
         ...(change === "publisher" ? { publisher: "different" } : {}),
       };
-      checks.observe(f.plugin)(candidate.revision, null, candidate);
+      if (via === "explicit")
+        checks.observe(f.plugin)(candidate.revision, null, candidate);
+      else {
+        f.checkGit.mockResolvedValueOnce({
+          ...f.preview,
+          candidates: [candidate],
+        });
+        await updates.check(true);
+      }
       expect(updates.isCurrentToken(token)).toBe(change === "same");
       const release = updates.beginOperation(queue.id, token);
       expect(!!release).toBe(change === "same");

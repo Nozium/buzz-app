@@ -687,23 +687,8 @@ export function createPluginUpdates(
             throw new Error(
               "The saved repository has no plugin at its installed path.",
             );
-          if (candidate.revision !== plugin.revision) {
+          if (candidate.revision !== plugin.revision)
             update.candidate = candidate;
-            const previous = updates.find(
-              (item) =>
-                item.id === id &&
-                item.installedRevision === update.installedRevision &&
-                item.installedPublisher === update.installedPublisher &&
-                item.installedEnabled === update.installedEnabled &&
-                item.updateChoice === update.updateChoice &&
-                updateSourceKey(item.source) === updateSourceKey(source) &&
-                item.candidate?.revision === candidate.revision &&
-                (item.candidate.publisher ?? null) ===
-                  (candidate.publisher ?? null),
-            );
-            update.token =
-              previous?.token ?? (crypto.randomUUID() as PluginUpdateToken);
-          }
         } catch (reason) {
           update.error =
             reason instanceof Error ? reason.message : String(reason);
@@ -715,10 +700,28 @@ export function createPluginUpdates(
           !observe(
             update.candidate?.revision ?? plugin.revision,
             update.error ?? null,
+            update.candidate,
           )
         ) {
           prune();
           continue;
+        }
+        const candidate = update.candidate;
+        if (candidate) {
+          const previous = updates.find(
+            (item) =>
+              item.id === id &&
+              item.installedRevision === update.installedRevision &&
+              item.installedPublisher === update.installedPublisher &&
+              item.installedEnabled === update.installedEnabled &&
+              item.updateChoice === update.updateChoice &&
+              updateSourceKey(item.source) === updateSourceKey(source) &&
+              item.candidate?.revision === candidate.revision &&
+              (item.candidate.publisher ?? null) ===
+                (candidate.publisher ?? null),
+          );
+          update.token =
+            previous?.token ?? (crypto.randomUUID() as PluginUpdateToken);
         }
         publish([
           ...updates.filter((item) => item.id !== id),
