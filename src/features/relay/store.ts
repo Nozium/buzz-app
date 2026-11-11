@@ -1631,8 +1631,7 @@ export function createChannelStore(
         // of channel access. A cancelled read proved and cost nothing.
         for (const [id, read] of pending)
           if (!read.complete && creationReads.get(id) === read) {
-            if (error instanceof Error && error.name === "AbortError")
-              creationReads.delete(id);
+            if (isAbort(error)) creationReads.delete(id);
             else missed(read);
           }
         throw error;
