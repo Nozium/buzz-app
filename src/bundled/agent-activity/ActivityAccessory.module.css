@@ -72,8 +72,10 @@
 .overlayControls > * {
   grid-area: 1 / 1;
 }
+/* Content narrower than the room kept for Stop, like bare dots, sits centered. */
 .overlayContent {
   display: flex;
+  justify-content: safe center;
   min-width: 0;
   width: 100%;
   mask-image: linear-gradient(
