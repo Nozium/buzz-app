@@ -123,8 +123,10 @@ struct State {
     retirements: u64,
     /// Set by an explicit sign-out and kept on disk (`Inner::signed_out`):
     /// the next sign-in asks for credentials instead of finishing on the
-    /// browser's session as the account just signed out. Any installed
-    /// session clears it. Expiry, refusals and close never set it.
+    /// browser's session as the account just signed out. Only a completed
+    /// browser sign-in clears it; a restored session takes the file as it
+    /// is, so a restore checked before another copy's sign-out cannot erase
+    /// that sign-out. Expiry, refusals and close never set it.
     force_login: bool,
 }
 impl State {
@@ -170,6 +172,9 @@ struct Inner {
     /// Each detached logout `revoke` started, so tests can wait for it.
     #[cfg(test)]
     revocations: Mutex<Vec<tauri::async_runtime::JoinHandle<()>>>,
+    /// Each browser step's start URL, so tests can read what it asked for.
+    #[cfg(test)]
+    logins: Mutex<Vec<String>>,
 }
 /// Records durably, before a sign-out or change of account commits, what
 /// else that retirement revokes; see [`FederatedIdentity::on_retire`]. The
@@ -327,6 +332,8 @@ impl FederatedIdentity {
             signed_out,
             #[cfg(test)]
             revocations: Mutex::default(),
+            #[cfg(test)]
+            logins: Mutex::default(),
         }));
         // Every customer server added before, so its grants and session are
         // reachable whether or not its communities are still joined.
@@ -507,11 +514,9 @@ impl FederatedIdentity {
         state.account = Some(email);
         self.signal(change);
     }
-    /// Make `session` current and watch for its expiry. The caller publishes.
-    /// An installed session, signed in here or restored from another copy,
-    /// is the account chosen, so it clears an explicit sign-out's mark.
+    /// Make `session` current and watch for its expiry. The caller publishes
+    /// and settles `State::force_login`.
     fn install_session(&self, state: &mut State, session: Arc<Session>) {
-        self.mark_signed_out(state, false);
         state.snapshot.status = Status::SignedIn;
         state.snapshot.revision = session.record.revision.clone();
         state.snapshot.email = session.record.email.clone();
@@ -920,7 +925,10 @@ impl FederatedIdentity {
         };
         state.restored = true;
         match result {
-            Ok(Some(session)) => self.install_session(&mut state, session),
+            Ok(Some(session)) => {
+                self.install_session(&mut state, session);
+                self.reread_signed_out(&mut state);
+            }
             Ok(None) => state.snapshot.status = Status::SignedOut,
             Err(failure) => {
                 if failure.session_denied {
@@ -1049,6 +1057,12 @@ impl FederatedIdentity {
         let secret = Zeroizing::new(URL_SAFE_NO_PAD.encode(bytes.as_ref()));
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(secret.as_bytes()));
         let login = login_start(config, &challenge, start);
+        #[cfg(test)]
+        self.0
+            .logins
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(login.to_string());
         let callback = app.state::<crate::oauth_callback::OAuthCallbackHost>();
         let attempt = callback
             .begin_federated(
@@ -1236,6 +1250,8 @@ impl FederatedIdentity {
                     self.reset(&mut state);
                     state.callback = callback;
                 }
+                // A completed browser sign-in is the account chosen.
+                self.mark_signed_out(&mut state, false);
                 self.install_session(&mut state, session.clone());
                 self.publish(&state);
                 true
@@ -1307,8 +1323,9 @@ impl FederatedIdentity {
     /// the file follows the order of sign-outs and installs. A tiny local
     /// write, like `Customers::remember` in the `derived` lock. Always written
     /// or removed, since other Buzz copies with this profile share the file.
-    /// A failed write still asks for credentials until this run ends; a failed
-    /// removal asks once more after a restart. Neither changes the session.
+    /// A failed write still asks for credentials until this run ends or
+    /// restores a session; a failed removal asks once more after a restart or
+    /// restore. Neither changes the session.
     fn mark_signed_out(&self, state: &mut State, signed_out: bool) {
         state.force_login = signed_out;
         let Some(path) = &self.0.signed_out else {
@@ -1327,6 +1344,14 @@ impl FederatedIdentity {
         };
         if written.is_err() {
             eprintln!("The sign-in server's sign-out mark could not be saved");
+        }
+    }
+    /// Takes `State::force_login` from the shared file, for a restored
+    /// session: the session may be older than another copy's sign-out, so
+    /// only a browser sign-in, here or in another copy, clears it.
+    fn reread_signed_out(&self, state: &mut State) {
+        if let Some(path) = &self.0.signed_out {
+            state.force_login = path.exists();
         }
     }
     async fn finish_sign_out(

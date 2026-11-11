@@ -1121,10 +1121,11 @@ sign-in sends `prompt=login` whatever the caller asks: it asks the sign-in
 provider to authenticate again instead of finishing on the browser's session as
 the account just signed out. The provider decides what the browser shows, and
 the browser's session there is not ended. The mark is a file beside the server's
-FI records (`<account>.signed-out`), so it survives a restart, and any installed
-session (a completed sign-in or renewal, or one restored from another copy)
-removes it. Expiry, refusals and close never set it, so renewing the same
-account stays one click. Sign out of Buzz leaves an existing mark in place.
+FI records (`<account>.signed-out`), so it survives a restart, and only a
+completed browser sign-in or renewal removes it. A session restored from another
+copy takes the mark as the file has it: that session may have been checked
+before another copy's sign-out, so it never erases the mark. Expiry, refusals
+and close never set it, so renewing the same account stays one click. Sign out of Buzz leaves an existing mark in place.
 
 The browser callback shows that sign-in was received and attempts to close after
 three seconds. After verified session installation, macOS can return focus to

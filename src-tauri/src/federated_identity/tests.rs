@@ -538,24 +538,122 @@ async fn an_explicit_sign_out_asks_for_credentials_until_a_sign_in_completes_eve
     server.await.unwrap();
 }
 
+/// Runs a production sign-in at `server`, a plain-HTTP fixture, so the
+/// browser step is refused before any browser opens, and says whether its
+/// start URL asked for credentials (`prompt=login`).
+async fn sign_in_asks_for_credentials(server: &FederatedIdentity) -> bool {
+    let app = tauri::test::mock_builder()
+        .manage(crate::oauth_callback::OAuthCallbackHost::default())
+        .build(crate::app_context())
+        .unwrap();
+    let snapshot = server
+        .sign_in(app.handle(), LoginStart::default())
+        .await
+        .unwrap();
+    assert_eq!(snapshot.failure, Some("browser-unavailable"));
+    let login = server.0.logins.lock().unwrap().pop().unwrap();
+    assert!(login.starts_with("http://"), "{login}");
+    url::Url::parse(&login)
+        .unwrap()
+        .query_pairs()
+        .any(|pair| pair == ("prompt".into(), "login".into()))
+}
+
 #[tokio::test]
-async fn a_restored_session_clears_a_sign_out_mark() {
+async fn the_production_sign_in_sends_prompt_login_after_a_sign_out_and_a_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let marker = root.path().join("account.signed-out");
+    let store = Arc::new(Memory::default());
+    let owner = marked(store.clone(), UNREACHABLE.into(), &marker);
+    assert!(!sign_in_asks_for_credentials(&owner).await);
+    let session = record();
+    *store.raw.lock().unwrap() = Some(session.raw.clone());
+    {
+        let mut state = owner.state();
+        owner.install_session(&mut state, session);
+    }
+    assert!(owner.sign_out(None).await.status == Status::SignedOut);
+    assert!(sign_in_asks_for_credentials(&owner).await);
+    let restarted = marked(store, UNREACHABLE.into(), &marker);
+    assert!(sign_in_asks_for_credentials(&restarted).await);
+}
+
+#[tokio::test]
+async fn a_restored_session_leaves_the_sign_out_mark_to_a_browser_sign_in() {
     let root = tempfile::tempdir().unwrap();
     let marker = root.path().join("account.signed-out");
     std::fs::write(&marker, b"").unwrap();
     let (base, server) = adapter(vec![
         serde_json::json!({"expires_at":"2099-01-01T00:00:00Z","email":"a@example.com"}),
+        serde_json::json!({"expires_at":"2099-01-01T00:00:00Z","email":"a@example.com"}),
     ])
     .await;
     let store = Arc::new(Memory::default());
-    // Another Buzz copy with this profile signed in since this one signed out.
     *store.raw.lock().unwrap() = Some(record().raw.clone());
-    let owner = marked(store, base, &marker);
-    assert!(asks_for_credentials(&owner));
+    // The mark may be newer than the session: keep it.
+    let owner = marked(store.clone(), base.clone(), &marker);
     assert!(owner.restore().await.status == Status::SignedIn);
-    assert!(!asks_for_credentials(&owner));
-    assert!(!marker.exists());
+    assert!(asks_for_credentials(&owner));
+    assert!(marker.exists());
+    // Another copy's browser sign-in removed the mark and saved its session:
+    // a copy that signed out here adopts that session and stops asking.
+    let other = marked(store.clone(), base, &marker);
+    assert!(other.sign_out(None).await.status == Status::SignedOut);
+    assert!(asks_for_credentials(&other));
+    std::fs::remove_file(&marker).unwrap();
+    *store.raw.lock().unwrap() = Some(record().raw.clone());
+    let app = tauri::test::mock_builder()
+        .manage(crate::oauth_callback::OAuthCallbackHost::default())
+        .build(crate::app_context())
+        .unwrap();
+    let snapshot = other
+        .sign_in(app.handle(), LoginStart::default())
+        .await
+        .unwrap();
+    assert!(snapshot.status == Status::SignedIn);
+    assert!(!asks_for_credentials(&other));
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_restore_checked_before_another_copys_sign_out_keeps_its_mark() {
+    let root = tempfile::tempdir().unwrap();
+    let marker = root.path().join("account.signed-out");
+    let (base, server) = adapter(vec![
+        serde_json::json!({"expires_at":"2099-01-01T00:00:00Z","email":"a@example.com"}),
+    ])
+    .await;
+    let store = Arc::new(Memory::default());
+    let session = record();
+    *store.raw.lock().unwrap() = Some(session.raw.clone());
+    // Copy A is signed in; copy B starts restoring the shared session.
+    let a = marked(store.clone(), UNREACHABLE.into(), &marker);
+    {
+        let mut state = a.state();
+        state.restored = true;
+        a.install_session(&mut state, session);
+    }
+    let b = marked(store.clone(), base, &marker);
+    let (held, reading) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    *store.read_gate.lock().unwrap() = Some((held, released));
+    let worker = b.clone();
+    let restoring = tokio::spawn(async move { worker.restore().await });
+    tokio::task::spawn_blocking(move || reading.recv().unwrap())
+        .await
+        .unwrap();
+    // B has read the session; A signs out before B's check answers.
+    assert!(a.sign_out(None).await.status == Status::SignedOut);
+    assert!(marker.exists());
+    release.send(()).unwrap();
+    assert!(restoring.await.unwrap().status == Status::SignedIn);
+    server.await.unwrap();
+    assert!(marker.exists());
+    assert!(asks_for_credentials(&b));
+    // Both copies quit; the next launch has no session and still asks.
+    drop((a, b));
+    let fresh = marked(store, UNREACHABLE.into(), &marker);
+    assert!(sign_in_asks_for_credentials(&fresh).await);
 }
 
 #[tokio::test]
