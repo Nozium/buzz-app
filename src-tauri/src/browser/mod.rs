@@ -103,14 +103,9 @@ struct BrowserSession {
 }
 
 impl BrowserSession {
-    /// Loads `target` as a user action, which allows the next handoff.
+    /// Loading a page is not a user action by itself: callers acting for one,
+    /// such as a typed address, also reset the approvals.
     fn navigate(&self, target: &str, fallback_to_http: bool) -> Result<(), String> {
-        self.load(target, fallback_to_http)?;
-        self.handoff.approvals.borrow_mut().reset();
-        Ok(())
-    }
-
-    fn load(&self, target: &str, fallback_to_http: bool) -> Result<(), String> {
         let url = self.policy.validate(target)?;
         let http_fallback = fallback_to_http
             .then(|| self.policy.http_fallback(&url))
@@ -130,7 +125,7 @@ impl BrowserSession {
     fn returned(&self) -> Result<(), String> {
         let next = self.handoff.approvals.borrow_mut().take_return();
         match next {
-            Some(next) => self.load(&next.app, false),
+            Some(next) => self.navigate(&next.app, false),
             None => Ok(()),
         }
     }
@@ -363,6 +358,9 @@ impl Handoff {
                     snapshot.error = None;
                     snapshot.notice = Some(HELD_IN_BROWSER.into());
                 } else if approvals.pending.is_none() {
+                    // The approval owns the notice, so no held page sits
+                    // behind it.
+                    approvals.held = None;
                     approvals.pending = Some(next);
                     snapshot.notice = Some(APPROVE_AFTER_RELOAD.into());
                 }
@@ -623,7 +621,10 @@ pub async fn browser_navigate(
 ) -> Result<(), String> {
     on_main_thread(&app, move || {
         with_browser(&session_id, |browser| {
-            browser.navigate(&url, fallback_to_http)
+            browser.navigate(&url, fallback_to_http)?;
+            // A typed address allows the next handoff.
+            browser.handoff.approvals.borrow_mut().reset();
+            Ok(())
         })
     })
     .await
@@ -936,6 +937,18 @@ mod handoff_tests {
         assert!(handoff.approvals.borrow().held.is_some());
         assert!(handoff.approvals.borrow().pending.is_none());
         assert_eq!(handoff.snapshot.borrow().error, None);
+
+        // An approval the page then reaches takes over the notice and drops
+        // the held page, so Open in browser cannot open it in its place.
+        assert!(handoff.intercept(&format!("{GATE}?app=a.apps.builderlab.xyz")));
+        assert!(opened.borrow().is_empty());
+        let approvals = handoff.approvals.borrow();
+        assert!(approvals.held.is_none());
+        assert!(approvals.pending.is_some());
+        assert_eq!(
+            handoff.snapshot.borrow().notice.as_deref(),
+            Some(APPROVE_AFTER_RELOAD)
+        );
     }
 
     #[test]
