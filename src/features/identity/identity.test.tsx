@@ -4882,7 +4882,8 @@ it.each(["launches Buzz", "arrives on the landing"])(
       }
       const heading = await invitedHeading("relay.example.com:8443");
       expect(heading).toBeVisible();
-      expect(heading).toHaveFocus();
+      // Focus follows the page in a passive effect, after the heading renders.
+      await waitFor(() => expect(heading).toHaveFocus());
       expect(screen.getByText(INVITED_COPY)).toBeVisible();
       expect(landingButtons()).toEqual(["Create account", SIGN_IN, "Not now"]);
       // Opening the link sent the lookup and nothing else: no browser, no key.
@@ -5130,15 +5131,20 @@ it("the same invite opened again over its failed lookup looks the community up a
   let next: ReturnType<typeof landingRelay> | undefined;
   try {
     await screen.findByRole("heading", { name: "Finding community" });
+    // The lookup starts in an effect; fail its request once it is waiting.
+    await waitFor(() =>
+      expect(failed.relayCalls).toContainEqual(failed.lookup[0]),
+    );
     await act(async () => failed.info.reject(new Error("Offline")));
     await screen.findByRole("heading", { name: "Couldn’t find community" });
     // The page's own Retry would be lost with the lookup it belongs to.
     screen.getByRole("button", { name: "Retry" }).focus();
     next = landingRelay(design);
     links.arrive(osInvite(design, "second"));
-    expect(
-      await screen.findByRole("heading", { name: "Finding community" }),
-    ).toHaveFocus();
+    const finding = await screen.findByRole("heading", {
+      name: "Finding community",
+    });
+    await waitFor(() => expect(finding).toHaveFocus());
     await act(async () => next?.info.resolve());
     expect(await invitedHeading("design")).toBeVisible();
     expect(next.relayCalls).toEqual(next.lookup);
