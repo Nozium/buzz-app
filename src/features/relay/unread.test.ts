@@ -185,6 +185,29 @@ function setup(
   };
 }
 
+function requireCapturedRead(
+  unread: Pick<UnreadCapability, "markCapturedMessagesRead">,
+  messageIds: readonly string[],
+) {
+  if (!unread.markCapturedMessagesRead)
+    throw new Error("Captured message reads are unavailable");
+  return unread.markCapturedMessagesRead(messageIds);
+}
+
+// Keep the public optional seam structurally compatible with existing hosts.
+const acceptsLegacyUnreadCapability: (
+  host: Omit<UnreadCapability, "markCapturedMessagesRead">,
+) => UnreadCapability = (host) => host;
+void acceptsLegacyUnreadCapability;
+
+it("detects an older host that omits the optional captured-read capability", () => {
+  const olderHost: Pick<UnreadCapability, "markCapturedMessagesRead"> = {};
+
+  expect(() => requireCapturedRead(olderHost, ["captured-message"])).toThrow(
+    "Captured message reads are unavailable",
+  );
+});
+
 it("a read reply that needs no conversation lookup is not reported pending", async () => {
   const h = setup();
   h.grant("room");
@@ -1944,6 +1967,359 @@ it("rejected storage update preserves the entire subtree and permits a clean ret
   expect(h.journal()?.state.frontiers[`msg:${child.id}`]).toBe(12);
   expect(h.journal()?.localUnread["message-force:room"]).toBeUndefined();
 });
+
+it("reads only captured root and reply IDs, leaving other forced rows and later arrivals unread", async () => {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.alice, "room", "root", 11);
+  const selectedReply = message(h.alice, "room", "selected reply", 12, [
+    ["e", root.id, "", "reply"],
+  ]);
+  const descendant = message(h.alice, "room", "unselected descendant", 13, [
+    ["e", selectedReply.id, "", "reply"],
+  ]);
+  const sibling = message(h.alice, "room", "unselected sibling", 14, [
+    ["e", root.id, "", "reply"],
+  ]);
+  h.emit([root, selectedReply, descendant, sibling]);
+  const unread = h.session.unread;
+  await unread.markMessageUnread("room", root.id);
+
+  const held = h.holdSaveStarted();
+  const reading = requireCapturedRead(unread, [root.id, selectedReply.id]);
+  await held.started;
+  const later = message(h.alice, "room", "later arrival", 15, [
+    ["e", root.id, "", "reply"],
+    ["p", h.viewer.pubkey],
+  ]);
+  h.emit([later]);
+  held.release();
+  await reading;
+
+  for (const row of [root, selectedReply])
+    expect(unread.attention("room", row.id)).toMatchObject({
+      forced: false,
+      unread: false,
+    });
+  for (const row of [descendant, sibling])
+    expect(unread.attention("room", row.id)).toMatchObject({
+      forced: true,
+      unread: true,
+    });
+  expect(unread.attention("room", later.id).unread).toBe(true);
+  expect(h.journal()?.state.frontiers).toEqual({
+    [`msg:${root.id}`]: root.created_at,
+    [`msg:${selectedReply.id}`]: selectedReply.created_at,
+  });
+  // The shared sidebar hint has no ownership by this captured ID set.
+  expect(h.journal()?.localUnread["message-force:room"]).toBeGreaterThan(0);
+});
+
+it("clears a captured forced message already behind its saved read frontier", async () => {
+  const h = setup();
+  h.grant("room");
+  const selected = message(h.alice, "room", "selected", 11);
+  const other = message(h.alice, "room", "other", 12);
+  h.emit([selected, other]);
+  const unread = h.session.unread;
+
+  await unread.markThrough(
+    { kind: "message", channelId: "room", messageId: selected.id },
+    selected.id,
+  );
+  await unread.markMessageUnread("room", selected.id);
+  await unread.markMessageUnread("room", other.id);
+
+  await requireCapturedRead(unread, [selected.id]);
+
+  expect(unread.attention("room", selected.id)).toMatchObject({
+    forced: false,
+    unread: false,
+  });
+  expect(unread.attention("room", other.id)).toMatchObject({
+    forced: true,
+    unread: true,
+  });
+  expect(h.journal()?.state.frontiers).toEqual({
+    [`msg:${selected.id}`]: selected.created_at,
+  });
+  expect(h.journal()?.localUnread["message-force:room"]).toBeGreaterThan(0);
+});
+
+it("persists a captured cross-channel set in one save and preserves independent channel and thread marks", async () => {
+  const h = setup();
+  h.grant("room");
+  h.grant("other");
+  const root = message(h.alice, "room", "root", 11);
+  const reply = message(h.alice, "room", "reply", 12, [
+    ["e", root.id, "", "reply"],
+  ]);
+  const other = message(h.alice, "other", "other channel", 13);
+  h.emit([root, reply, other]);
+  const unread = h.session.unread;
+  await unread.markUnreadLocal({ kind: "channel", channelId: "room" });
+  await unread.markUnreadLocal({
+    kind: "thread",
+    channelId: "room",
+    rootId: root.id,
+  });
+  await unread.markMessageUnread("room", root.id);
+  const before = h.journal();
+
+  await requireCapturedRead(unread, [root.id, reply.id, other.id]);
+
+  expect(h.journal()?.revision).toBe((before?.revision ?? 0) + 1);
+  expect(h.journal()?.state.frontiers).toEqual({
+    [`msg:${root.id}`]: root.created_at,
+    [`msg:${reply.id}`]: reply.created_at,
+    [`msg:${other.id}`]: other.created_at,
+  });
+  expect(h.journal()?.localUnread.room).toBeGreaterThan(0);
+  expect(h.journal()?.localUnread[`thread:${root.id}`]).toBeGreaterThan(0);
+  expect(h.journal()?.localUnread["message-force:room"]).toBeGreaterThan(0);
+});
+
+it("preserves a pre-existing shared force hint owned by another window", async () => {
+  const h = setup();
+  h.grant("room");
+  const selected = message(h.alice, "room", "selected", 11);
+  h.emit([selected]);
+  const unread = h.session.unread;
+  await unread.markMessageUnread("room", selected.id);
+  const second = createReadState({
+    viewer: h.viewer.pubkey,
+    reader: { read: async () => [] },
+    host: undefined,
+    storage: h.storage,
+  });
+  await second.ready;
+  try {
+    await second.markLocalUnread("message-force:room", () => true);
+    const sharedHint = h.journal()?.localUnread["message-force:room"];
+
+    await requireCapturedRead(unread, [selected.id]);
+
+    expect(unread.attention("room", selected.id).forced).toBe(false);
+    expect(h.journal()?.localUnread["message-force:room"]).toBe(sharedHint);
+  } finally {
+    second.dispose();
+  }
+});
+
+it("failed exact-read persistence keeps forced IDs and retry persists only the selected ID", async () => {
+  const h = setup();
+  h.grant("room");
+  const selected = message(h.alice, "room", "selected", 11);
+  const other = message(h.alice, "room", "other", 12);
+  h.emit([selected, other]);
+  const unread = h.session.unread;
+  await unread.markMessageUnread("room", selected.id);
+  await unread.markMessageUnread("room", other.id);
+  const before = h.journal();
+
+  h.failNextSave();
+  await expect(requireCapturedRead(unread, [selected.id])).rejects.toThrow(
+    "Storage update rejected",
+  );
+  expect(h.journal()).toBe(before);
+  expect(unread.sync().status).toBe("error");
+  expect(unread.attention("room", selected.id).forced).toBe(true);
+  expect(unread.attention("room", other.id).forced).toBe(true);
+
+  await requireCapturedRead(unread, [selected.id]);
+  expect(unread.sync().status).toBe("local");
+  expect(unread.attention("room", selected.id).forced).toBe(false);
+  expect(unread.attention("room", other.id).forced).toBe(true);
+  expect(h.journal()?.state.frontiers).toEqual({
+    [`msg:${selected.id}`]: selected.created_at,
+  });
+  const reloaded = createReadState({
+    viewer: h.viewer.pubkey,
+    reader: { read: async () => [] },
+    host: undefined,
+    storage: h.storage,
+  });
+  await reloaded.ready;
+  try {
+    expect(reloaded.state().frontiers[`msg:${selected.id}`]).toBe(
+      selected.created_at,
+    );
+    expect(reloaded.state().frontiers[`msg:${other.id}`]).toBeUndefined();
+  } finally {
+    reloaded.dispose();
+  }
+});
+
+it("clears a captured own-message overlay without inventing a read frontier", async () => {
+  const h = setup();
+  h.grant("room");
+  const own = message(h.viewer, "room", "own", 11);
+  h.emit([own]);
+  const unread = h.session.unread;
+  await unread.markMessageUnread("room", own.id);
+
+  await expect(requireCapturedRead(unread, [own.id])).resolves.toMatchObject({
+    durability: "saved",
+    sync: "local-only",
+  });
+
+  expect(unread.attention("room", own.id).forced).toBe(false);
+  expect(h.journal()?.state.frontiers).toEqual({});
+  expect(h.journal()?.localUnread["message-force:room"]).toBeGreaterThan(0);
+});
+
+it("serializes overlapping captured sets in either order and releases locks after failure", async () => {
+  const h = setup();
+  h.grant("room");
+  h.grant("other");
+  const inRoom = message(h.alice, "room", "room message", 11);
+  const inOther = message(h.alice, "other", "other message", 12);
+  h.emit([inRoom, inOther]);
+  const unread = h.session.unread;
+  const held = h.holdSaveStarted();
+  h.failNextSave();
+  const first = requireCapturedRead(unread, [inRoom.id, inOther.id]);
+  const firstResult = expect(first).rejects.toThrow("Storage update rejected");
+  try {
+    await held.started;
+    const second = requireCapturedRead(unread, [inOther.id, inRoom.id]);
+    const secondResult = expect(second).resolves.toMatchObject({
+      durability: "saved",
+    });
+    held.release();
+    await Promise.all([firstResult, secondResult]);
+  } finally {
+    held.release();
+  }
+
+  expect(h.journal()?.state.frontiers).toEqual({
+    [`msg:${inRoom.id}`]: inRoom.created_at,
+    [`msg:${inOther.id}`]: inOther.created_at,
+  });
+});
+
+it("a cross-window manual re-mark of a captured ID fences the queued exact read", async () => {
+  const h = setup();
+  h.grant("room");
+  const row = message(h.alice, "room", "selected", 11);
+  h.emit([row]);
+  const unread = h.session.unread;
+  await unread.markMessageUnread("room", row.id);
+  const second = createReadState({
+    viewer: h.viewer.pubkey,
+    reader: { read: async () => [] },
+    host: undefined,
+    storage: h.storage,
+  });
+  await second.ready;
+  const held = h.holdSaveStarted();
+  const reading = requireCapturedRead(unread, [row.id]);
+  const rejected = expect(reading).rejects.toThrow();
+  try {
+    await held.started;
+    await second.markLocalUnread(`msg:${row.id}`, () => true);
+    const saved = h.journal();
+    held.release();
+    await rejected;
+    expect(h.journal()).toEqual(saved);
+    expect(h.journal()?.state.frontiers[`msg:${row.id}`]).toBeUndefined();
+    expect(h.journal()?.localUnread[`msg:${row.id}`]).toBeGreaterThan(0);
+    expect(unread.attention("room", row.id).forced).toBe(true);
+  } finally {
+    held.release();
+    second.dispose();
+  }
+});
+
+it("a newer queued manual and forced choice on a captured ID wins after its exact read", async () => {
+  const h = setup();
+  h.grant("room");
+  const row = message(h.alice, "room", "selected", 11);
+  h.emit([row]);
+  const unread = h.session.unread;
+  const held = h.holdSaveStarted();
+  const reading = requireCapturedRead(unread, [row.id]);
+  await held.started;
+  const manual = unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: row.id,
+  });
+  const forced = unread.markMessageUnread("room", row.id);
+  held.release();
+  await Promise.all([reading, manual, forced]);
+
+  expect(unread.attention("room", row.id)).toMatchObject({
+    forced: true,
+    unread: true,
+  });
+  expect(h.journal()?.localUnread[`msg:${row.id}`]).toBeGreaterThan(0);
+});
+
+it.each(["missing", "deleted", "inaccessible"] as const)(
+  "rejects a captured set containing a %s ID without partially saving it",
+  async (kind) => {
+    const h = setup();
+    h.grant("room");
+    const row = message(h.alice, "room", "selected", 11);
+    h.emit([row]);
+    const ids = [row.id];
+    if (kind === "missing") ids.push("missing");
+    if (kind === "deleted")
+      h.emit([
+        signed(h.alice, {
+          kind: 5,
+          created_at: 12,
+          content: "",
+          tags: [["e", row.id]],
+        }),
+      ]);
+    if (kind === "inaccessible") {
+      h.grant("other");
+      const inaccessible = message(h.alice, "other", "not accessible", 13);
+      h.emit([inaccessible]);
+      ids.push(inaccessible.id);
+      h.emit([roster(h.relay, "other", [], 20)]);
+    }
+
+    await expect(requireCapturedRead(h.session.unread, ids)).rejects.toThrow();
+    expect(h.journal()?.state.frontiers).toEqual({});
+  },
+);
+
+it.each(["revoke", "leave", "dispose", "delete"] as const)(
+  "revalidates the captured action at save after %s",
+  async (action) => {
+    const h = setup();
+    h.grant("room");
+    const row = message(h.alice, "room", "selected", 11);
+    h.emit([row]);
+    const unread = h.session.unread;
+    await unread.markMessageUnread("room", row.id);
+    const before = h.journal();
+    const held = h.holdSaveStarted();
+    const reading = requireCapturedRead(unread, [row.id]);
+    try {
+      await held.started;
+      if (action === "revoke") h.emit([roster(h.relay, "room", [], 20)]);
+      if (action === "leave") unread.leaveChannel("room");
+      if (action === "dispose") h.dispose();
+      if (action === "delete")
+        h.emit([
+          signed(h.alice, {
+            kind: 5,
+            created_at: 12,
+            content: "",
+            tags: [["e", row.id]],
+          }),
+        ]);
+    } finally {
+      held.release();
+    }
+    await expect(reading).rejects.toThrow();
+    expect(h.journal()).toBe(before);
+  },
+);
 
 it("serializes independent subtree reads and rejects stale unread after leaving", async () => {
   const h = setup();

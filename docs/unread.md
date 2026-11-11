@@ -474,6 +474,15 @@ still require retained evidence of their own.
 
 ## Captured explicit reads
 
+`markCapturedMessagesRead(messageIds)` is an optional explicit operation for a
+caller that already captured verified message IDs. It records only the eligible
+per-message reads in that set: it does not expand to replies or descendants,
+advance a channel/thread prefix, or include later arrivals. After the saved
+action succeeds, only those IDs' visit-local forced-unread overlays are cleared;
+the shared message-force hint and independent channel, root, and thread marks
+remain. Older hosts may omit this capability, so callers must check it before
+invoking it.
+
 `prepareChannelRead(channelId, rootId?)` captures the channel's existing
 prefix/time cut and owned local-mark keys once. Invoke its returned function to
 save or retry that same intent; a retry does not capture later arrivals or a
