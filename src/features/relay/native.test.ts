@@ -2295,3 +2295,20 @@ it("an ordinary 403 reports no community refusal", async () => {
   expect(refusals).toEqual([]);
   stop?.();
 });
+
+it("a refused unsigned GET reports no community refusal", async () => {
+  // Native signs only POST and reports refusals only for signed requests.
+  const transport = await connectNativeTransport(community);
+  const refusals: string[] = [];
+  const stop = transport.observeRefusal?.((refusal) => refusals.push(refusal));
+  const answer = vi.mocked(invoke).getMockImplementation();
+  vi.mocked(invoke).mockImplementation(async (command, args, options) =>
+    command === "relay_http" && (args as Request).method === "GET"
+      ? { status: 401, headers: {}, body: "authentication required\n" }
+      : answer?.(command, args, options),
+  );
+  const response = await nativeRelayRequest(community, "/gated");
+  expect(response.status).toBe(401);
+  expect(refusals).toEqual([]);
+  stop?.();
+});

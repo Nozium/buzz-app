@@ -155,7 +155,12 @@ export async function nativeRelayRequest(
     // once for a cancelled read, otherwise within its timeout.
     bounded.throwIfAborted();
     const response = nativeResponse(result);
-    if (response.status === 401 || response.status === 403)
+    // Only a signed request speaks for the session, as native decides (`send`
+    // in relay.rs signs only POST): a refused GET says nothing about it.
+    if (
+      body !== undefined &&
+      (response.status === 401 || response.status === 403)
+    )
       await announceRefusal(community, response);
     return response;
   } finally {
