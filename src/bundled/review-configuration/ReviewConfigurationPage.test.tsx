@@ -1,0 +1,248 @@
+// @vitest-environment jsdom
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, expect, it, vi } from "vitest";
+import type { EventTemplate } from "nostr-tools";
+import type { RelaySession } from "../../features/relay/session";
+import type { ChannelSummary } from "../../features/relay/contracts";
+import type { EventData } from "../../features/relay/events";
+import { keypair, signed } from "../../features/relay/testing";
+import { ReviewConfigurationCommunity } from "./ReviewConfigurationPage";
+
+afterEach(cleanup);
+const channel = "11111111-1111-4111-8111-111111111111";
+function fixture() {
+  const key = keypair();
+  let events: EventData[] = [];
+  let list = {
+    status: "ready",
+    channels: [
+      { id: channel, name: "Reviews", channelType: "stream" } as ChannelSummary,
+    ],
+  };
+  const listeners = new Set<() => void>();
+  const snapshotRead = vi.fn(async () => events);
+  const publish = vi.fn(async (event: EventData) => {
+    events = [event];
+    return event.id;
+  });
+  const session = {
+    channels: {
+      ensureList() {},
+      list: () => list,
+      subscribeList: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    },
+    snapshotRead,
+    configArtifactWriter: {
+      sign: async (template: EventTemplate) => signed(key, template),
+      publish,
+    },
+  } as unknown as RelaySession;
+  return {
+    session,
+    publish,
+    snapshotRead,
+    metadataCached(cached: boolean) {
+      list = {
+        ...list,
+        channels: [
+          {
+            id: channel,
+            name: "Reviews",
+            channelType: "stream",
+            ...(cached ? { metadataCached: true } : {}),
+          },
+        ],
+      };
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+async function openDraft() {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("combobox", { name: "Review channel" }));
+  await user.click(await screen.findByRole("option", { name: "Reviews" }));
+  await screen.findByText(
+    "No repositories configured in this channel. Register one to save its review lanes.",
+  );
+  await user.click(screen.getByRole("button", { name: "Register repository" }));
+  await user.type(
+    screen.getByRole("textbox", { name: "GitHub repository" }),
+    "example-org/project",
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: "Lane 1 instructions" }),
+    "Check authorization and keyboard navigation.",
+  );
+  return user;
+}
+
+it("registers, reloads and edits a repository through the real form and artifact writer", async () => {
+  const test = fixture();
+  render(<ReviewConfigurationCommunity session={test.session} />);
+  const user = await openDraft();
+  await user.click(screen.getByRole("button", { name: "Save settings" }));
+  await screen.findByText(
+    "Saved example-org/project. Reviews are not enabled yet.",
+  );
+  await user.click(screen.getByRole("button", { name: "Reload" }));
+  await screen.findByRole("button", { name: "Edit example-org/project" });
+  await user.click(
+    screen.getByRole("button", { name: "Edit example-org/project" }),
+  );
+  expect(
+    (
+      screen.getByRole("textbox", {
+        name: "Lane 1 instructions",
+      }) as HTMLTextAreaElement
+    ).value,
+  ).toBe("Check authorization and keyboard navigation.");
+  await user.clear(
+    screen.getByRole("textbox", { name: "Lane 1 instructions" }),
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: "Lane 1 instructions" }),
+    "Check database migrations.",
+  );
+  await user.click(screen.getByRole("button", { name: "Save settings" }));
+  await screen.findByText(
+    "Saved example-org/project. Reviews are not enabled yet.",
+  );
+  expect(test.publish).toHaveBeenCalledTimes(2);
+  expect(test.publish.mock.calls[1]?.[0].tags).toContainEqual([
+    "prev",
+    test.publish.mock.calls[0]?.[0].id,
+  ]);
+});
+
+it("keeps the draft on rejection, prevents duplicate submissions, and recovers", async () => {
+  const test = fixture();
+  let reject: (error: Error) => void = () => {};
+  test.publish.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, rejectSave) => {
+        reject = rejectSave;
+      }),
+  );
+  render(<ReviewConfigurationCommunity session={test.session} />);
+  const user = await openDraft();
+  await user.dblClick(screen.getByRole("button", { name: "Save settings" }));
+  await waitFor(() => expect(test.publish).toHaveBeenCalledTimes(1));
+  expect(
+    (screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  await act(async () => reject(new Error("conflict: artifact head changed")));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Your draft is still here",
+  );
+  expect(
+    (
+      screen.getByRole("textbox", {
+        name: "Lane 1 instructions",
+      }) as HTMLTextAreaElement
+    ).value,
+  ).toContain("keyboard navigation");
+  await user.click(screen.getByRole("button", { name: "Save settings" }));
+  await screen.findByText(
+    "Saved example-org/project. Reviews are not enabled yet.",
+  );
+});
+
+it("preserves the draft while channel authorization reconfirms, but gates Save", async () => {
+  const test = fixture();
+  render(<ReviewConfigurationCommunity session={test.session} />);
+  await openDraft();
+  act(() => test.metadataCached(true));
+  expect(
+    (screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (
+      screen.getByRole("textbox", {
+        name: "Lane 1 instructions",
+      }) as HTMLTextAreaElement
+    ).value,
+  ).toContain("keyboard navigation");
+  act(() => test.metadataCached(false));
+  expect(
+    (screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(false);
+  expect(
+    (
+      screen.getByRole("textbox", {
+        name: "Lane 1 instructions",
+      }) as HTMLTextAreaElement
+    ).value,
+  ).toContain("keyboard navigation");
+  expect(test.publish).not.toHaveBeenCalled();
+});
+
+it("aborts an unfinished write when the page leaves its session", async () => {
+  const test = fixture();
+  const publish = vi.fn(
+    (_event: EventData, signal: AbortSignal) =>
+      new Promise<string>((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(signal.reason)),
+      ),
+  );
+  const session = {
+    ...test.session,
+    configArtifactWriter: { ...test.session.configArtifactWriter, publish },
+  } as RelaySession;
+  const view = render(<ReviewConfigurationCommunity session={session} />);
+  const user = await openDraft();
+  await user.click(screen.getByRole("button", { name: "Save settings" }));
+  await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+  view.unmount();
+  expect(publish.mock.calls[0]?.[1].aborted).toBe(true);
+});
+
+it("counts unreadable records toward the limit when a new repository is saved", async () => {
+  const test = fixture();
+  test.snapshotRead.mockResolvedValueOnce(
+    Array.from({ length: 99 }, () => ({
+      kind: 45010,
+      id: "a".repeat(64),
+      pubkey: "b".repeat(64),
+      sig: "",
+      created_at: 1,
+      tags: [
+        ["h", channel],
+        ["type", "buzz.review.config"],
+      ],
+      content: "{broken",
+    })),
+  );
+  render(<ReviewConfigurationCommunity session={test.session} />);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("combobox", { name: "Review channel" }));
+  await user.click(await screen.findByRole("option", { name: "Reviews" }));
+  await screen.findByText("No readable configurations in this channel.");
+  await user.click(screen.getByRole("button", { name: "Register repository" }));
+  await user.type(
+    screen.getByRole("textbox", { name: "GitHub repository" }),
+    "example-org/project",
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: "Lane 1 instructions" }),
+    "Check tests.",
+  );
+  await user.click(screen.getByRole("button", { name: "Save settings" }));
+  await screen.findByText(
+    "Saved example-org/project. Reviews are not enabled yet.",
+  );
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Register repository",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+});

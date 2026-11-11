@@ -1,0 +1,44 @@
+.review-config-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.review-config-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4) var(--space-panel-inset) var(--space-8);
+}
+.review-config-content {
+  max-width: 48rem;
+  margin-inline: auto;
+}
+.review-config-content,
+.review-config-form,
+.review-config-lane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.review-config-content p {
+  margin: 0;
+}
+.review-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.review-config-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.review-config-table th,
+.review-config-table td {
+  text-align: start;
+  overflow-wrap: anywhere;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-standard);
+}

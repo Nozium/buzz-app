@@ -1153,6 +1153,15 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   local installs. Upgrades preserve their previous state, including Bestie off
   when no choice was saved. Enable or disable them in **Manage plugins**; saved
   choices persist. A deliberate plugin-settings reset uses the current defaults.
+- **Review Configuration** is optional and starts off. Enable it in **Manage
+  plugins** to add its own Messages sidebar entry. Choose a review channel,
+  register a GitHub repository, and save named lanes with instructions. Saved
+  repositories appear in a table; **Edit** changes their settings and **Reload**
+  reads the latest saved versions. Settings live on the community relay and are
+  visible to channel readers; members who can post can edit them. A conflicting
+  edit preserves your draft: copy your changes before cancelling and reloading.
+  This first version saves configuration only. It does not assign reviewers,
+  submit PRs, or send the planned 15-minute reminders.
 - A plugin's details in Manage plugins link to the Settings sections that hold
   its settings: sections it adds, such as GitHub comment authors, and Decisions
   API for a decision provider, such as TypeSafe. Only sections the Settings
