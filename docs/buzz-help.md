@@ -1142,12 +1142,16 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   whether supported GitHub links and the linked-PR shortcut open in a side
   panel or your browser. It starts on and is saved on this device across all
   communities. Turning it off keeps pull request indicators and agent tools enabled.
-- A Solo can link one pull request using its chat menu or an agent’s
-  `github_link_pr` tool. An agent can also announce its newly created PR with
-  `send`’s `pull_request` URL and exact branch. On the owner’s desktop, GitHub
-  verifies authorship and branch before linking it; plain links do not link it.
-  An existing link or manual unlink is never replaced automatically.
-  Linked Solos show lifecycle, checks, review, unresolved review threads and
+- The optional **GitHub** plugin can show a personal pull request on Team, DM
+  and Solo rows, including read-only channels. Open a PR from that conversation
+  and choose **Show for me**, or use `github_link_pr`. This changes only your
+  sidebar on this device, not the channel or its members. **Hide for me** blocks
+  automatic reassociation. An agent can call `github_announce_pr` after creating
+  the conversation’s own PR; GitHub verifies authorship and its exact head
+  branch. It does not publish a channel message or adopt ordinary PR links.
+  Existing personal choices and saved Solo links/unlinks take precedence.
+  Existing shared Solo links and their guarded shared actions remain supported.
+  Linked rows show lifecycle, checks, review, unresolved review threads and
   GitHub merge readiness. Hover or focus the status icons for details. Failed,
   stale or unavailable reads cannot show ready. GitHub readiness does not
   replace your workflow’s approvals or grant permission to merge.

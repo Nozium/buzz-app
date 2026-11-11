@@ -15,16 +15,34 @@ Preview GitHub repositories, pull requests, issues, and commits without leaving 
 3. Switch a pull request from **Summary** to **Changes** to read its diff.
 4. Choose **Open on GitHub** to see the full page.
 
-## Solo pull requests
+5. To show a PR beside any conversation (including a read-only channel), open
+   its PR panel there and choose **Show for me**. **Hide for me** removes it.
+   This is personal to you on this device; existing shared Solo links remain.
 
-When an agent announces this chat’s own PR with `send`, it can include
-`pull_request: { url, branch }`. This signed declaration, not links in message
-text, lets GitHub automatically link an owned Solo. The plugin verifies that the
-signed-in GitHub account authored the PR and that its head branch matches.
-References, quotes and code never link a PR. Conflicting declarations in one
-connection require an explicit manual link.
-Existing links and manual unlink records always take precedence, including after
-reconnect. Use `github_link_pr` or the PR panel to explicitly replace a link.
+---
+
+## Conversation pull requests
+
+The optional GitHub plugin can show a personal PR association on Team, DM and
+Solo rows. Use **Show for me** in a PR panel opened from the conversation, or
+`github_link_pr`. This device-local overlay is scoped to the signed-in person,
+community and conversation. It works in read-only channels without sending a
+message, joining the channel or changing shared metadata. **Hide for me** leaves
+a manual-unlink record; a later automatic announcement cannot restore it.
+
+After creating this conversation's own PR, an agent can call
+`github_announce_pr` with its URL and exact head branch. The plugin verifies
+GitHub authorship and branch before associating it automatically. The tool does
+not post a message; announce the result separately if appropriate. Existing
+personal choices and saved Solo links/unlinks win. Another PR requires an
+explicit manual replacement. Incidental links, quoted messages and shell output
+are never scanned or adopted.
+
+Existing shared Solo links remain a fallback. Their panel actions and
+`github_link_pr` with `shared: true` retain the original creator/writable-Solo
+boundary. Personal overlays do not widen shared-write authority, synchronize to
+other devices, or change what other channel members see. Saving a personal link
+requires local storage and the browser's cross-window storage locks.
 
 The sidebar keeps the PR lifecycle icon and adds separate checks, review,
 review-thread and readiness indicators. Conflicts get their own signal. Unknown,

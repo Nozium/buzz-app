@@ -197,7 +197,7 @@ it("shows every shown chat's linked pull request from one shared read", async ()
   await vi.advanceTimersByTimeAsync(PULL_REFRESH_MS);
   expect(gh).toHaveBeenCalledTimes(2);
   expect(pulls.get(chat)).toBe(view);
-  expect(changed).toHaveBeenCalledTimes(told);
+  expect(changed).toHaveBeenCalledTimes(told + 2);
   for (const unwatch of stop) unwatch();
   await vi.advanceTimersByTimeAsync(PULL_REFRESH_MS * 3);
   expect(gh).toHaveBeenCalledTimes(2);
@@ -337,5 +337,31 @@ it("expires readiness without a read and rechecks it immediately on visibility r
   expect(pulls.get(chat)?.stale).toBe(true);
   expect(soloSignals(pulls.get(chat) ?? approved).at(-1)?.tone).toBe("unknown");
   stop();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("notifies both consumers even if one renders stale before the expiry callback", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const approved = approvedPull();
+  const readAt = Date.now();
+  const states = {
+    watch: () => () => {},
+    get: () => approved.state,
+    readAt: () => ({ readAt }),
+  } as unknown as PullStates;
+  const pulls = createSoloPulls(session().session, states);
+  pulls.linked(chat, approved.url);
+  const one = vi.fn(),
+    two = vi.fn();
+  const stopOne = pulls.watch(chat, one),
+    stopTwo = pulls.watch(chat, two);
+  // Advance Date without running the delayed timer, as in a throttled window.
+  vi.setSystemTime(readAt + 2 * PULL_REFRESH_MS + 1);
+  expect(pulls.get(chat)?.stale).toBe(true);
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(one).toHaveBeenCalledOnce();
+  expect(two).toHaveBeenCalledOnce();
+  stopOne();
+  stopTwo();
   expect(vi.getTimerCount()).toBe(0);
 });

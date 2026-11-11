@@ -189,14 +189,6 @@ export const TOOLS: readonly Tool[] = [
       mentions: strs,
       audience,
       request,
-      pull_request: {
-        type: "object",
-        description:
-          "Declare this Solo’s own newly created pull request, not a reference. Use on a top-level Solo send. The owner’s desktop can auto-link it after GitHub verifies authorship and branch; existing links and manual unlinks take precedence.",
-        properties: { url: str, branch: str },
-        required: ["url", "branch"],
-        additionalProperties: false,
-      },
       final,
     },
     ["audience"],
@@ -615,11 +607,7 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
       throw new Error(
         "This chat stays at the top level: send again without reply.",
       );
-    const audienceTags = [
-      ...audienceOf(args),
-      ...requestOf(args),
-      ...pullRequestOf(args),
-    ];
+    const audienceTags = [...audienceOf(args), ...requestOf(args)];
     const thread = reply ? await tools.threadTags(reply) : [];
     return post(tools, channel, args, thread, audienceTags);
   },
@@ -1602,27 +1590,6 @@ function requestOf(args: Args): string[][] {
   const id = text(args.request)?.toLowerCase();
   if (!id || !HEX.test(id)) throw new Error(`Not an event id: ${args.request}`);
   return [["buzz:request", id]];
-}
-
-/** An explicit work announcement, separate from incidental links in prose. */
-function pullRequestOf(args: Args): string[][] {
-  if (args.pull_request === undefined) return [];
-  const value = args.pull_request as { url?: unknown; branch?: unknown } | null;
-  if (
-    !value ||
-    typeof value.url !== "string" ||
-    typeof value.branch !== "string" ||
-    !/^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/pull\/[1-9][0-9]*$/i.test(
-      value.url,
-    ) ||
-    !value.branch.trim() ||
-    value.branch.length > 255 ||
-    /[\s\p{Cc}]/u.test(value.branch)
-  )
-    throw new Error(
-      "pull_request needs a GitHub pull request URL and its exact head branch",
-    );
-  return [["buzz:pull-request", value.url, value.branch]];
 }
 
 /** The tags for a message's required audience. */

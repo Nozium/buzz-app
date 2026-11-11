@@ -12,7 +12,11 @@ export function soloSignals(pull: SoloPull): readonly Signal[] {
   if (state?.state === "merged" || state?.state === "closed") return [];
   const trusted = !pull.failed && !pull.stale && state?.details?.signedIn;
   const checklist = trusted ? state.details?.checklist : undefined;
-  const checks = trusted ? state.checks : undefined;
+  const checks = trusted
+    ? state.checks === "success" && state.settled !== true
+      ? "pending"
+      : state.checks
+    : undefined;
   const review = checklist?.review;
   const reviewTone =
     review?.decision === "CHANGES_REQUESTED"

@@ -186,3 +186,16 @@ it("does not show ready when conflict evidence contradicts the checklist", () =>
     )?.tone,
   ).not.toBe("success");
 });
+
+it("does not paint passing-but-incomplete checks green", () => {
+  const pull = approvedPull();
+  expect(
+    soloSignals({ ...pull, state: { ...pull.state, settled: false } }).find(
+      (signal) => signal.kind === "checks",
+    ),
+  ).toMatchObject({ tone: "pending", label: "Checks running" });
+  expect(
+    soloSignals({ ...pull, state: { ...pull.state, settled: false } }).at(-1)
+      ?.tone,
+  ).toBe("unknown");
+});
