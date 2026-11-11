@@ -333,6 +333,9 @@ async function relayAuthority(fetch, relay) {
       nip11.supported_extensions.includes("nip-cl"),
     // NIP-AR sync: REQ with `"artifact": "current"` keeps a set current.
     artifactSync: nip11.artifacts?.sync?.version === 1,
+    artifactSupport:
+      Array.isArray(nip11.supported_extensions) &&
+      nip11.supported_extensions.includes("nip-ar"),
     // Bridge search accepts `search_sort: "newest"`.
     searchSort:
       Array.isArray(nip11.supported_extensions) &&
@@ -845,6 +848,7 @@ const json = (res, code, body) => {
 /** @returns {import('vite').Plugin} */
 export function relayBrokerPlugin({
   authorizedViewer,
+  browserOrigin,
   relayUrl,
   communityAliases,
   identity = () => loadIdentity(authorizedViewer),
@@ -857,11 +861,38 @@ export function relayBrokerPlugin({
   // Tests that hold EOSE on purpose lengthen this real-time deadline.
   liveSetupTimeoutMs,
 } = {}) {
+  const publicOrigin =
+    browserOrigin === undefined
+      ? undefined
+      : typeof browserOrigin === "string"
+        ? URL.parse(browserOrigin)
+        : null;
+  if (
+    browserOrigin !== undefined &&
+    (publicOrigin?.protocol !== "https:" ||
+      publicOrigin.username ||
+      publicOrigin.password ||
+      publicOrigin.pathname !== "/" ||
+      publicOrigin.search ||
+      publicOrigin.hash)
+  )
+    throw new Error(
+      "browserOrigin must be an HTTPS origin without credentials, path, query, or fragment.",
+    );
   const aliases = parseCommunityAliases(communityAliases);
   const defaultRelay = relayUrl?.trim() ? relayOrigin(relayUrl) : undefined;
   return {
     name: "buzz-relay-broker",
     configResolved(config) {
+      if (
+        publicOrigin &&
+        (config.command !== "serve" ||
+          config.mode !== "development" ||
+          config.isProduction)
+      )
+        throw new Error(
+          "browserOrigin requires the Vite development server in development mode.",
+        );
       // Request headers express browser origin intent, not remote-client
       // authentication. Check the effective listener, including CLI overrides,
       // before configureServer loads the signing identity.
@@ -967,7 +998,7 @@ export function relayBrokerPlugin({
       let presenceFlight = false;
       let sidebarUploads = 0;
       let attachmentUploads = 0;
-      let libraryRead;
+      const libraryReads = new Map();
       const sidebarMutations = new Map();
       const streams = new Map();
       const admissions = createHostAdmission();
@@ -1007,7 +1038,8 @@ export function relayBrokerPlugin({
           else if (res.statusCode >= 400) log.warn(line);
           else log.debug(line);
         });
-        const origin = `http://${req.headers.host ?? ""}`;
+        const origin =
+          publicOrigin?.origin ?? `http://${req.headers.host ?? ""}`;
         // Same-origin browser access only; trusted plugins/local processes are not sandboxed.
         if (!/^(localhost|127\.0\.0\.1):\d+$/.test(req.headers.host ?? ""))
           return json(res, 403, { error: "Host rejected" });
@@ -1045,6 +1077,14 @@ export function relayBrokerPlugin({
                 send(builderlab.snapshot());
                 return;
               }
+              if (action === "capabilities" && req.method === "GET")
+                return json(
+                  res,
+                  200,
+                  await builderlab.capabilities(
+                    url.searchParams.get("revision"),
+                  ),
+                );
               if (action === "auth" && req.method === "GET")
                 return json(res, 200, { auth: await builderlab.auth() });
               if (req.method !== "POST")
@@ -1592,13 +1632,20 @@ export function relayBrokerPlugin({
 
           if (route === "/api/relay/agent-library" && req.method === "GET") {
             try {
-              // Share concurrent reads, never retain the local snapshot after completion.
-              libraryRead ??= Promise.resolve()
-                .then(() => agentLibrary())
-                .finally(() => {
-                  libraryRead = undefined;
-                });
-              return json(res, 200, await libraryRead);
+              // Share only same-community reads; never retain a completed snapshot.
+              if (!libraryReads.has(relay))
+                libraryReads.set(
+                  relay,
+                  Promise.resolve()
+                    .then(() =>
+                      agentLibrary(undefined, {
+                        community: relay,
+                        owner: viewer,
+                      }),
+                    )
+                    .finally(() => libraryReads.delete(relay)),
+                );
+              return json(res, 200, await libraryReads.get(relay));
             } catch {
               return json(res, 503, {
                 error:
@@ -1629,7 +1676,7 @@ export function relayBrokerPlugin({
                 30178,
                 40100,
                 1984,
-                45010,
+                ...((await getAuthority(relay)).artifactSupport ? [45010] : []),
                 ...WORKFLOW_KINDS,
                 ...((await getAuthority(relay)).channelCreation ? [9007] : []),
               ],
