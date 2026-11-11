@@ -48,6 +48,7 @@ import {
 import type { ClaudeModel, Settled, Spawn, ToolServer } from "./claude";
 import { appClient, readFile } from "../../buzz-mcp/app-client";
 import {
+  keepingLastCore,
   MemoryReads,
   READ_TIMEOUT_MS,
   recentNotesSection,
@@ -220,12 +221,15 @@ export class ClaudeRuntime {
     () => JSON.stringify([addedKey(this.added()), this.credentials]),
   );
 
+  /** Its last read `core` memory stands in for a failed read. */
+  private readonly core: Agents["core"];
+
   constructor(
     private readonly host: Pick<Host, "spawn">,
     /** What each agent's turns read of its community, while it can be read. */
     private readonly reads: (key: AgentKey) => AgentReads | undefined,
     /** The agent's `core` memory as the host keeps it (`Agents.core`). */
-    private readonly core: Agents["core"],
+    core: Agents["core"],
     private readonly storage: AgentStore = localStore(),
     private readonly resolveConfig: (
       raw: unknown,
@@ -247,7 +251,9 @@ export class ClaudeRuntime {
     private readonly bound: (agent: AgentKey) => boolean = () => false,
     private readonly target?: AgentExecution,
     private readonly targetKey?: string,
-  ) {}
+  ) {
+    this.core = keepingLastCore(core);
+  }
 
   /** A failed turn's error as its report says it, such as where to fix
    * Claude's credentials. */

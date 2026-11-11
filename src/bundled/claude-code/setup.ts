@@ -31,8 +31,9 @@ export type Request = (input: HostRequest) => Promise<HostResponse>;
 
 /** Where Anthropic publishes each release with its checksums. */
 const RELEASES = "https://downloads.claude.ai/claude-code-releases";
-/** Model discovery disables customizations with --safe-mode (2.1.169+). */
-export const MIN_VERSION = "2.1.169";
+/** Sessions pass --system-prompt-snapshot (2.1.267+); model discovery also
+ * needs --safe-mode (2.1.169+). */
+export const MIN_VERSION = "2.1.267";
 /** `uname -sm` to the release's platform name. */
 const PLATFORMS: Readonly<Record<string, string>> = {
   "Darwin arm64": "darwin-arm64",

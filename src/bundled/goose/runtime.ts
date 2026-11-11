@@ -9,6 +9,7 @@
 // fails.
 import type { Context } from "../../buzz-mcp/client";
 import {
+  keepingLastCore,
   MemoryReads,
   READ_TIMEOUT_MS,
 } from "../../features/agent-harness/core-memory";
@@ -161,12 +162,15 @@ export class GooseRuntime {
    * goose's provider key. */
   explain: (error: string) => string = (error) => error;
 
+  /** Its last read `core` memory stands in for a failed read. */
+  private readonly core: Agents["core"];
+
   constructor(
     private readonly host: Host,
     /** The owner's connection to each agent's own community. */
     private readonly relay: (key: AgentKey) => RelayData | undefined,
     /** The agent's `core` memory as the host keeps it (`Agents.core`). */
-    private readonly core: Agents["core"],
+    core: Agents["core"],
     private readonly storage: Storage = globalThis.localStorage,
     /** The tools plugins add to every session now. */
     private readonly added: () => readonly AddedTool[] = () => [],
@@ -175,7 +179,9 @@ export class GooseRuntime {
       "",
     /** Agent storage, where what each session started with is kept. */
     private readonly agentStore: AgentStore = localStore(),
-  ) {}
+  ) {
+    this.core = keepingLastCore(core);
+  }
 
   /** What each of the agent's sessions started with. */
   prompts(agent: AgentKey) {
