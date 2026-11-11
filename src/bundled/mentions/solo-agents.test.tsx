@@ -541,6 +541,60 @@ it("picking an addressed row while several agents are addressed toggles it", asy
   test.library.dispose();
 });
 
+it.each([1, 2])(
+  "typed exact-name Enter chooses Al with %i agents addressed",
+  async (count) => {
+    const test = setup(false),
+      user = userEvent.setup();
+    const alexandra = { pubkey: "c".repeat(64), name: "Alexandra" },
+      bob = { pubkey: "d".repeat(64), name: "Bob" },
+      al = { pubkey: "e".repeat(64), name: "Al" };
+    const identities = [alexandra, bob, al];
+    const library = createAgentLibrary(async () => ({
+      definitions: [],
+      identities,
+    }));
+    // Load all three choices before opening: this tests ranking, not arrival order.
+    await library.queries.refresh();
+    const session = {
+      ...test.session,
+      agentLibrary: library.queries,
+      agentChoices: createAgentChoices({
+        scope: "exact-name",
+        library: library.queries,
+        signal: new AbortController().signal,
+      }),
+    };
+    const { view, toggle } = renderAudiencePicker(
+      { ...test, session },
+      [alexandra, bob].slice(0, count),
+    );
+    try {
+      await user.click(screen.getByRole("button", { name: /Change agents/ }));
+      await screen.findByRole("button", {
+        name: rowName("Al", "Adds to chat when you send"),
+      });
+      const search = screen.getByRole("searchbox");
+      await user.type(search, "Al");
+      // Assert the action first: wrong ordering used to remove Alexandra,
+      // or hit the composer's last-agent guard when she was addressed alone.
+      await user.keyboard("{Enter}");
+      expect(toggle).toHaveBeenCalledExactlyOnceWith(al);
+      expect(
+        [...document.querySelectorAll("[data-mention-choice]")].map((row) =>
+          row.getAttribute("data-mention-choice"),
+        ),
+      ).toEqual([al.pubkey, alexandra.pubkey]);
+      expect(search).toHaveFocus();
+      expect(search).toBeVisible();
+    } finally {
+      view.unmount();
+      library.dispose();
+      test.library.dispose();
+    }
+  },
+);
+
 it("installs addressed exact keys before the cap and keeps toggle order until reopening", async () => {
   const test = setup(false),
     user = userEvent.setup();

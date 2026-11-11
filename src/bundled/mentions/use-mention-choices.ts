@@ -451,9 +451,9 @@ export function useMentionChoices(
       (key) => session.presence?.status(key) ?? "unknown",
       MENTION_ROWS,
     );
-  // Partition before the cap, also when invited agents arrive after members.
+  // Browse addressed agents before the cap; typed searches keep match quality first.
   const rank = (choices: readonly MentionChoice[]) =>
-    addressed?.size
+    addressed?.size && !query.trim()
       ? [
           ...normalRank(
             choices.filter((c) => addressed.has(c.recipient.pubkey)),
