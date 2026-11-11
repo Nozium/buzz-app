@@ -92,6 +92,12 @@ export class CapturedReadWouldWidenError extends Error {
     this.name = "CapturedReadWouldWidenError";
   }
 }
+export class CapturedReadNotRetainedError extends Error {
+  constructor() {
+    super("Exact captured read could not retain every selected message");
+    this.name = "CapturedReadNotRetainedError";
+  }
+}
 const same = (a: unknown, b: unknown): boolean => {
   if (Object.is(a, b)) return true;
   if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
@@ -1485,6 +1491,36 @@ export function createReadState({
             ) {
               // The local floor reads every older message, beyond the captured set.
               throw new CapturedReadWouldWidenError();
+            }
+            if (options.preserveCapturedSet) {
+              const retainedFrontiers = {
+                ...kept.reserve,
+                ...kept.state.frontiers,
+              };
+              const retainedState = {
+                frontiers: retainedFrontiers,
+                overrides: kept.state.overrides,
+              };
+              const home = homeLookup({ ...current.homes, ...kept.homes });
+              const covered = coveredWith(home);
+              if (
+                messages.some(({ key, timestamp, channelId, rootId }) => {
+                  if (
+                    timestamp <= kept.floor ||
+                    (effectiveFrontier(retainedState, key, channelId, rootId) ??
+                      -1) >= timestamp
+                  )
+                    return false;
+                  const cover = covered?.(key, (other) =>
+                    other === key ? timestamp : retainedFrontiers[other],
+                  );
+                  return (
+                    cover === undefined ||
+                    (retainedFrontiers[cover] ?? -1) < timestamp
+                  );
+                })
+              )
+                throw new CapturedReadNotRetainedError();
             }
             return {
               ...current,

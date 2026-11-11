@@ -618,10 +618,14 @@ mark: a reply finds its channel from its own event, but finds its thread only wh
 root is loaded. Older desktop and mobile clients ignore `activity:`, so they show the
 ordinary top-level messages it covers as unread. This is accepted; it never makes a
 read in those clients unread here.
-Marks without retained evidence are kept, and nothing is dropped while any override
-exists. Reading an already covered message saves nothing. Only frontier-only hints can
-be pruned; older messages may look unread again. No synthetic channel prefix is
-introduced to fit.
+Marks without retained evidence are kept while journal capacity permits. Overrides
+protect inherited channel/thread frontiers; message and row hints may still be
+evicted under pressure. Reading an already covered message saves nothing. Only
+frontier-only hints can be pruned; older messages may look unread again. No synthetic
+channel prefix is introduced to fit. Exact captured-message reads reject the whole
+save if any selected message would be absent from retained journal/reserve state and
+above the existing local floor; their caller leaves the selected unread overlays
+unchanged on rejection.
 The automatic activity keys share these bounded-hint limits. Older clients can
 preserve/republish them but do not interpret their catch-up meaning; mixed-version
 sidebar behavior is not identical. No storage migration is required.
