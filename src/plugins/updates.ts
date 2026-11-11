@@ -439,6 +439,15 @@ export function createPluginUpdates(
   }
   const prune = () => {
     const next = updates.flatMap((update): PluginUpdate[] => {
+      const plugin = installed(update.id);
+      if (plugin && plugin.enabled !== update.installedEnabled)
+        update = {
+          ...update,
+          installedEnabled: plugin.enabled,
+          ...(update.token && {
+            token: crypto.randomUUID() as PluginUpdateToken,
+          }),
+        };
       if (!current(update)) return [];
       const result = pluginUpdateCheck(
         observedChecks?.snapshot() ?? {},
@@ -460,9 +469,20 @@ export function createPluginUpdates(
           (result.candidate.publisher ?? null) !==
             (update.candidate?.publisher ?? null))
       ) {
+        const recovery =
+          update.error &&
+          activeReview &&
+          activeReview.update.id === update.id &&
+          current(activeReview.update) &&
+          activeReview.update.candidate?.revision ===
+            result.candidate.revision &&
+          (activeReview.update.candidate.publisher ?? null) ===
+            (result.candidate.publisher ?? null);
         const discovered = {
           ...update,
-          token: crypto.randomUUID() as PluginUpdateToken,
+          token:
+            (recovery ? activeReview?.token : undefined) ??
+            (crypto.randomUUID() as PluginUpdateToken),
           candidate: result.candidate,
         };
         delete discovered.error;

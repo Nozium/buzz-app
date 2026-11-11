@@ -956,6 +956,13 @@ it("keeps a queued update retryable after its fresh preview cannot be loaded", a
   expect(within(review).getByRole("button", { name: "Update" })).toBeEnabled();
   expect(capability.getQueue(accepted.id)?.items[0]?.status).toBe("reviewing");
   expect(f.installImport).not.toHaveBeenCalled();
+  fireEvent.click(within(review).getByRole("button", { name: "Update" }));
+  await waitFor(() => expect(f.installImport).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(capability.getQueue(accepted.id)?.items[0]?.status).toBe(
+      "installed",
+    ),
+  );
 });
 
 it("ends a queued review when the host invalidates its action before confirmation", async () => {

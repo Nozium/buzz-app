@@ -1672,7 +1672,12 @@ it.each(["revision", "publisher", "enabled", "source", "choice"] as const)(
       field === "choice" ? "disabled" : "stale",
     );
     expect(updates.capability.queueUpdates([token])).toBeUndefined();
-    expect(updates.capability.getSnapshot().candidates).toEqual([]);
+    if (field === "enabled") {
+      expect(updates.capability.getSnapshot().candidates).toHaveLength(1);
+      expect(updates.capability.getSnapshot().candidates[0]?.token).not.toBe(
+        token,
+      );
+    } else expect(updates.capability.getSnapshot().candidates).toEqual([]);
     expect(f.imports.install).not.toHaveBeenCalled();
     updates.dispose();
   },
@@ -2108,7 +2113,6 @@ it.each(["revision", "publisher", "error"] as const)(
   },
 );
 
-
 it("preserves per-source Git deadlines after another plugin arrives", async () => {
   vi.useFakeTimers();
   const f = fixture();
@@ -2149,3 +2153,67 @@ it("preserves per-source Git deadlines after another plugin arrives", async () =
     updates.dispose();
   }
 });
+
+it.each(["candidate", "error"] as const)(
+  "retains the shared %s after Disable without another source read",
+  async (kind) => {
+    const f = fixture();
+    if (kind === "error")
+      f.checkGit.mockRejectedValueOnce(new Error("offline"));
+    const updates = createPluginUpdates(f.manager, f.authorize);
+    try {
+      await updates.check();
+      const token = updates.capability.getSnapshot().candidates[0]?.token;
+      f.plugin.enabled = false;
+      f.set(f.get());
+      await updates.check();
+      expect(updates.snapshot()).toHaveLength(1);
+      expect(updates.snapshot()[0]?.installedEnabled).toBe(false);
+      if (kind === "candidate") {
+        const next = updates.capability.getSnapshot().candidates[0]?.token;
+        expect(next).toBeDefined();
+        expect(next).not.toBe(token);
+        expect(
+          updates.capability.queueUpdates(next ? [next] : []),
+        ).toBeDefined();
+        expect(
+          updates.capability.queueUpdates(token ? [token] : []),
+        ).toBeUndefined();
+      } else expect(updates.snapshot()[0]?.error).toContain("offline");
+      expect(f.checkGit).toHaveBeenCalledOnce();
+    } finally {
+      updates.dispose();
+    }
+  },
+);
+
+it.each(["same", "revision", "publisher"] as const)(
+  "reconciles a recovered active review only for the original candidate (%s)",
+  async (change) => {
+    const f = fixture();
+    const updates = createPluginUpdates(f.manager, f.authorize);
+    try {
+      const token = (await updates.capability.refresh()).candidates[0]?.token;
+      if (!token) throw new Error("Expected candidate");
+      const queue = updates.capability.queueUpdates([token]);
+      if (!queue || !startReview(updates))
+        throw new Error("Expected active review");
+      const checks = sharedPluginUpdateChecks(f.manager.imports);
+      checks.observe(f.plugin)(undefined, "Temporary acquisition failure");
+      expect(updates.isCurrentToken(token)).toBe(false);
+      const candidate = {
+        ...f.candidate,
+        ...(change === "revision" ? { revision: "newer" } : {}),
+        ...(change === "publisher" ? { publisher: "different" } : {}),
+      };
+      checks.observe(f.plugin)(candidate.revision, null, candidate);
+      expect(updates.isCurrentToken(token)).toBe(change === "same");
+      const release = updates.beginOperation(queue.id, token);
+      expect(!!release).toBe(change === "same");
+      release?.();
+      expect(f.imports.install).not.toHaveBeenCalled();
+    } finally {
+      updates.dispose();
+    }
+  },
+);
