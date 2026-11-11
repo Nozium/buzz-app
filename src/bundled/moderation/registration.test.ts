@@ -125,6 +125,7 @@ it.each([
       landingChannels: false,
     });
     const root = new Context();
+    provideNavigation(root);
     root.provide("pluginStatus", {
       isActive: () => true,
       subscribe: () => () => {},

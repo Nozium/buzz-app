@@ -464,9 +464,11 @@ it("opens the community's welcome channel before its auto-join channel and pins 
   const welcome = await screen.findByRole("region", {
     name: "Hello, newcomer",
   });
-  // The message is Markdown, rendered as a message body is.
-  expect(welcome).toHaveTextContent("Say hi and introduce yourself.");
+  // The message is Markdown, rendered as a message body is: its single
+  // newline is a line break.
+  expect(welcome).toHaveTextContent("Say hiand introduce yourself.");
   expect(welcome.querySelector("strong")).toHaveTextContent("hi");
+  expect(welcome.querySelector("strong + br")).not.toBeNull();
   // Pinned beside the history, not a row in it; an empty channel says so.
   expect(welcome.closest("[data-message-scroller]")).toBeNull();
   expect(await screen.findByText("No messages yet.")).toBeVisible();
