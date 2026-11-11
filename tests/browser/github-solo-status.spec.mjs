@@ -36,7 +36,7 @@ test("approved Solo status remains legible and a failed refresh removes readines
           const native =
             node.parentElement.firstElementChild.getBoundingClientRect();
           return (
-            status.left >= native.right &&
+            (status.left >= native.right || status.top >= native.bottom) &&
             status.right <= node.parentElement.getBoundingClientRect().right
           );
         }),

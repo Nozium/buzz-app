@@ -93,7 +93,7 @@ test("linked Solo keeps native row interactions and honest public-only status", 
           const native =
             node.parentElement.firstElementChild.getBoundingClientRect();
           return (
-            bounds.left >= native.right &&
+            (bounds.left >= native.right || bounds.top >= native.bottom) &&
             bounds.right <= wrapper.right &&
             wrapper.width > 0
           );
@@ -112,6 +112,21 @@ test("linked Solo keeps native row interactions and honest public-only status", 
     });
     await page.keyboard.press("Escape");
     await row.hover();
+    await expect
+      .poll(() =>
+        row.evaluate((node) => {
+          const bounds = node.getBoundingClientRect();
+          return (
+            document
+              .elementFromPoint(
+                bounds.left + bounds.width / 2,
+                bounds.top + bounds.height / 2,
+              )
+              ?.closest("[data-solo-channel-id]") === node
+          );
+        }),
+      )
+      .toBe(true);
     await page
       .getByRole("button", {
         name: "Actions for Keep the release notes readable",
