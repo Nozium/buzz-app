@@ -16,7 +16,7 @@ import type {
 } from "./unread";
 import type { SavedHead } from "./persistence";
 import type { ReadStateSigning } from "./read-state-host";
-import { retainReadState } from "./read-state-retention";
+import { READ_RESERVE_KEYS, retainReadState } from "./read-state-retention";
 import { SOLO_LABEL } from "../solo/labels";
 import {
   keypair,
@@ -2149,6 +2149,41 @@ it("failed exact-read persistence keeps forced IDs and retry persists only the s
   } finally {
     reloaded.dispose();
   }
+});
+
+it("refuses an exact read that would raise the local floor over unselected messages", async () => {
+  // This valid but unnormalized journal forces the next save to compact old marks.
+  const frontiers = Object.fromEntries(
+    Array.from({ length: 9_000 }, (_, n) => [`msg:${n.toString(36)}`, 100]),
+  );
+  const reserve = Object.fromEntries(
+    Array.from({ length: READ_RESERVE_KEYS }, (_, n) => [
+      `msg:reserve-${n.toString(36)}`,
+      100,
+    ]),
+  );
+  const h = setup({}, true, (journal) => ({
+    ...journal,
+    state: { ...journal.state, frontiers },
+    reserve,
+  }));
+  h.grant("room");
+  const selected = message(h.alice, "room", "selected", 200);
+  h.emit([selected]);
+  const unread = h.session.unread;
+  await unread.markMessageUnread("room", selected.id);
+  const before = h.journal();
+
+  await expect(requireCapturedRead(unread, [selected.id])).rejects.toThrow(
+    "Exact captured read would widen the retained read set",
+  );
+
+  expect(h.journal()).toBe(before);
+  expect(h.journal()?.floor ?? 0).toBe(0);
+  expect(unread.attention("room", selected.id)).toMatchObject({
+    forced: true,
+    unread: true,
+  });
 });
 
 it("clears a captured own-message overlay without inventing a read frontier", async () => {

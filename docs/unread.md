@@ -480,7 +480,9 @@ per-message reads in that set: it does not expand to replies or descendants,
 advance a channel/thread prefix, or include later arrivals. After the saved
 action succeeds, only those IDs' visit-local forced-unread overlays are cleared;
 the shared message-force hint and independent channel, root, and thread marks
-remain. Older hosts may omit this capability, so callers must check it before
+remain. If local read-state retention would need to raise its device-wide floor
+for these marks, the save rejects unchanged rather than reading unselected older
+messages. Older hosts may omit this capability, so callers must check it before
 invoking it.
 
 `prepareChannelRead(channelId, rootId?)` captures the channel's existing

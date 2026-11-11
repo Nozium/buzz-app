@@ -1419,6 +1419,7 @@ export function createReadState({
       quiet = false,
       fence?: LocalUnreadFence,
       clearLocalKeys: readonly string[] = [],
+      options: { preserveCapturedSet?: boolean } = {},
     ) =>
       queue(async () => {
         await ready;
@@ -1472,6 +1473,15 @@ export function createReadState({
                   homes: current.homes ?? {},
                   floor: current.floor ?? 0,
                 };
+            if (
+              options.preserveCapturedSet &&
+              kept.floor > (current.floor ?? 0)
+            ) {
+              // The local floor reads every older message, beyond the captured set.
+              throw new Error(
+                "Exact captured read would widen the retained read set",
+              );
+            }
             return {
               ...current,
               revision,

@@ -3012,6 +3012,7 @@ export function createUnread({
           fence,
           // This sidebar hint is shared across windows, not owned by this set.
           messageKeys,
+          { preserveCapturedSet: true },
         );
         // The fenced save succeeded; newer same-window marks wait behind these
         // channel locks, so only this captured overlay can be removed here.
