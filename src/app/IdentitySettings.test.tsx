@@ -342,6 +342,72 @@ it("shows a renewal in progress with a Cancel that ends only the browser step", 
   expect(h.service.signOut).not.toHaveBeenCalled();
 });
 
+it("keeps keyboard focus on the renewal action as Renew and Cancel swap", async () => {
+  const h = federatedFixture();
+  h.publish({
+    status: "signed-in",
+    email: "a@example.com",
+    expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+  });
+  let finish: () => void = () => {};
+  vi.mocked(h.service.signIn).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve(h.service.snapshot());
+      }),
+  );
+  vi.mocked(h.service.cancelSignIn).mockImplementation(async () => finish());
+  render(<IdentitySettings viewer={viewer} federatedIdentity={h.service} />, {
+    wrapper: ToastProvider,
+  });
+  const user = userEvent.setup();
+  screen.getByRole("button", { name: "Renew sign-in" }).focus();
+  await user.keyboard("{Enter}");
+  expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+  await user.keyboard("{Enter}");
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Renew sign-in" })).toHaveFocus(),
+  );
+});
+
+it("does not take focus back after the person moves away from Cancel", async () => {
+  const h = federatedFixture();
+  h.publish({
+    status: "signed-in",
+    email: "a@example.com",
+    expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    renewing: true,
+  });
+  let finish: () => void = () => {};
+  vi.mocked(h.service.cancelSignIn).mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = () => {
+          h.publish({ renewing: false });
+          resolve();
+        };
+      }),
+  );
+  render(
+    <>
+      <IdentitySettings viewer={viewer} federatedIdentity={h.service} />
+      <button type="button">Elsewhere</button>
+    </>,
+    { wrapper: ToastProvider },
+  );
+  const user = userEvent.setup();
+  screen.getByRole("button", { name: "Cancel" }).focus();
+  await user.keyboard("{Enter}");
+  expect(h.service.cancelSignIn).toHaveBeenCalledOnce();
+  const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+  elsewhere.focus();
+  act(() => finish());
+  expect(
+    await screen.findByRole("button", { name: "Renew sign-in" }),
+  ).toBeVisible();
+  expect(elsewhere).toHaveFocus();
+});
+
 it("shows a renewal that native reports as waiting, after the page reopens", async () => {
   const h = federatedFixture();
   // Settings was left mid-renewal: only native knows it still waits.

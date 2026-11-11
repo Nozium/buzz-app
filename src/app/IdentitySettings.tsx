@@ -2,6 +2,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -829,6 +830,22 @@ function OrganizationSignIn({
   // The session a browser renewal started from, while that renewal runs.
   // Native's `renewing` says so too, after this page was left and reopened.
   const [renewal, setRenewal] = useState<string | null>(null);
+  // Renew and Cancel replace each other. The one that had focus hands it to
+  // its replacement, unless the person has moved focus elsewhere.
+  const handoff = useRef<Element | null>(null);
+  const actions = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const from = handoff.current;
+    if (!from || from.isConnected) return;
+    handoff.current = null;
+    const active = document.activeElement;
+    if (!active || active === document.body || active.contains(actions.current))
+      trigger.current?.focus();
+  });
+  const holdFocus = () => {
+    const active = document.activeElement;
+    handoff.current = actions.current?.contains(active) ? active : null;
+  };
   useEffect(() => setErrorOpen(!!problem), [problem]);
   if (!state.authority || state.status === "unconfigured") return null;
   // A failed restore keeps its stored session, which may still be valid: no
@@ -892,6 +909,7 @@ function OrganizationSignIn({
   // The current session stays live while the browser step runs; Cancel ends
   // only that step.
   const renew = () => {
+    holdFocus();
     const revision = state.revision;
     setRenewal(revision);
     void run(() => {
@@ -914,6 +932,7 @@ function OrganizationSignIn({
       >
         <div
           ref={(element) => {
+            actions.current = element;
             // The primary action owns return focus, including SplitButton’s first half.
             trigger.current = element?.querySelector("button") ?? null;
           }}
@@ -927,7 +946,10 @@ function OrganizationSignIn({
                 variant="subtle"
                 size="sm"
                 type="button"
-                onClick={() => void run(() => identity.cancelSignIn())}
+                onClick={() => {
+                  holdFocus();
+                  void run(() => identity.cancelSignIn());
+                }}
               >
                 Cancel
               </Button>
