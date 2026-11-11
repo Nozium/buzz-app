@@ -43,8 +43,10 @@ pub async fn mesh_compute_widget_open<R: tauri::Runtime>(
     window
         .with_webview(|webview| {
             use objc2_app_kit::{NSWindow, NSWindowButton};
+            use objc2_foundation::NSSize;
             // Tauri runs this closure on the UI thread with a live native window.
             let native: &NSWindow = unsafe { &*webview.ns_window().cast() };
+            native.setContentAspectRatio(NSSize::new(1.0, 1.0));
             for kind in [
                 NSWindowButton::CloseButton,
                 NSWindowButton::MiniaturizeButton,

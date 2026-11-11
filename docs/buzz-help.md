@@ -1024,8 +1024,8 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   instructions for watched turns in both Chat and Agent mode. Watched messages
   are context for that Interest; later direct requests do not inherit it. Mesh
   agents respond only to their owner. On macOS, the floating activity widget uses
-  native rounded corners with its title and window buttons hidden. Close it from
-  the widget’s settings menu.
+  native rounded corners and stays square when resized, with its title and window
+  buttons hidden. Close it from the widget’s menu.
 - **Solo workers**: where a plugin offers it, an owner can authorize one agent to
   start, message, read, stop, and archive the owner's workers in Solo chats. The
   agent asks the owner's Buzz in a private channel with only the two of them;
