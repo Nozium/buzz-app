@@ -2989,12 +2989,12 @@ export function createUnread({
             channelOf(event) === channelId,
         );
       const messageKeys = selected.map(({ id }) => `msg:${id}`);
+      const fence = reads.captureLocalUnread([
+        ...selected.map(({ id }) => `msg:${id}`),
+        ...channelIds.map(messageForceKey),
+      ]);
       return serializeChannels(channelIds, async () => {
         if (!valid()) throw new Error("Unread channel visit expired");
-        const fence = reads.captureLocalUnread([
-          ...selected.map(({ id }) => `msg:${id}`),
-          ...channelIds.map(messageForceKey),
-        ]);
         const result = await reads.readMessages(
           selected
             .filter(({ event }) => event.pubkey !== viewer)

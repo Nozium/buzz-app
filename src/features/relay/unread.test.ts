@@ -2348,6 +2348,38 @@ it("a cross-window manual re-mark of a captured ID fences the queued exact read"
   }
 });
 
+it("captures the unread fence before waiting for channel queues", async () => {
+  const h = setup();
+  h.grant("room");
+  const row = message(h.alice, "room", "selected", 11);
+  h.emit([row]);
+  const unread = h.session.unread;
+  const second = createReadState({
+    viewer: h.viewer.pubkey,
+    reader: { read: async () => [] },
+    host: undefined,
+    storage: h.storage,
+  });
+  await second.ready;
+  const held = h.holdSaveStarted();
+  const blocker = unread.markUnreadLocal(h.target);
+  await held.started;
+  const reading = requireCapturedRead(unread, [row.id]);
+  const rejected = expect(reading).rejects.toThrow();
+  try {
+    await second.markLocalUnread(`msg:${row.id}`, () => true);
+    held.release();
+    await blocker;
+    await rejected;
+
+    expect(h.journal()?.state.frontiers[`msg:${row.id}`]).toBeUndefined();
+    expect(h.journal()?.localUnread[`msg:${row.id}`]).toBeGreaterThan(0);
+  } finally {
+    held.release();
+    second.dispose();
+  }
+});
+
 it("a newer queued manual and forced choice on a captured ID wins after its exact read", async () => {
   const h = setup();
   h.grant("room");
