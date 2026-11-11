@@ -61,6 +61,8 @@ import * as workflows from "./workflows";
 import type { BundledPlugin } from "../plugins/manager";
 import linksManifest from "./links/manifest.json";
 import * as links from "./links";
+import linkPreviewsManifest from "./link-previews/manifest.json";
+import * as linkPreviews from "./link-previews";
 import moderationManifest from "./moderation/manifest.json";
 import * as moderation from "./moderation";
 import relayStaffManifest from "./relay-staff/manifest.json";
@@ -168,6 +170,11 @@ export const bundledPlugins: readonly BundledPlugin[] = [
     enabledByDefault: true,
   },
   {
+    manifest: { ...linkPreviewsManifest, apiVersion: 1 },
+    module: linkPreviews,
+    enabledByDefault: true,
+  },
+  {
     manifest: { ...channelsManifest, apiVersion: 1 },
     module: channels,
     enabledByDefault: true,
@@ -180,7 +187,7 @@ export const bundledPlugins: readonly BundledPlugin[] = [
   {
     manifest: { ...bestieManifest, apiVersion: 1 },
     module: bestie,
-    enabledByDefault: false,
+    enabledByDefault: true,
   },
   {
     manifest: { ...usageManifest, apiVersion: 1 },

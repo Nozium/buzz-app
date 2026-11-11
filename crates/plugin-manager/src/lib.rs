@@ -92,6 +92,10 @@ pub struct HostGrants {
     /// address, one hop at a time, with no cookies; never pages.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub public_images: bool,
+    /// `readPage` may read the preview fields of a web page on any public
+    /// HTTPS address, one hop at a time, with no cookies; never its HTML.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub public_pages: bool,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -455,6 +459,10 @@ pub fn bundled_manifests() -> Vec<Manifest> {
         serde_json::from_str(include_str!("../../../src/bundled/mermaid/manifest.json"))
             .expect("bundled mermaid manifest"),
         serde_json::from_str(include_str!(
+            "../../../src/bundled/link-previews/manifest.json"
+        ))
+        .expect("bundled link previews manifest"),
+        serde_json::from_str(include_str!(
             "../../../src/bundled/identity-naming/manifest.json"
         ))
         .expect("identity naming manifest"),
@@ -543,9 +551,11 @@ fn enabled_by_default(id: &str) -> bool {
             | "buzz.terminal"
             | "buzz.profiles"
             | "buzz.links"
+            | "buzz.link-previews"
             | "buzz.voice-notes"
             | "buzz.huddles"
             | "buzz.github"
+            | "buzz.bestie"
             | "buzz.watching"
             | "buzz.pairing"
             | "buzz.inbox"
@@ -654,7 +664,7 @@ impl Default for Registry {
         }
     }
 }
-// Freeze known defaults so later releases cannot silently withdraw a feature.
+// Freeze known defaults so later releases cannot silently change a feature's state.
 fn pin_bundled_defaults(registry: &mut Registry, existing_profile: bool) -> bool {
     let mut changed = false;
     for manifest in bundled_manifests() {
@@ -663,9 +673,13 @@ fn pin_bundled_defaults(registry: &mut Registry, existing_profile: bool) -> bool
             .entry(manifest.id.clone())
             .or_insert_with(|| {
                 changed = true;
-                enabled_by_default(&manifest.id)
-                    || (existing_profile
-                        && matches!(manifest.id.as_str(), "buzz.reminders" | "buzz.workflows"))
+                if existing_profile && manifest.id == "buzz.bestie" {
+                    false
+                } else {
+                    enabled_by_default(&manifest.id)
+                        || (existing_profile
+                            && matches!(manifest.id.as_str(), "buzz.reminders" | "buzz.workflows"))
+                }
             });
     }
     changed
@@ -867,6 +881,7 @@ pub struct Manager {
     profile: String,
     safe_mode: bool,
     existing_profile: bool,
+    packaged_fetch: std::sync::Arc<std::sync::Mutex<managed::PackagedFetch>>,
 }
 impl Manager {
     /// Host control-plane location that protected workers must not modify.
@@ -892,6 +907,7 @@ impl Manager {
             profile: profile.into(),
             safe_mode,
             existing_profile,
+            packaged_fetch: Default::default(),
         })
     }
     /// Opens the environment's plugin home, else `home`: the desktop passes its own app data folder.
@@ -904,14 +920,38 @@ impl Manager {
     }
     /// The managed plugin policy and how each recommendation stands in `catalog`.
     pub fn managed(&self, catalog: &Catalog) -> managed::Managed {
-        managed::status(
-            managed::path(&self.home, std::env::var_os(managed::PATH_ENV)),
+        let fetch = self.packaged_fetch.lock().map_or_else(
+            |_| managed::PackagedFetch::Failed("Policy fetch state is unavailable".into()),
+            |fetch| fetch.clone(),
+        );
+        managed::effective(
+            &self.home,
+            std::env::var_os(managed::PATH_ENV),
+            (!managed::PACKAGED_URL.is_empty()).then_some((managed::PACKAGED_URL, &fetch)),
             catalog,
         )
     }
     /// Repository access rules for Git imports, from the file beside the profile folders.
     pub fn repository_access(&self) -> access::AccessRules {
         access::load(&self.home, std::env::var_os(access::PATH_ENV))
+    }
+    /// Keeps a policy fetched from [`managed::PACKAGED_URL`] if Buzz can use it.
+    pub fn store_packaged_policy(&self, bytes: &[u8]) -> Result<bool> {
+        let stored = managed::store_packaged(&self.home, managed::PACKAGED_URL, bytes);
+        self.record_packaged_fetch(stored.as_ref().map(|_| ()).map_err(Clone::clone));
+        stored
+    }
+    /// Records a fetch that failed before Buzz could check the response.
+    pub fn packaged_policy_failed(&self, reason: String) {
+        self.record_packaged_fetch(Err(reason));
+    }
+    fn record_packaged_fetch(&self, outcome: std::result::Result<(), String>) {
+        if let Ok(mut fetch) = self.packaged_fetch.lock() {
+            *fetch = match outcome {
+                Ok(()) => managed::PackagedFetch::Fetched,
+                Err(reason) => managed::PackagedFetch::Failed(reason),
+            };
+        }
     }
     fn lock(&self) -> Result<File> {
         fs::create_dir_all(&self.root).map_err(err)?;
@@ -2265,6 +2305,21 @@ mod tests {
         );
         images["host"]["publicImages"] = serde_json::json!("true");
         assert!(serde_json::from_value::<Manifest>(images).is_err());
+        assert!(!old.host.as_ref().unwrap().public_pages);
+        let mut pages = manifest.clone();
+        pages["host"]["publicPages"] = serde_json::json!(false);
+        let parsed: Manifest = serde_json::from_value(pages.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), manifest);
+        pages["host"]["publicPages"] = serde_json::json!(true);
+        let parsed: Manifest = serde_json::from_value(pages.clone()).unwrap();
+        assert!(parsed.host.as_ref().unwrap().public_pages);
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), pages);
+        assert_ne!(
+            artifact_from_text(&manifest.to_string(), "export const x = 1".into()).unwrap(),
+            artifact_from_text(&pages.to_string(), "export const x = 1".into()).unwrap()
+        );
+        pages["host"]["publicPages"] = serde_json::json!("true");
+        assert!(serde_json::from_value::<Manifest>(pages).is_err());
         for limit in [1, 4096, MAX_HOST_COMMAND_OUTPUT_BYTES] {
             let mut valid = manifest.clone();
             valid["host"]["commands"][0]["maxOutputBytes"] = serde_json::json!(limit);

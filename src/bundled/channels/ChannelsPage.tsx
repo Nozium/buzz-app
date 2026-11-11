@@ -803,13 +803,14 @@ function ChannelWorkspace({
         if (trigger?.isConnected) trigger.focus({ preventScroll: true });
       },
       completed() {
+        const shown = new Set(handoff?.soloNeighbors.current?.(channel.id));
         // Unarchive restores the open chat; every other action leaves it.
         if (action !== "unarchive" && !origin?.aborted && navigator)
           void navigator.open(
             soloSuccessor(
               scope,
               queries.channels.list().channels,
-              neighbors,
+              neighbors.filter((id) => shown.has(id)),
               channel.id,
             ),
           );
@@ -2241,9 +2242,11 @@ function ChannelWorkspace({
                 draft.project,
                 draft.agent,
                 draft.linked,
+                draft.region,
                 retiredSoloDraft.generation,
               ])}
               linkedId={draft.linked}
+              region={draft.region}
               source={linkedSource}
               visit={navigation}
               focusRequest={

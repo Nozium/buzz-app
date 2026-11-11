@@ -397,13 +397,154 @@ type PluginInstaller = {
     id: string,
     listener: (status: "installed" | "absent" | "unavailable") => void,
   ): () => void;
+  updates?: PluginUpdateCapability;
 };
 ```
 
-These status methods may be missing on an older host even when the optional
-service is available. Feature-check each method before calling it; see the
-[plugin authoring guide](plugin-authoring-guide.md#extension-points) for
+These installation-status methods may be missing on an older host even when the
+optional service is available. Feature-check each method before calling it; see
+the [plugin authoring guide](plugin-authoring-guide.md#extension-points) for
 status semantics and subscription-lifetime guidance.
+
+```ts
+type Updates = NonNullable<PluginInstaller["updates"]>;
+type PluginUpdateToken = ReturnType<Updates["getSnapshot"]>["candidates"][number]["token"];
+type PluginUpdateOwnerId = NonNullable<Updates["ownerId"]>;
+// Branded strings: retain tokens and owner IDs returned by the host; never construct them.
+type PluginUpdateSnapshot = {
+  status: "disabled" | "unavailable" | "checking" | "fresh" | "stale" | "error";
+  checkedAt: number | null; // epoch milliseconds for the last completed check
+  candidates: readonly {
+    token: PluginUpdateToken;
+    id: string;
+    name: string;
+    installedRevision: string;
+    candidateRevision: string;
+  }[];
+  errors: readonly { id: string; message: string }[];
+};
+type PluginUpdateQueueSnapshot = {
+  id: string;
+  status: "queued" | "reviewing" | "completed" | "cancelled" | "failed" | "partial";
+  items: readonly {
+    token: PluginUpdateToken;
+    id: string;
+    status: "queued" | "reviewing" | "installed" | "partial" | "cancelled" | "failed";
+    error?: string;
+  }[];
+};
+type PluginUpdateQueueRequest = {
+  ownerId: PluginUpdateOwnerId;
+  requestId: string;
+  tokens: readonly PluginUpdateToken[];
+};
+type PluginUpdateQueueRequestIdentity = {
+  ownerId: PluginUpdateOwnerId;
+  requestId: string;
+};
+type PluginUpdateQueueRequestResult =
+  | { status: "admitted"; queue: PluginUpdateQueueSnapshot }
+  | { status: "not-admitted" }
+  | { status: "unknown" }
+  | { status: "conflict" };
+type PluginUpdateCapability = {
+  ownerId: PluginUpdateOwnerId | undefined;
+  getSnapshot(): PluginUpdateSnapshot;
+  subscribe(listener: () => void): () => void;
+  refresh(): Promise<PluginUpdateSnapshot>;
+  queueUpdates(
+    tokens: readonly PluginUpdateToken[],
+    request?: PluginUpdateQueueRequestIdentity,
+  ): PluginUpdateQueueSnapshot | undefined;
+  getQueueRequest(
+    request: PluginUpdateQueueRequest,
+  ): PluginUpdateQueueRequestResult;
+  getQueue(id: string): PluginUpdateQueueSnapshot | undefined;
+  subscribeQueue(id: string, listener: () => void): () => void;
+  cancelQueue(id: string): boolean;
+};
+```
+
+Plugin authors can name the nested update contract through the existing public
+`PluginInstaller` type as `NonNullable<PluginInstaller["updates"]>`; its method
+argument and result types are available through that member.
+
+`updates` is optional in the public type for compatibility with older hosts. In
+the current host, a present `pluginInstaller` service always exposes the bridge;
+its snapshot is `unavailable` until the retained checker registers and if it
+later unregisters. An absent service or `updates` member is unknown, not an empty
+or up-to-date result. In a host that exposes the bridge, `unavailable` means the
+retained checker or its catalog/import source is not available; `disabled` means
+no installed plugin currently has update checks enabled with a checkable source;
+`checking` is an in-progress refresh; `stale`
+means no recent completed check or installed source/state changed since the last
+check; `error` means one or more checks failed; `fresh` describes a completed
+aggregate check of currently eligible sources. It is not a per-plugin "up to date" result.
+The snapshot contains known update candidates and known check errors, but does not expose a
+per-plugin checked-current or eligibility result. A plugin absent from both
+arrays is unknown: it may be current, opted out, unsupported, or lack a
+checkable saved source. Consumers must not infer per-plugin status from a fresh
+snapshot miss; only listed candidates are known updates and listed errors are
+known check failures.
+
+Candidate tokens are opaque and bound to the checker’s current source, installed
+revision and publisher, candidate revision and publisher, enabled state, and
+saved update-check choice. `refresh()` invokes the host's existing retained
+checker; it does not create a second poller or install anything. Plugin-triggered
+refreshes share a one-minute minimum interval; calls within that interval return
+the current snapshot, while a running refresh is shared. Host-forced checks are
+not throttled by this limit.
+`queueUpdates(tokens, request?)` accepts only tokens from a completed check within the
+freshness window when each token still names a current candidate for its
+installed plugin. It can accept a known candidate even when the aggregate status
+is `error`, or `stale` because another plugin's source changed after that check,
+if that token remains current. A source change during a check invalidates tokens
+from that run. It returns `undefined` while checking, after expiry, or when a
+requested token is no longer current, or when 50 queues are already pending or
+reviewing. Accepted queues share one host-retained serialized review path across
+callers. The host retains at most 50 queue snapshots, evicting the oldest
+terminal snapshot when needed; terminal queues no longer occupy the review
+scheduler. Every item opens the existing explicit review, identifies the requesting
+plugin when applicable, and waits for the owner to confirm; no item is installed silently. An item is `partial` when its update
+was installed but the enabled plugin failed to activate at that revision.
+`cancelQueue()` cancels pending or unopened reviews, but does not undo an
+operation the owner already confirmed. Queue state is retained by the host
+provider, not across a host restart. Subscribe before reading `getSnapshot()` or
+`getQueue()` so an update cannot be missed, and release subscriptions with the
+plugin effect. The host also releases both update subscriptions when the calling
+plugin is disposed. A non-fresh status is not evidence that no updates exist.
+
+When a caller may retry after losing the submission result, it must create and
+retain one stable, non-empty `requestId` (at most 128 characters) for that
+logical attempt and pair it with the captured `ownerId`. Pass the same identity
+and ordered token list on every retry, including after the consumer unmounts or
+remounts. A submission identity from another provider lifetime is rejected;
+`getQueueRequest()` for its captured identity reports `unknown`. IDs must be
+unique across different submissions by the same plugin to this provider; a random ID is
+appropriate. The host deduplicates repeated tokens in first-seen order. A repeated ID and
+identical normalized token list returns the same queue snapshot while that
+snapshot is retained; a changed payload is refused. If the queue's terminal
+snapshot was evicted, replay returns `undefined` and does not create another
+queue, so an ambiguous result stays unknown rather than becoming a duplicate
+review. Capture `ownerId`, `requestId`, and the exact ordered token list before
+submitting; `getQueueRequest(request)` does not enqueue or retry. For the same
+provider lifetime, it reports `admitted` with the retained queue for an exact
+recorded request, `conflict` when that ID is bound to a different normalized
+token list, or `not-admitted` when no admission record exists. It reports
+`unknown` if the owner ID no longer matches, the provider is unavailable or has
+been disposed, or the recorded queue was evicted. A missing `ownerId` is not
+evidence of non-admission. Only `admitted` is proof of admission; only
+`not-admitted` from the same live provider is proof this request was not
+admitted. After `unknown`, do not submit under a new request ID or infer that no
+review was queued. Request IDs and their retention limit are namespaced by the
+calling plugin ID, so different plugins can use the same ID independently and a
+remounted plugin can reconcile its prior request. The provider retains at most
+1,024 request identities per plugin for its lifetime; after that, it refuses new identified submissions instead of
+evicting identities. Queue/request state is not persisted across a provider
+replacement or host restart, so old identities then resolve as `unknown` and
+this contract does not provide cross-restart idempotency. An absent capability
+or an `unavailable` snapshot is not evidence that a prior ambiguous submission
+was rejected. A refresh does not resolve an earlier ambiguous submission.
 
 `requestInstall` never installs silently. It opens Settings → Plugins with the Git
 source prefilled and read-only, and the user still chooses **Find**, reviews the
@@ -504,8 +645,9 @@ Focus is the first caller and registers its restriction only while Focus is on.
 ### Decorating host sidebar rows and adding sort modes
 
 `ctx.reflect.get("sidebarRows")` is an optional version-1 capability for host
-Team channel and direct-message rows, including rows moved into custom groups.
-Solo conversations are not supported yet. Use the reflective lookup rather than
+Team channel, direct-message and ordinary Solo rows, including rows moved into
+custom Team groups or Solo workspaces. Plugin-owned Solo regions render their
+own rows and are not decorated here. Use the reflective lookup rather than
 required `inject` so the plugin still activates on older hosts.
 
 ```tsx
@@ -520,11 +662,13 @@ ctx.reflect.get("sidebarRows")?.register({
 });
 ```
 
-`row` contains `id`, `kind` (`team` or `dm`), `label`, `sectionKey`, the current
+`row` contains `id`, `kind` (`team`, `dm` or `solo`), `label`, `sectionKey`, the current
 `channel` summary (including available labels, visibility and activity data), and
 its current `unread` snapshot. Unknown unread counts remain `null`; activity
 fields retain their existing units and unknown values. This is the host's
 currently authorized roster, not a channel discovery API.
+For Solo, `sectionKey` is the workspace id, or `""` for unfiled chats. Only
+`render` applies to Solo; contributed sort modes remain Team-only.
 
 `Default` is a React element, not a component constructor: return it, wrap it,
 or return a replacement element. Returning `null` intentionally hides the row;
@@ -543,12 +687,18 @@ throws, invalid return values, and descendant render failures restore the
 original host element for that row only, not a partially decorated result.
 Repeated callback and invalid-result fallbacks retain the host row across live
 updates. Switching between a decoration and fallback, or recovering from a
-descendant error, can remount it and reset an open menu. If the host button had
+descendant error, can remount it and reset an open menu or active drag. If the host button had
 focus, the host restores it to the same channel's replacement button anywhere in
 the sidebar, including after a section move, only when the update leaves focus
 on the document body; it never overrides focus moved elsewhere.
 If the row is hidden instead, focus moves to a surviving neighbor in the same
 section, or its heading when no row remains.
+For Solo rows, the opaque host element includes its shared mark, overflow menu
+and drag surface, so returning `null` removes those controls too. Hidden Solo
+rows are skipped when choosing the next chat after leaving or deleting one,
+including rows hidden while that action is pending. Solo hiding does not change
+workspace caps, Show more counts or empty-workspace affordances. A Solo entry
+without an available channel summary keeps the native row until the roster loads.
 Disabling, replacing or disposing a plugin removes its contributions through its
 Cordis scope. With no active render contribution, the existing host row renders
 without an extra DOM wrapper.
@@ -707,6 +857,19 @@ gets the agent's Buzz client and where it is working, so the tool acts as the
 agent, as the rest of a trusted plugin's code acts as its owner. Names are
 lowercase and cannot be a Buzz tool's. The tool is removed when its plugin's
 scope ends, so safe mode removes installed plugins' tools.
+
+`call(client, context, args)` can read `client.signal`, a host-owned
+`AbortSignal` captured for that call. Native Claude and Codex cancel it on
+Stop. Keep that exact signal across waits. Pass it to work that supports
+cancellation, then call `signal.throwIfAborted()` before an external write.
+A new turn does not restore a canceled call. The supplied client also checks
+cancellation before it publishes. Stop cannot undo a write already sent.
+The signal does not grant access or replace the plugin's access checks.
+Hosts without a cancellation signal omit it; a tool that requires one must
+refuse the call when it is absent. Do not infer cancellation from conversation
+activity. The signal is a live object, not part of saved tool arguments or
+session archives. `BuzzClient` from `@buzz/author` declares this property;
+`AddedToolContext` keeps only the conversation destination.
 
 The bundled **Plugin development** plugin (`buzz.plugin-development`, on by
 default) gives local agents three tools. `plugin_authoring_guide` returns
@@ -971,9 +1134,9 @@ contracts with their own layout and local navigation.
 
 ### Bundled defaults
 
-**Channels is the only required bundled plugin.** Bestie,
-Todos, Usage, Reminders, Workflows and Shared compute are off by default for fresh installs. Feedback, Diff viewer, Identity
-Naming, Agent Activity, Terminal, Links, GitHub, Inbox,
+**Channels is the only required bundled plugin.** Todos, Usage, Reminders,
+Workflows and Shared compute are off by default for fresh installs. Bestie,
+Feedback, Diff viewer, Identity Naming, Agent Activity, Terminal, Links, GitHub, Inbox,
 Repositories, Agents, Claude, Codex, Builderlab,
 Membership, and Moderation are on by default, but optional. Both browser and
 native catalogs declare that policy.
@@ -988,9 +1151,10 @@ Both storage owners persist resolved bundled states. Native default snapshots
 are best effort: a failed write keeps the readable catalog usable and is retried
 on the next read; explicit edits and resets still report write failures.
 Existing profiles without saved Reminders or Workflows choices retain
-their former On state; fresh profiles start both Off. Reopening preserves either
-result, and an explicit reset uses current defaults. Future default-off changes
-must follow [the fresh-install decision](plugin-defaults.md), including legacy
+their former On state; fresh profiles start both Off. Bestie starts On for fresh
+profiles; existing profiles without a saved choice retain its former Off state.
+Reopening preserves these results, and an explicit reset uses current defaults.
+Future default changes must follow [the fresh-install decision](plugin-defaults.md), including legacy
 backfills for releases without saved states.
 Default-on does not promise platform support: Terminal contributes UI
 only on macOS/Linux desktop; Builderlab's hosted communities need either the desktop app or
@@ -1808,6 +1972,20 @@ Names that resolve publicly but are reached only through a VPN (such as a
 company's internal hosts) are not visible to this check, so the plugin must
 refuse them by name on every hop. The site sees the user's IP address.
 
+Declare `host: { publicPages: true }` to let `readPage(url, { timeoutMs? })`
+read a link preview's fields from any public HTTPS page. It pins addresses and
+follows no redirect, exactly as `publicImages` does, and sends
+`Accept: text/html,application/xhtml+xml`. A redirect returns
+`{ status, location }`; a 2xx HTML page returns `{ status, preview }`; anything
+else returns `{ status }`. Native code reads at most the page's head (512 KiB,
+stopping at `</head>` or `<body>`) and returns only `title`, `description`,
+`siteName`, `image`, `imageAlt` and `icon`, preferring Open Graph over Twitter
+card tags over `<title>` and `<meta name="description">`, with entities decoded,
+whitespace collapsed and lengths capped. `image` and `icon` are absolute HTTPS
+URLs; read the image with `requestBytes` under `publicImages`. The page's HTML
+never reaches the plugin. The timeout defaults to 10000 ms and can be
+1–30000 ms. The same VPN caveat applies: refuse internal names on every hop.
+
 Only images come back, but the plugin chooses each URL, so the grant lets it
 send data it holds to any public site in the path, query or hostname. It lifts
 the bound `networkOrigins` otherwise puts on where a plugin's data can go; the
@@ -2359,6 +2537,22 @@ contract or relay protocol changes are required. Known channel references and
 unambiguous signed person/agent mentions share the inline hover styling. Names in
 ordinary prose never create notification intent or establish an identity.
 
+`registerLinkPreview({ id, title, matches, order?, component })` contributes a
+card below a message for one of its links. The host lists the credential-free
+HTTPS links in the message's Markdown prose, once each in the order written:
+bare and labeled links, but not `<url>` (which asks for no preview), links in
+code, images, or links naming one of the message's attachments. Diffs, agent
+envelopes and messages a message renderer draws get no cards. For each link the
+lowest-`order` match draws its card under the panel
+[resolution order](#resolution-order), so a plugin claims its own URLs by
+registering below the default web card's catch-all band; a component that
+renders nothing leaves that link without a card. Components receive
+`{ url, messageId, open }`; `open()` routes `url` through the host's link
+handler, as clicking the link does, and returns false once the contribution or
+message has retired. Cards sit between the message bubble and its attachments.
+After three, the rest fold behind "Show N more previews". A render failure drops
+only that card. Registration follows the existing plugin lifetime.
+
 `registerCodeBlock({ id, title, matches, component, action? })` contributes optional
 presentation for a fenced code block. `matches(language)` receives the fence's
 info-string language as written; `component` and `action` receive `{ code, language }`. The
@@ -2751,6 +2945,12 @@ is the answering provider's key (`<plugin id>/<provider id>`), or undefined
 when none is on, and `ctx.decisions.status()` its status. `Decisions` exposes
 no way to choose the provider. `state` and every question go to the provider,
 so send only what the decision needs.
+
+`ctx.decisions.retireProvider(id)` clears a saved choice for a retired provider
+from the calling plugin. Pass the local provider ID, without a plugin prefix.
+The host then uses its default providers. Choices for other providers stay in
+effect. The method throws if the saved change fails or the caller has no plugin
+scope. It does not register a provider or let a plugin select another provider.
 
 | Provider | Plugin | Credentials |
 |----------|--------|-------------|

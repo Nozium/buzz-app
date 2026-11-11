@@ -442,6 +442,25 @@ it("replies in the current thread and notifies the members it names", async () =
   ]);
 });
 
+// As a model that fills in every optional field sends it.
+it("replies in the current thread when channel and reply are blank", async () => {
+  const { client, published } = fake(community);
+  await callTool(client, { channel: "chan", root }, "send", {
+    audience: "everyone",
+    text: "hi",
+    channel: "",
+    reply: "",
+    path: "",
+    files: [],
+    mentions: [],
+    final: true,
+  });
+  expect(published.at(-1)?.tags).toEqual([
+    ["h", "chan"],
+    ["e", root, "", "reply"],
+  ]);
+});
+
 it("tags a message for agents, and needs the audience said", async () => {
   const { client, published } = fake(community);
   const context = { channel: "chan", root };
@@ -461,6 +480,32 @@ it("tags a message for agents, and needs the audience said", async () => {
   await expect(
     callTool(client, context, "send", { text: "hi", audience: "humans" }),
   ).rejects.toThrow("audience must be everyone or agents");
+  expect(published).toHaveLength(1);
+});
+
+it("signs the turn's triggering request separately from the flattened reply", async () => {
+  const { client, published } = fake(community);
+  const context = { channel: "chan", root };
+  const request = "f".repeat(64);
+  await callTool(client, context, "send", {
+    text: "Checking",
+    audience: "agents",
+    request: request.toUpperCase(),
+  });
+  expect(published[0]?.tags).toEqual([
+    ["h", "chan"],
+    ["e", root, "", "reply"],
+    ["audience", "agents"],
+    ["buzz:request", request],
+  ]);
+  for (const bad of ["", "nope", 7])
+    await expect(
+      callTool(client, context, "send", {
+        text: "hi",
+        audience: "agents",
+        request: bad,
+      }),
+    ).rejects.toThrow("Not an event id");
   expect(published).toHaveLength(1);
 });
 
@@ -776,6 +821,26 @@ it("reads the current thread with each message's latest edit", async () => {
     `${nested} from ${alice} "Alice Smith" at 1970-01-01T00:01Z: edited`,
     "The relay returned no older replies.",
   ]);
+});
+
+// As a model that fills in every optional field sends it.
+it("reads the current thread when optional fields are blank or 0", async () => {
+  const { client } = fake(community);
+  const blank = (await callTool(client, { channel: "chan", root }, "read", {
+    channel: "",
+    thread: "",
+    message_url: "",
+    q: "",
+    author: "",
+    since: 0,
+    before: 0,
+    before_id: "",
+    limit: 5,
+  })) as string;
+  expect(blank).toBe(
+    await callTool(client, { channel: "chan", root }, "read", { limit: 5 }),
+  );
+  expect(blank).toContain(`thread ${root} in chan`);
 });
 
 it.each([
@@ -4270,11 +4335,12 @@ it.each(["everyone", "agents"])(
   },
 );
 
-it("tags a nested reply for agents only", async () => {
+it("tags a nested reply for agents only, signing its request", async () => {
   const { client, published } = fake(community);
   await callTool(client, { channel: "chan", root }, "reply_in_subthread", {
     parent: nested,
     audience: "agents",
+    request: "f".repeat(64),
     text: "a",
   });
   expect(published[0]?.tags).toEqual([
@@ -4282,6 +4348,7 @@ it("tags a nested reply for agents only", async () => {
     ["e", root, "", "root"],
     ["e", nested, "", "reply"],
     ["audience", "agents"],
+    ["buzz:request", "f".repeat(64)],
   ]);
 });
 
