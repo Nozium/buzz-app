@@ -1104,6 +1104,7 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
 
 - Plugins can add features. **Settings → Plugins → Manage plugins** controls
   them. Do not assume a particular optional plugin is on. Manage plugins uses the background checker’s retained results and shows **Update** when a newer version is available. Opening the list or returning to the window does not start a separate check. Git plugins need to declare update support; saved folder and Git sources also offer **Check for updates** in their details. An **Update** button opens the review before anything is installed.
+  Unsigned external plugins can install and run by default. Launch Buzz with `BUZZ_REQUIRE_PLUGIN_SIGNATURES=1` to require signatures; restart with the variable unset or set to `0` to turn enforcement off. When enforcement is enabled, unsigned installations remain blocked until replaced with signed releases. Use **Update** in the plugin’s Settings details to apply a signed release, even when its code has not changed. Supplied signatures are always verified. Plugins built into Buzz are exempt.
   A page whose plugin is turned off says so, and its **Manage plugins** opens
   that plugin, where **Enable** turns it back on.
   If a plugin hides the focused Team sidebar row, keyboard focus moves to a
