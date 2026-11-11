@@ -193,13 +193,22 @@ function readCaptured(
 }
 
 function requireCapturedRead(
-  unread: UnreadCapability,
+  unread: Pick<UnreadCapability, "markCapturedMessagesRead">,
   messageIds: readonly string[],
 ) {
   const result = readCaptured(unread, messageIds);
   if (!result) throw new Error("Captured message reads are unavailable");
   return result;
 }
+
+it("detects an older host that omits the optional captured-read capability", () => {
+  const olderHost: Pick<UnreadCapability, "markCapturedMessagesRead"> = {};
+
+  expect(readCaptured(olderHost, ["captured-message"])).toBeUndefined();
+  expect(() => requireCapturedRead(olderHost, ["captured-message"])).toThrow(
+    "Captured message reads are unavailable",
+  );
+});
 
 it("a read reply that needs no conversation lookup is not reported pending", async () => {
   const h = setup();
