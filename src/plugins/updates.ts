@@ -571,11 +571,13 @@ export function createPluginUpdates(
     if (configuration.status !== "ready") return;
     const now = Date.now();
     const sources = getSources();
+    const remaining = delay(false);
     if (
       !force &&
       sources === lastSources &&
       lastCheck !== undefined &&
-      now - lastCheck < 3_600_000
+      remaining !== undefined &&
+      remaining > 0
     )
       return;
     lastSources = sources;
@@ -688,6 +690,7 @@ export function createPluginUpdates(
           lastErrors = true;
         }
         if (!current(update)) continue;
+        checked.set(id, { identity, at: Date.now() });
         if (
           !observe(
             update.candidate?.revision ?? plugin.revision,
@@ -729,13 +732,19 @@ export function createPluginUpdates(
     const update = updates.find((item) => item.token === token);
     return update?.candidate && current(update) ? update : undefined;
   };
-  const isCurrentToken = (token: PluginUpdateToken) =>
-    !closed &&
-    !!plugins.imports &&
-    !checking &&
-    lastCheck !== undefined &&
-    Date.now() - lastCheck < 3_600_000 &&
-    !!resolveCandidate(token);
+  const isCurrentToken = (token: PluginUpdateToken) => {
+    const update = resolveCandidate(token);
+    const checkedAt = update && checked.get(update.id)?.at;
+    return (
+      !closed &&
+      !!plugins.imports &&
+      !checking &&
+      lastCheck !== undefined &&
+      checkedAt !== undefined &&
+      Date.now() - checkedAt < 3_600_000 &&
+      !!update
+    );
+  };
   const snapshotQueue = (queue: UpdateQueueRecord) => {
     if (queue.snapshot) return queue.snapshot;
     const statuses = queue.items.map((item) => item.status);

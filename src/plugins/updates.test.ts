@@ -2107,3 +2107,45 @@ it.each(["revision", "publisher", "error"] as const)(
     }
   },
 );
+
+
+it("preserves per-source Git deadlines after another plugin arrives", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const updates = createPluginUpdates(f.manager, f.authorize);
+  try {
+    await updates.check();
+    vi.advanceTimersByTime(1_800_000);
+    const configuration = f.get();
+    if (configuration.status !== "ready") throw new Error("Expected catalog");
+    const other = {
+      ...f.plugin,
+      manifest: { ...f.plugin.manifest, id: "example.other" },
+      updateSource: { ...gitUpdateSource(f.plugin), path: "other" },
+    };
+    f.preview.candidates.push({
+      path: "other",
+      manifest: other.manifest,
+      revision: "other-new",
+    });
+    f.set({
+      ...configuration,
+      catalog: { ...configuration.catalog, plugins: [f.plugin, other] },
+    });
+    await updates.check();
+    const otherToken = updates.capability
+      .getSnapshot()
+      .candidates.find((item) => item.id === other.manifest.id)?.token;
+    if (!otherToken) throw new Error("Expected second candidate");
+    vi.advanceTimersByTime(1_800_000);
+    expect(await updates.check()).toBe(1_800_000);
+    expect(updates.nextCheck()).toBe(1_800_000);
+    expect(f.checkGit).toHaveBeenCalledTimes(3);
+    vi.advanceTimersByTime(1_800_000);
+    expect(updates.isCurrentToken(otherToken)).toBe(false);
+    await updates.check();
+    expect(f.checkGit).toHaveBeenCalledTimes(4);
+  } finally {
+    updates.dispose();
+  }
+});
