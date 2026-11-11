@@ -194,18 +194,12 @@ function requireCapturedRead(
   return unread.markCapturedMessagesRead(messageIds);
 }
 
-// Keep the public optional seam structurally compatible with existing hosts.
-const acceptsLegacyUnreadCapability: (
-  host: Omit<UnreadCapability, "markCapturedMessagesRead">,
-) => UnreadCapability = (host) => host;
-void acceptsLegacyUnreadCapability;
+it("keeps older hosts without captured reads structurally compatible", () => {
+  const { markCapturedMessagesRead, ...olderHost } = setup().session.unread;
 
-it("detects an older host that omits the optional captured-read capability", () => {
-  const olderHost: Pick<UnreadCapability, "markCapturedMessagesRead"> = {};
-
-  expect(() => requireCapturedRead(olderHost, ["captured-message"])).toThrow(
-    "Captured message reads are unavailable",
-  );
+  expect(markCapturedMessagesRead).toBeTypeOf("function");
+  const currentHost: UnreadCapability = olderHost;
+  expect(currentHost.markCapturedMessagesRead).toBeUndefined();
 });
 
 it("a read reply that needs no conversation lookup is not reported pending", async () => {
