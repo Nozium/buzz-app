@@ -251,6 +251,16 @@ export function ChannelInventory({
         ifStale: true,
       });
   }, [lifecycle, list.asOf, list.status]);
+  // A confirmed open asks the relay to unhide its DM, so a recent read is out
+  // of date.
+  useEffect(
+    () =>
+      queries.directMessages.subscribeOpened(
+        () =>
+          void lifecycle.refreshVisibility(visibilityRequest.current?.signal),
+      ),
+    [queries, lifecycle],
+  );
   const lifecycleFocus = useRef<string | undefined>(undefined);
   const lifecycleTrigger = useRef<HTMLElement | undefined>(undefined);
   const sidebar = useSidebarView(

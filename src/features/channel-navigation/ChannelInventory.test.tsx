@@ -282,6 +282,70 @@ function visibilityFixture() {
   return { f, read, lifecycle };
 }
 
+it("reads DM visibility again after a confirmed open within FRESH_FOR", async () => {
+  const dm = "11111111-1111-4111-8111-111111111111";
+  const relayKey = keypair();
+  const f = fixture(undefined, "ready", [
+    { id: "alpha", name: "alpha", channelType: "stream" },
+    {
+      id: dm,
+      name: "Avery",
+      channelType: "dm",
+      members: ["a".repeat(64), "c".repeat(64)],
+    },
+  ]);
+  let hidden = true;
+  let at = 1_700_000_000;
+  const read = vi.fn(async () => [
+    signed(relayKey, {
+      kind: 30622,
+      created_at: at++,
+      tags: [
+        ["d", f.session.viewer],
+        ["p", f.session.viewer],
+        ...(hidden ? [["h", dm]] : []),
+      ],
+      content: "",
+    }),
+  ]);
+  const lifecycle = createChannelLifecycle({
+    reader: { read },
+    viewer: f.session.viewer,
+    relayAuthor: relayKey.pubkey,
+    canAccess: () => true,
+    acceptDiscovery() {},
+    removed() {},
+  });
+  f.session.channelLifecycle = lifecycle.capability;
+  const opened = new Set<(id: string) => void>();
+  f.session.directMessages = {
+    ...f.session.directMessages,
+    subscribeOpened(listener) {
+      opened.add(listener);
+      return () => void opened.delete(listener);
+    },
+  };
+  const row = () => document.querySelector(`[data-channel-id="${dm}"]`);
+  try {
+    render(f.view("alpha"));
+    await waitFor(() =>
+      expect(lifecycle.capability.snapshot().hidden).toEqual([dm]),
+    );
+    expect(row()).toBeNull();
+    // The relay unhides the DM; a roster commit within FRESH_FOR reads nothing.
+    hidden = false;
+    f.commit();
+    expect(read).toHaveBeenCalledOnce();
+    act(() => {
+      for (const listener of opened) listener(dm);
+    });
+    await waitFor(() => expect(row()).not.toBeNull());
+    expect(read).toHaveBeenCalledTimes(2);
+  } finally {
+    cleanup();
+    lifecycle.dispose();
+  }
+});
 it("keeps visibility recovery quiet, then offers the existing retry after exhaustion", async () => {
   vi.useFakeTimers();
   const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
