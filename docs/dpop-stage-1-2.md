@@ -72,6 +72,9 @@ on retries before enabling `humanProofReplayProtectionEnabled`.
 `requireFreshBuzzAuthentication` also requires persisted verified IdP time.
 Bound sessions always enforce freshness at sensitive boundaries and human
 NIP-98 replay checks, independent of the legacy rollout flags.
+A sensitive boundary accepts an IdP sign-in no older than the issuer setting
+`buzzSensitiveActionMaxAuthAgeSeconds` (default and minimum: 1 hour). Bound
+login itself still needs a sign-in from the last 5 minutes.
 
 The storage identity is stable across bearer, software, and Secure Enclave modes.
 A bound record stores a key handle and explicit key mode and uses a new version. Restore loads that
