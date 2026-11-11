@@ -13,6 +13,7 @@ static KEY_CREATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub(super) struct DeviceKey {
     handle: String,
+    #[cfg(target_os = "macos")]
     jwk: serde_json::Value,
     thumbprint: String,
     retained: AtomicBool,
