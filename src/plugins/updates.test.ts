@@ -278,6 +278,56 @@ it("notifies subscribers when freshness expires without fetching or installing",
   updates.dispose();
 });
 
+it.each([false, true])(
+  "expires at the oldest remaining source deadline (remove first=%s)",
+  async (removeFirst) => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const updates = createPluginUpdates(f.manager, f.authorize);
+    try {
+      await updates.check();
+      const first = updates.capability.getSnapshot().candidates[0];
+      vi.advanceTimersByTime(1_800_000);
+      const second = {
+        ...f.plugin,
+        manifest: { ...f.plugin.manifest, id: "example.second" },
+      };
+      const configuration = f.get();
+      if (configuration.status !== "ready") throw new Error("Expected catalog");
+      f.preview.candidates = [{ ...f.candidate, manifest: second.manifest }];
+      f.set({
+        ...configuration,
+        catalog: {
+          ...configuration.catalog,
+          plugins: removeFirst ? [second] : [f.plugin, second],
+        },
+      });
+      await updates.check();
+      expect(f.checkGit).toHaveBeenCalledTimes(2);
+      const changed = vi.fn();
+      updates.capability.subscribe(changed);
+      vi.advanceTimersByTime(1_799_999);
+      expect(updates.capability.getSnapshot().status).toBe("fresh");
+      expect(changed).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      if (removeFirst) {
+        expect(changed).not.toHaveBeenCalled();
+        expect(updates.capability.getSnapshot().status).toBe("fresh");
+        vi.advanceTimersByTime(1_800_000);
+      } else {
+        if (!first) throw new Error("Expected first candidate");
+        expect(updates.isCurrentToken(first.token)).toBe(false);
+      }
+      expect(changed).toHaveBeenCalledOnce();
+      expect(updates.capability.getSnapshot().status).toBe("stale");
+      expect(f.checkGit).toHaveBeenCalledTimes(2);
+      expect(f.imports.install).not.toHaveBeenCalled();
+    } finally {
+      updates.dispose();
+    }
+  },
+);
+
 it("discovers without acquiring a preview or installing; Later lasts for the candidate and run", async () => {
   vi.useFakeTimers();
   const f = fixture();

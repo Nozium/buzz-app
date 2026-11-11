@@ -365,15 +365,25 @@ export function createPluginUpdates(
       ? `The update was installed, but activation failed: ${activation.error ?? "Unknown activation error"}`
       : undefined;
   };
+  const freshnessAt = () =>
+    lastCheck === undefined
+      ? undefined
+      : Math.min(
+          lastCheck,
+          ...[...checked]
+            .filter(([id]) => pluginUpdateSource(plugins, id))
+            .map(([, value]) => value.at),
+        );
   const snapshotStatus = (): PluginUpdateStatus => {
     const { configuration } = plugins.snapshot();
     if (closed || !plugins.imports || configuration.status !== "ready")
       return "unavailable";
     if (checking) return "checking";
     if (!getEligibleCount()) return "disabled";
+    const at = freshnessAt();
     if (
-      lastCheck === undefined ||
-      Date.now() - lastCheck >= 3_600_000 ||
+      at === undefined ||
+      Date.now() - at >= 3_600_000 ||
       getSources() !== lastSources
     )
       return "stale";
@@ -786,10 +796,11 @@ export function createPluginUpdates(
       clearTimeout(freshnessTimer);
       if (!closed) {
         // Notify observers at expiry even when the hidden host does not run discovery.
-        if (lastCheck !== undefined)
+        const at = freshnessAt();
+        if (at !== undefined)
           freshnessTimer = setTimeout(
             () => publish(),
-            Math.max(0, lastCheck + 3_600_000 - Date.now()),
+            Math.max(0, at + 3_600_000 - Date.now()),
           );
         publish();
       }
