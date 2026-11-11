@@ -448,7 +448,39 @@ export function createPluginUpdates(
     );
   }
   const prune = () => {
-    const next = updates.flatMap((update): PluginUpdate[] => {
+    const results = observedChecks?.snapshot() ?? {};
+    const records = [...updates];
+    const { configuration } = plugins.snapshot();
+    if (configuration.status === "ready") {
+      for (const plugin of configuration.catalog.plugins) {
+        const id = plugin.manifest.id;
+        const source = pluginUpdateSource(plugins, id);
+        const result = pluginUpdateCheck(results, plugin);
+        if (
+          !source ||
+          !result ||
+          result.checking ||
+          (!result.error &&
+            (!result.candidate ||
+              samePluginRelease(result.candidate, plugin))) ||
+          records.some(
+            (update) =>
+              update.id === id &&
+              current({ ...update, installedEnabled: plugin.enabled }),
+          )
+        )
+          continue;
+        records.push({
+          id,
+          source,
+          installedRevision: plugin.revision,
+          installedPublisher: plugin.publisher ?? null,
+          installedEnabled: plugin.enabled,
+          updateChoice: plugin.updateChecks ?? null,
+        });
+      }
+    }
+    const next = records.flatMap((update): PluginUpdate[] => {
       const plugin = installed(update.id);
       if (plugin && plugin.enabled !== update.installedEnabled)
         update = {
@@ -459,10 +491,7 @@ export function createPluginUpdates(
           }),
         };
       if (!current(update)) return [];
-      const result = pluginUpdateCheck(
-        observedChecks?.snapshot() ?? {},
-        installed(update.id),
-      );
+      const result = pluginUpdateCheck(results, plugin);
       if (!result || result.checking) return [update];
       if (result.error) {
         if (result.error === update.error) return [update];

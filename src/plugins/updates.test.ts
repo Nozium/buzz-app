@@ -2461,3 +2461,102 @@ it.each(["new", "old"])(
     }
   },
 );
+
+it.each([false, true])(
+  "inserts an explicit result after a checked-current result (failure=%s)",
+  async (failure) => {
+    const f = fixture();
+    f.candidate.revision = f.plugin.revision;
+    const updates = createPluginUpdates(f.manager, f.authorize);
+    try {
+      await updates.check();
+      expect(updates.snapshot()).toEqual([]);
+      if (failure)
+        f.checkGit.mockRejectedValueOnce(new Error("source unavailable"));
+      else f.candidate.revision = "new";
+      await sharedPluginUpdateChecks(f.manager.imports).check(
+        f.plugin,
+        f.authorize,
+      );
+      const snapshot = updates.capability.getSnapshot();
+      if (failure) {
+        expect(snapshot.status).toBe("error");
+        expect(snapshot.errors).toEqual([
+          { id: f.plugin.manifest.id, message: "Error: source unavailable" },
+        ]);
+      } else {
+        expect(snapshot.candidates).toHaveLength(1);
+        expect(snapshot.candidates[0]?.candidateRevision).toBe("new");
+        const token = snapshot.candidates[0]?.token;
+        expect(token && updates.isCurrentToken(token)).toBe(true);
+      }
+    } finally {
+      updates.dispose();
+    }
+  },
+);
+
+it("inserts a shared result that supersedes the first automatic check", async () => {
+  const f = fixture();
+  let finish!: (preview: ImportPreview) => void;
+  f.checkGit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const updates = createPluginUpdates(f.manager, f.authorize);
+  const pending = updates.check();
+  try {
+    await vi.waitFor(() => expect(f.checkGit).toHaveBeenCalledOnce());
+    await sharedPluginUpdateChecks(f.manager.imports).check(
+      f.plugin,
+      f.authorize,
+    );
+    expect(updates.capability.getSnapshot().candidates).toHaveLength(1);
+    finish({
+      ...f.preview,
+      candidates: [{ ...f.candidate, revision: f.plugin.revision }],
+    });
+    await pending;
+    expect(updates.capability.getSnapshot().candidates).toHaveLength(1);
+    const token = updates.snapshot()[0]?.token;
+    expect(token && updates.isCurrentToken(token)).toBe(true);
+  } finally {
+    finish(f.preview);
+    await pending;
+    updates.dispose();
+  }
+});
+
+it.each(["opt-out", "folder", "url"])(
+  "does not create background records from ineligible %s shared results",
+  async (kind) => {
+    const f = fixture();
+    if (kind === "opt-out") f.plugin.updateChecks = false;
+    if (kind === "folder") {
+      f.plugin.updateSource = { root: "/plugins", path: "." };
+      Object.assign(f.imports, {
+        checkFolder: vi.fn(async () => ({ revision: f.plugin.revision })),
+      });
+    }
+    if (kind === "url")
+      f.plugin.updateSource = {
+        url: "https://plugins.example.org/plugin.json",
+        sha256: "a".repeat(64),
+      };
+    const updates = createPluginUpdates(f.manager, f.authorize);
+    try {
+      await updates.check();
+      sharedPluginUpdateChecks(f.manager.imports).observe(f.plugin)(
+        f.candidate,
+        null,
+        f.candidate,
+      );
+      expect(updates.snapshot()).toEqual([]);
+      expect(updates.capability.getSnapshot().candidates).toEqual([]);
+    } finally {
+      updates.dispose();
+    }
+  },
+);
