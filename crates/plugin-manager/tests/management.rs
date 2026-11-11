@@ -1152,7 +1152,6 @@ fn bundled_defaults_preserve_saved_choices_and_only_channels_is_required() {
                 | "buzz.relay-notes"
                 | "buzz.reminders"
                 | "buzz.workflows"
-                | "buzz.mesh-compute"
                 | "buzz.focus"
                 | "buzz.drafts-and-sent"
                 | "buzz.charts"
@@ -1181,7 +1180,12 @@ fn bundled_defaults_preserve_saved_choices_and_only_channels_is_required() {
         }
     }
     // Saved choices override current defaults even across process restarts.
-    for id in ["buzz.bestie", "buzz.reminders", "buzz.workflows"] {
+    for id in [
+        "buzz.bestie",
+        "buzz.mesh-compute",
+        "buzz.reminders",
+        "buzz.workflows",
+    ] {
         for enabled in [true, false] {
             manager
                 .change(if enabled { "enable" } else { "disable" }, id)
@@ -1220,6 +1224,7 @@ fn bundled_defaults_are_pinned_for_fresh_and_untouched_existing_profiles() {
                 ("buzz.reminders", existing),
                 ("buzz.workflows", existing),
                 ("buzz.bestie", !existing),
+                ("buzz.mesh-compute", !existing),
             ] {
                 assert_eq!(
                     catalog
@@ -1259,6 +1264,7 @@ fn bundled_defaults_are_pinned_for_fresh_and_untouched_existing_profiles() {
             ("buzz.reminders", false),
             ("buzz.workflows", false),
             ("buzz.bestie", true),
+            ("buzz.mesh-compute", true),
         ] {
             assert_eq!(
                 reopened
@@ -1312,6 +1318,7 @@ fn failed_default_snapshot_does_not_block_untouched_upgrades() {
                 ("buzz.reminders", true),
                 ("buzz.workflows", saved_workflows.unwrap_or(true)),
                 ("buzz.bestie", false),
+                ("buzz.mesh-compute", false),
             ] {
                 assert_eq!(
                     catalog
@@ -1331,6 +1338,7 @@ fn failed_default_snapshot_does_not_block_untouched_upgrades() {
             serde_json::from_slice(&fs::read(settings).unwrap()).unwrap();
         assert_eq!(saved["bundledOverrides"]["buzz.reminders"], true);
         assert_eq!(saved["bundledOverrides"]["buzz.bestie"], false);
+        assert_eq!(saved["bundledOverrides"]["buzz.mesh-compute"], false);
         assert_eq!(
             saved["bundledOverrides"]["buzz.workflows"],
             saved_workflows.unwrap_or(true)
@@ -1346,7 +1354,12 @@ fn legacy_plugin_settings_preserve_choices_while_missing_flags_keep_old_defaults
         fs::create_dir_all(&root).unwrap();
         let mut flags = serde_json::json!({ "buzz.github": false });
         if let Some(enabled) = saved {
-            for id in ["buzz.bestie", "buzz.reminders", "buzz.workflows"] {
+            for id in [
+                "buzz.bestie",
+                "buzz.mesh-compute",
+                "buzz.reminders",
+                "buzz.workflows",
+            ] {
                 flags[id] = enabled.into();
             }
         }
@@ -1362,7 +1375,12 @@ fn legacy_plugin_settings_preserve_choices_while_missing_flags_keep_old_defaults
         for _launch in 0..2 {
             let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
             let catalog = manager.catalog().unwrap();
-            for id in ["buzz.bestie", "buzz.reminders", "buzz.workflows"] {
+            for id in [
+                "buzz.bestie",
+                "buzz.mesh-compute",
+                "buzz.reminders",
+                "buzz.workflows",
+            ] {
                 assert_eq!(
                     catalog
                         .plugins
@@ -1370,7 +1388,7 @@ fn legacy_plugin_settings_preserve_choices_while_missing_flags_keep_old_defaults
                         .find(|p| p.manifest.id == id)
                         .unwrap()
                         .enabled,
-                    saved.unwrap_or(id != "buzz.bestie"),
+                    saved.unwrap_or(!matches!(id, "buzz.bestie" | "buzz.mesh-compute")),
                     "{id}, saved={saved:?}"
                 );
             }
