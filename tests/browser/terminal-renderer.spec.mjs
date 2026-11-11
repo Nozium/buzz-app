@@ -189,6 +189,20 @@ test("terminal placement moves the retained shell and syncs across windows", asy
         () => window.retainedTerminal === document.querySelector(".xterm"),
       ),
     ).toBe(true);
+    // A closed pane keeps the Side terminal attached; explicit reopening focuses it.
+    await page
+      .getByRole("button", { name: "Close tab pane", exact: true })
+      .click();
+    await expect(side).toBeHidden();
+    await page.keyboard.press("Control+j");
+    await expect(side).toBeVisible();
+    await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+    expect(await page.evaluate(() => window.terminalPanel.spawns())).toBe(1);
+    expect(
+      await page.evaluate(
+        () => window.retainedTerminal === document.querySelector(".xterm"),
+      ),
+    ).toBe(true);
     // Retained tabs keep their opening context while the launcher follows threads.
     await page.setViewportSize({ width: 1280, height: 800 });
     await page

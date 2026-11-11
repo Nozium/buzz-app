@@ -316,6 +316,9 @@ function PlacementWorkspace({ current }: { current: ChannelSummary }) {
       <button type="button" onClick={() => showSettings(true)}>
         Terminal settings
       </button>
+      <button type="button" onClick={() => state.setPaneOpen(false)}>
+        Close tab pane
+      </button>
       <button
         type="button"
         onClick={() =>

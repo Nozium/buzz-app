@@ -116,6 +116,19 @@ export const apply: PluginModule["apply"] = (ctx) => {
       };
     }, [toggleWithFocus, target, focus, available, pressed]);
     useEffect(() => {
+      if (!pressed || focusRequest !== focus) return;
+      // A retained pane may reopen without mounting its screen again.
+      queueMicrotask(() => {
+        if (
+          binding?.target === target &&
+          binding.pressed &&
+          focusRequest === focus &&
+          sessions.get(context)?.screen?.focus()
+        )
+          focusRequest = undefined;
+      });
+    }, [pressed, target, focus, context]);
+    useEffect(() => {
       const current = binding;
       // Let the host retire the old opening before opening the new contribution.
       queueMicrotask(() => {

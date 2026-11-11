@@ -17,6 +17,7 @@ import styles from "./Terminal.module.css";
 export type TerminalInputSource = "user" | "reply";
 export type TerminalScreen = {
   mount(host: HTMLElement, focus?: boolean): () => void;
+  focus(): boolean;
   output(data: Uint8Array): Promise<void>;
   dispose(): void;
 };
@@ -117,8 +118,16 @@ export function createScreen(
       ? `"${family}", var(--font-system-mono)`
       : "";
   };
+  const focus = () => {
+    const modal = document.querySelector('dialog[open], [aria-modal="true"]');
+    if (disposed || !element.isConnected || (modal && !modal.contains(element)))
+      return false;
+    terminal.focus();
+    return true;
+  };
   return {
-    mount(host, focus = true) {
+    focus,
+    mount(host, focusOnMount = true) {
       detach?.();
       host.append(element);
       applyFont();
@@ -163,8 +172,7 @@ export function createScreen(
       element.addEventListener("keydown", splash.dismiss);
       void update();
       // A placement move can remount behind Settings; its dialog keeps focus.
-      const modal = document.querySelector('dialog[open], [aria-modal="true"]');
-      if (focus && (!modal || modal.contains(host))) terminal.focus();
+      if (focusOnMount) focus();
       const cleanup = () => {
         // A closing pane can unmount after another mount has claimed the screen.
         if (!attached) return;

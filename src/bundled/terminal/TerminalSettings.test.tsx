@@ -357,11 +357,13 @@ it("keeps failed saves active, hides recovery while inactive, and retries the ac
 function setupOptionMeta(platform = "MacIntel") {
   vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
   const font = createTerminalFontPreference();
-  stores.push(font);
+  const placement = createTerminalPlacementPreference();
+  stores.push(font, placement);
   render(
     <ToastProvider>
       <TerminalSettings
         font={font}
+        placement={placement}
         drafts={createTerminalSettingsDraft()}
         active={() => true}
       />

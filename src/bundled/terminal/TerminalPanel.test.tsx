@@ -29,7 +29,7 @@ test("thread context changes keep the mounted screen and reply focus", () => {
   const entry: TerminalSession = {
     context,
     status: "running",
-    screen: { mount, output: async () => {}, dispose() {} },
+    screen: { mount, focus: () => true, output: async () => {}, dispose() {} },
   };
   const sessions: TerminalSessions = {
     available: true,
@@ -127,6 +127,7 @@ test.each(["button", "native menu"])(
       context,
       status: "running",
       screen: {
+        focus: () => true,
         mount: (host) => {
           host.append(input);
           return detach;
