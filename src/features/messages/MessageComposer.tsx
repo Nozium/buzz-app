@@ -38,6 +38,7 @@ import {
 } from "./mention-admission";
 import { rememberMention } from "./mention-history";
 import {
+  composerChips,
   readComposerSnapshot,
   composerMarkdownContext,
   markdownRanges,
@@ -49,6 +50,7 @@ import { useListedChannel } from "../relay/listed-channel";
 import { FileDropOverlay } from "./FileDropOverlay";
 import { useFileDrop } from "./use-file-drop";
 import { Button } from "../../shared/design-system/ui/Button";
+import { useToastClearance } from "../../shared/design-system/ui/Toast";
 import { LoadingRegion } from "../../shared/design-system/ui/LoadingRegion";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
@@ -66,6 +68,7 @@ import {
 } from "./remembered-mentions";
 import { rememberAgentsPreference } from "./mention-preferences";
 import { useSendWithModEnterPreference } from "./send-key-preference";
+import { useEditWithUpArrowPreference } from "./edit-key-preference";
 import { matches } from "../shortcuts/bindings";
 import { isApplePlatform } from "../shortcuts/format";
 import { useChosenAgent } from "../solo/default-agent";
@@ -78,10 +81,14 @@ import {
 } from "../solo/people";
 import {
   ArrowUpIcon,
+  ChatCircleIcon,
+  LockIcon,
   PaperclipIcon,
   PencilSimpleIcon,
   XIcon,
 } from "../../shared/design-system/icons/index";
+import { channelIcon } from "../channels/channel-icon";
+import { channelIconClass } from "../../shared/inline-reference";
 import { useVoiceCapture } from "./useVoiceCapture";
 import { ComposerAttachments } from "./ComposerAttachments";
 import {
@@ -129,6 +136,7 @@ import {
   type MentionDraft,
   type MentionRecipient,
 } from "./mention-draft";
+import { useShowingDraft } from "./draft-places";
 import { normalizeName } from "../search/person-match";
 import { ComposerAccessories } from "../conversation/ComposerAccessories";
 import { ComposerTools } from "../conversation/ComposerTools";
@@ -139,7 +147,6 @@ import { ComposerModels, type DraftPicks } from "./ComposerModels";
 import type { MentionPicks } from "../relay/messages";
 import type {
   ConversationExtensions,
-  CompletionEdit,
   CompletionPending,
   CompletionQuery,
   CompletionResolution,
@@ -147,7 +154,15 @@ import type {
   ComposerResource,
 } from "../conversation/contracts";
 import { ComposerCompletions } from "../conversation/ComposerCompletions";
-import { MENTION_RESOLVE_TIMEOUT_MS } from "../conversation/completion";
+import {
+  chosenWorkspace,
+  WorkspaceCompletion,
+  type WorkspaceCompletionTarget,
+} from "../conversation/workspace-completion";
+import {
+  MENTION_RESOLVE_TIMEOUT_MS,
+  type HostCompletionEdit,
+} from "../conversation/completion";
 import { useCompletionEditor } from "../conversation/useCompletionEditor";
 import { formatMediaTime, mediaTimeReply } from "./media-timecode";
 import { RichComposerInput } from "./RichComposerInput";
@@ -159,6 +174,7 @@ import type {
   ComposerFormat,
 } from "./composer-dom";
 import { TargetOpenerProvider } from "../conversation/opener";
+import { channelText } from "../channels/channel-icon";
 import { avatarMedia } from "../../shared/avatar-source";
 import { followUpBehaviorPreference } from "./follow-up-preference";
 import { followUpQueue } from "./follow-up-queue";
@@ -295,7 +311,11 @@ export type MessageComposerProps = {
   requireMention?: boolean | undefined;
   chatPresentation?: boolean | undefined;
   trailingTool?: ReactNode;
+  /** Only while the chat is new: `#` then offers its workspaces first. */
+  workspace?: WorkspaceCompletionTarget | undefined;
   inviteAgents?: boolean | undefined;
+  /** Narrows a submission's agents to those its owner accepts. */
+  agentFilter?: ((pubkey: string) => boolean) | undefined;
   onSend?: (id: string) => void;
   /** A plain slash command with no recipients or attachments may be consumed by
    * its conversation owner. Return false to send it as an ordinary message. */
@@ -318,6 +338,8 @@ export type MessageComposerProps = {
    * seedMentions); other composers read their own channel window. */
   threadSeed?: Pick<ChannelMessage, "id" | "mentions"> | undefined;
   replyParentId?: string | undefined;
+  /** Bind a timecoded reply to the selected gallery attachment. */
+  mediaTargetUrl?: string | undefined;
   replyContext?: ReactNode;
   mediaTimeSeconds?: number;
   clearMediaTime?(): void;
@@ -343,6 +365,8 @@ export type MessageComposerProps = {
     /** Told after each save whether the editor holds a draft it could not
      * save, which view state then misses. */
     unsaved?: ((held: boolean) => void) | undefined;
+    /** Hears each edit, whether or not saving it succeeded. */
+    onDraftChange?: ((draft: MentionDraft) => void) | undefined;
     /** `addressed`: the toolbar's agents, when they are held apart from the text. */
     submit: (
       draft: MentionDraft,
@@ -377,7 +401,7 @@ export function MessageComposer(props: MessageComposerProps) {
 }
 
 function PersonalComposer(props: MessageComposerProps) {
-  const { session, channelId, submission } = props;
+  const { session, channelId, submission, agentFilter } = props;
   const choices = useAgentChoices(session, true, true);
   const profiles = useSyncExternalStore(
     session.profiles.subscribe,
@@ -394,7 +418,9 @@ function PersonalComposer(props: MessageComposerProps) {
   const roster = useMemo(
     () =>
       submission
-        ? choices.selectable
+        ? agentFilter
+          ? choices.selectable.filter((agent) => agentFilter(agent.pubkey))
+          : choices.selectable
         : soloRoster(
             members,
             session.viewer,
@@ -404,6 +430,7 @@ function PersonalComposer(props: MessageComposerProps) {
           ),
     [
       submission,
+      agentFilter,
       choices.selectable,
       members,
       agentPubkeys,
@@ -441,14 +468,6 @@ function PersonalComposer(props: MessageComposerProps) {
   return (
     <DraftMentionRoster.Provider value={value}>
       <Composer {...props} />
-      {choices.error && (
-        <p role="alert">
-          {choices.error}{" "}
-          <Button onClick={() => void props.session.agentChoices.refresh()}>
-            Retry agents
-          </Button>
-        </p>
-      )}
     </DraftMentionRoster.Provider>
   );
 }
@@ -465,6 +484,13 @@ function untouchedDraft(draft: MentionDraft) {
     !draft.chatCards?.length &&
     !draft.gifs?.length
   );
+}
+
+/** The link that opens a conversation, or a thread in it. */
+function conversationLink(channelId: string, threadRootId?: string) {
+  return threadRootId
+    ? `buzz://message?${new URLSearchParams({ channel: channelId, id: threadRootId, thread: threadRootId })}`
+    : `buzz://channel/${encodeURIComponent(channelId)}`;
 }
 
 function sameAttachmentSelection(
@@ -495,6 +521,7 @@ function Composer({
   threadRootId,
   threadSeed,
   replyParentId,
+  mediaTargetUrl,
   replyContext,
   mediaTimeSeconds,
   clearMediaTime,
@@ -511,6 +538,7 @@ function Composer({
   chatPresentation = false,
   inviteAgents = false,
   trailingTool,
+  workspace,
 }: MessageComposerProps) {
   const active = useConversationPresentation();
   // Previews replace the list on every message; subscribe to this channel's facts.
@@ -536,7 +564,10 @@ function Composer({
     if (disabled || !active) sendAttempt.current?.abort();
   }, [disabled, active]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Retargeting invalidates an in-flight send, not the root-keyed draft.
-  useLayoutEffect(() => () => sendAttempt.current?.abort(), [replyParentId]);
+  useLayoutEffect(
+    () => () => sendAttempt.current?.abort(),
+    [replyParentId, mediaTargetUrl],
+  );
   const inputId = useId();
   const draftKey =
     submission?.draftKey ??
@@ -684,6 +715,7 @@ function Composer({
   // subscribe only while they could seed. Nothing is loaded here: the host
   // owns the window.
   const presented = active && shown;
+  useShowingDraft(scope, draftKey, presented);
   const seeking =
     seedsFromWindow &&
     presented &&
@@ -1039,6 +1071,7 @@ function Composer({
     [],
   );
   const sendWithModEnter = useSendWithModEnterPreference();
+  const editWithUpArrow = useEditWithUpArrowPreference();
   const saveDraft = (next: MentionDraft, save = true) => {
     next = stageChatCards(
       {
@@ -1064,6 +1097,7 @@ function Composer({
         submission.unsaved?.(
           unsavedDraft.current || unsavedPicks.current.size > 0,
         );
+        submission.onDraftChange?.(next);
       } else {
         dirty.current = true;
         if (!conflict && !accepted) persist(next);
@@ -1087,7 +1121,11 @@ function Composer({
   }
   const [error, setError] = useState<string>();
   const [pasteTooLong, setPasteTooLong] = useState(false);
-  const [attachmentError, setAttachmentError] = useState<string>();
+  const [attachmentError, setAttachmentError] =
+    useState<Readonly<{ title: string; description: string }>>();
+  /** Nothing was attached, for this one reason. */
+  const refuseAttachment = (description: string) =>
+    setAttachmentError({ title: "Could not attach file", description });
   const focusRestoredDraft = useRef(false);
   const beforeEdit = useRef<
     { value: MentionDraft; restore(): void } | undefined
@@ -1107,7 +1145,8 @@ function Composer({
   });
   // biome-ignore lint/correctness/useExhaustiveDependencies: A changed draft or edit target retires feedback about the previous paste.
   useEffect(() => {
-    setPasteTooLong(false);
+    // Avoid queuing a redundant passive update after every native keystroke.
+    if (pasteTooLong) setPasteTooLong(false);
   }, [draft, editing.target]);
   const editScope = useMessageEditScope();
   const editableRows = () =>
@@ -1208,8 +1247,16 @@ function Composer({
     (channel) => !!channel?.archived || !!channel?.readOnly,
   );
   const editDisabled = disabled || editLocked;
+  // Chips stay saved as they are until a build that understands them sends
+  // them.
+  const chips = useMemo(
+    () => composerChips(readComposerSnapshot(value.document)),
+    [value.document],
+  );
+  const unsupportedDraft = !!chips.length;
   const editingDisabled =
     disabled ||
+    unsupportedDraft ||
     admitting ||
     sending ||
     !!accepted ||
@@ -1222,10 +1269,18 @@ function Composer({
     threadRootId,
     active && !editingDisabled && !editing.target && !submission && !cached,
   );
-  const label = editing.target
-    ? "Edit message"
-    : (customLabel ??
-      (threadRootId ? "Reply to thread" : `Message #${channelName}`));
+  // The editor's placeholder is text, so a channel's own placeholder is drawn
+  // over it with its sidebar icon; DMs, threads and edits keep their text.
+  const ChannelIcon = useListedChannel(listed, channelId, channelIcon);
+  const channelLabel =
+    !editing.target && customLabel === undefined && !threadRootId;
+  const iconPlaceholder =
+    channelLabel && placeholder === undefined && ChannelIcon !== ChatCircleIcon;
+  const label = channelLabel
+    ? `Message ${ChannelIcon === LockIcon ? "" : "#"}${channelName}`
+    : editing.target
+      ? "Edit message"
+      : (customLabel ?? "Reply to thread");
   const gifPreview = useGifDraftPreview(extensions?.tools);
   const attachments = useAttachmentDraft(
     session,
@@ -1238,6 +1293,8 @@ function Composer({
     { ids: readonly string[]; owner: Element | null } | undefined
   >(undefined);
   const form = useRef<HTMLFormElement>(null);
+  // Notices float above the composer, not over Send.
+  useToastClearance(form);
   const notify = useToastNotification();
   const handOffFocus = useEffectEvent(() => {
     if (!form.current?.contains(document.activeElement)) return;
@@ -1269,7 +1326,7 @@ function Composer({
   const voice = useVoiceCapture(
     attachments.store,
     !active || editingDisabled || !!editing.target || !canAttach,
-    setAttachmentError,
+    refuseAttachment,
   );
   useEffect(() => {
     if (disabled) attachments.store.cancel();
@@ -1321,11 +1378,11 @@ function Composer({
     )
       return;
     if (editing.target) {
-      setAttachmentError("Finish editing before attaching new files.");
+      refuseAttachment("Finish editing before attaching new files.");
       return;
     }
     if (!canAttach) {
-      setAttachmentError(
+      refuseAttachment(
         submission
           ? "Create this conversation before attaching files."
           : "Uploads are unavailable on this connection.",
@@ -1333,14 +1390,26 @@ function Composer({
       return;
     }
     try {
-      attachments.store.add(files);
-      setAttachmentError(undefined);
-      return attachments.store
+      const before = attachments.store.snapshot().length;
+      const left = attachments.store.add(files);
+      const added = attachments.store
         .snapshot()
-        .slice(-files.length)
+        .slice(before)
         .map((item) => item.id);
-    } catch (reason) {
+      const refused = files.length - added.length;
       setAttachmentError(
+        left.length
+          ? {
+              title: added.length
+                ? `Could not attach ${refused} of ${files.length} files`
+                : `Could not attach ${refused} files`,
+              description: left.join(" "),
+            }
+          : undefined,
+      );
+      return added;
+    } catch (reason) {
+      refuseAttachment(
         reason instanceof Error ? reason.message : "Could not attach files.",
       );
     }
@@ -1633,15 +1702,18 @@ function Composer({
     text: string,
     recipient?: MentionRecipient,
     range?: CompletionQuery,
-    terminator?: ":",
+    /** The typed key that ended the query: a closing emoji colon, or the key
+     * that follows a mention in place of its space. */
+    terminator?: string,
     focus = true,
   ) {
     const field = input.current;
     if (!editable() || !field || typeof text !== "string") return false;
     // Edits replace prose; they do not change the original notification recipients.
     if (editing.target && recipient) {
-      text = editMentionText(recipient);
+      text = editMentionText(recipient, terminator);
       recipient = undefined;
+      terminator = undefined;
     }
     if (recipient && !admits()(recipient.pubkey)) {
       setError(
@@ -1949,7 +2021,11 @@ function Composer({
       return false;
     // Message edits only add references, never new notification intent.
     if (editing.target)
-      return insert(unique.map(editMentionText).join(""), undefined, range);
+      return insert(
+        unique.map((person) => editMentionText(person)).join(""),
+        undefined,
+        range,
+      );
     const admitted = admits();
     if (unique.some((person) => !admitted(person.pubkey))) {
       setError(
@@ -2030,7 +2106,7 @@ function Composer({
     return input.current.insertResource(resource);
   }
   function replaceCompletion(
-    edit: CompletionEdit,
+    edit: HostCompletionEdit,
     query: CompletionQuery,
     observation: ComposerObservation,
     key?: string,
@@ -2040,8 +2116,10 @@ function Composer({
       valueRef.current.text !== observation.text
     )
       return false;
-    // A typed terminator (Space, the closing emoji colon) stays literal in code.
-    if (key === " " || key === ":") {
+    // A typed terminator (Space, closing punctuation after a name, the closing
+    // emoji colon) stays literal in code. Tab, Enter and a click are not typed.
+    const typed = key?.length === 1 ? key : undefined;
+    if (typed) {
       const doc = readComposerSnapshot(valueRef.current.document);
       const context = doc
         ? composerMarkdownContext(doc)
@@ -2053,13 +2131,21 @@ function Composer({
       )
         return false;
     }
+    const chosen = chosenWorkspace(edit);
+    if (chosen !== undefined) {
+      // The chat's workspace leaves no text behind; the control shows it.
+      if (!workspace || editing.target || !insert("", undefined, query))
+        return false;
+      workspace.choose(chosen);
+      return true;
+    }
     if ("pending" in edit && edit.pending) {
       // Edits replace prose and add no recipients, so a chip that may become
-      // one has no place there: the typed Space stays literal.
+      // one has no place there: the typed key stays literal.
       const field = input.current;
       if (editing.target || !editable() || !field) return false;
       completion.invalidate();
-      const id = field.insertPendingMention(edit.pending.name, query);
+      const id = field.insertPendingMention(edit.pending.name, query, typed);
       if (!id) return false;
       pendingMentions.current.set(id, { resolve: edit.pending.resolve });
       setError(undefined);
@@ -2068,7 +2154,12 @@ function Composer({
     if ("mentions" in edit && edit.mentions)
       return insertMentions(edit.mentions, query);
     if ("mention" in edit && edit.mention)
-      return insert(`@${edit.mention.name} `, edit.mention, query);
+      return insert(`@${edit.mention.name} `, edit.mention, query, typed);
+    if ("token" in edit && edit.token) {
+      if (editing.target) return false;
+      completion.invalidate();
+      return input.current?.insertToken(edit.token, query) ?? false;
+    }
     return (
       typeof edit.text === "string" &&
       insert(
@@ -2441,6 +2532,7 @@ function Composer({
     }
     if (
       disabled ||
+      unsupportedDraft ||
       compactingNow() ||
       accepted ||
       conflict ||
@@ -2848,11 +2940,14 @@ function Composer({
               content,
               recipients,
               uploaded,
-              ...(replyParentId || references.length || tuned
+              ...(replyParentId || references.length || tuned || mediaTargetUrl
                 ? [replyParentId]
                 : []),
-              ...(references.length || tuned ? [references] : []),
-              ...(tuned ? [sentPicks] : []),
+              ...(references.length || tuned || mediaTargetUrl
+                ? [references]
+                : []),
+              ...(tuned || mediaTargetUrl ? [sentPicks] : []),
+              ...(mediaTargetUrl ? [mediaTargetUrl] : []),
             )
           : references.length || tuned
             ? sender.messages.send(
@@ -2911,10 +3006,20 @@ function Composer({
       } else if (capturedAttachments.length) {
         // The revision acceptance saves; remembered agents are not a draft.
         const followup = JSON.stringify(mentionDraft(""));
+        // Name it as the sidebar does; a thread link opens the thread.
+        const listed = channels().find((channel) => channel.id === channelId);
+        const name = channelText({ ...listed, name: channelName });
         sendInBackground(
           session,
           recoveryKey,
           channelId,
+          {
+            name: threadRootId ? `thread in ${name}` : name,
+            // A huddle opens from its entry point, never by its room's link.
+            ...(listed?.huddle
+              ? {}
+              : { link: conversationLink(channelId, threadRootId) }),
+          },
           capturedAttachments,
           async (uploaded) => {
             const sent = await publish(uploaded);
@@ -3071,6 +3176,12 @@ function Composer({
   if (attachmentsExiting && editing.target) setAttachmentsExiting(false);
   const context = (
     <div className={styles.composerContext}>
+      {unsupportedDraft && (
+        <p role="status">
+          This draft has details this version of Buzz cannot send. It is kept
+          unchanged.
+        </p>
+      )}
       {!cached && !submission && (
         <TypingIndicator
           audience="humans"
@@ -3239,25 +3350,36 @@ function Composer({
           {label}
         </label>
         {active && extensions?.completions && (
-          <ComposerCompletions
-            registry={extensions.completions}
-            editor={completion}
-            input={input}
-            session={session}
-            scope={scope}
-            channelId={channelId}
-            threadRootId={threadRootId}
-            inviteAgents={agentChoices && !editing.target}
-            replace={replaceCompletion}
-            resolved={value}
-          />
+          <WorkspaceCompletion.Provider
+            value={editing.target ? undefined : workspace}
+          >
+            <ComposerCompletions
+              registry={extensions.completions}
+              editor={completion}
+              input={input}
+              session={session}
+              scope={scope}
+              channelId={channelId}
+              threadRootId={threadRootId}
+              inviteAgents={agentChoices && !editing.target}
+              replace={replaceCompletion}
+              resolved={chips.length ? { ...value, tokens: chips } : value}
+            />
+          </WorkspaceCompletion.Provider>
         )}
-        <BackgroundUploadStatus session={session} focusTarget={input} />
+        <BackgroundUploadStatus
+          session={session}
+          focusTarget={input}
+          here={
+            presented ? conversationLink(channelId, threadRootId) : undefined
+          }
+          onOpenLink={onOpenLink}
+        />
         {dragging && <FileDropOverlay composer={form} />}
         {attachmentError && (
           <ToastNotice
-            title="Could not attach file"
-            description={attachmentError}
+            title={attachmentError.title}
+            description={attachmentError.description}
             onDismiss={() => setAttachmentError(undefined)}
           />
         )}
@@ -3453,18 +3575,20 @@ function Composer({
                   !editDisabled &&
                   !submission &&
                   !editing.target &&
-                  ((event.currentTarget.value === "" &&
-                    !valueRef.current.recipients.length) ||
+                  ((valueRef.current.text === "" &&
+                    !valueRef.current.recipients.length &&
+                    composerMarkdown(valueRef.current) === "") ||
                     automaticTag.current ===
                       JSON.stringify(valueRef.current)) &&
                   !valueRef.current.chatCards?.length &&
                   !valueRef.current.gifs?.length &&
                   !attachments.items.length
                 ) {
-                  // Like Slack, Up selects the newest message; E edits it.
-                  // ⌘↑ and surfaces without a selectable list keep Up-to-edit.
+                  // The default selects the newest message; the preference
+                  // and ⌘↑ edit using the same conversation-scoped lookup.
                   if (
                     !event.metaKey &&
+                    !editWithUpArrow &&
                     selectNewestMessage(editScope?.list.current)
                   ) {
                     event.preventDefault();
@@ -3512,6 +3636,18 @@ function Composer({
                 }
               }}
             />
+            {iconPlaceholder && (
+              // Its words are drawn by CSS, like the editor's own placeholder,
+              // so find-in-page and copying skip them.
+              <span
+                className={styles.channelPlaceholder}
+                aria-hidden="true"
+                data-lead="Message"
+                data-name={channelName}
+              >
+                <ChannelIcon className={channelIconClass(ChannelIcon)} />
+              </span>
+            )}
           </div>
         </div>
         {!editing.target &&
@@ -3586,6 +3722,7 @@ function Composer({
                   resettable={stickyPicks}
                   explicitOnly={!!submission && stickyPicks}
                   onChange={changePicks}
+                  focusAfterPickerRemoval={() => input.current?.focus()}
                   onResolved={(next, error) => {
                     resolvedPicks.current =
                       next === undefined

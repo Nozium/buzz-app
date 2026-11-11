@@ -6,6 +6,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { StrictMode, type ReactNode } from "react";
 import { ChannelTimeline } from "./ChannelTimeline";
@@ -16,6 +17,8 @@ import type { ReadTarget } from "../relay/read-state-model";
 import { keypair, message, scriptedTransport } from "../relay/testing";
 import { readView, writeView } from "../../shared/view-state";
 import { MessageManagement } from "./MessageManagement";
+import type { PageNavigation } from "../navigation/service";
+import type { JsonValue } from "../navigation/targets";
 
 // Real React lifecycle; only the virtualizer's imperative layout boundary is
 // modeled here. Browser journeys retain the actual same-message/4px contract.
@@ -96,6 +99,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   localStorage.clear();
+  delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
 });
 async function frame() {
   await act(async () => {
@@ -253,7 +257,8 @@ function mount(bottom = false, revealOnMount = false, anchorLoaded = true) {
   };
 }
 
-function boundaryFixture() {
+/** `reading`: this list's own dwell can mark rows read, as the real store would. */
+function boundaryFixture({ reading = false } = {}) {
   const viewer = keypair(),
     peer = keypair(),
     relay = keypair();
@@ -266,10 +271,14 @@ function boundaryFixture() {
     unknownIds = new Set<string>(),
     pendingIds = new Set<string>(),
     ineligibleIds = new Set<string>(),
+    // Read only by their own receipt, not by a channel-wide read.
+    receiptIds = new Set<string>(),
     listeners = new Set<() => void>();
   const syncListeners = new Set<() => void>();
   let readRevision = owner.session.unread.revision();
-  let syncSnapshot = owner.session.unread.sync();
+  let syncSnapshot = reading
+    ? { ...owner.session.unread.sync(), capability: "frontier-sync" as const }
+    : owner.session.unread.sync();
   const entries: {
     promise: Promise<void>;
     resolve: () => void;
@@ -302,16 +311,56 @@ function boundaryFixture() {
     list: () => channelList,
     subscribeList: () => () => {},
   };
+  // Every row built so far, loaded or not: the store's evidence, not the window.
+  const built: ChannelMessage[] = [];
+  // The store's repair has finished, so that evidence reaches past the window.
+  let sampled = true;
+  // Unsampled: a repair that can still sample is running.
+  let repairing = true;
+  let freshness: "observed" | "stale" = "observed";
+  let error: string | undefined;
   const snapshot = (channelId: string) => {
+    const oldest = built
+      .filter(
+        (row) =>
+          row.channelId === channelId &&
+          !row.membership &&
+          !row.huddle &&
+          row.audience !== "agents" &&
+          row.authorId !== viewer.pubkey &&
+          (unreadIds.has(row.id) || forcedIds.has(row.id)),
+      )
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))[0];
     return {
       target: { kind: "channel" as const, channelId },
+      ...(oldest ? { oldestUnreadId: oldest.id } : {}),
+      ...(sampled
+        ? { sampled: true as const }
+        : repairing
+          ? { sampling: true as const }
+          : {}),
       observedCount: unreadIds.size,
       attentionCount: 0,
       coverage: "observed" as const,
-      freshness: "observed" as const,
+      freshness,
       manual: "none" as const,
+      ...(error ? { error } : {}),
     };
   };
+  // A repair the timeline asks for; the real one reads the relay.
+  const ensure = vi.fn(() => Promise.resolve());
+  // Catch-up reads every loaded row, which advances read intent and leaves
+  // nothing unread in the channel; observe reads the rows it is given.
+  const catchUp = vi.fn(async () => {
+    unreadIds.clear();
+    readRevision++;
+    publish();
+  });
+  const observe = vi.fn(async (ids: readonly string[]) => {
+    for (const id of ids) unreadIds.delete(id);
+    readRevision++;
+    publish();
+  });
   const snapshots = new Map([
     ["c", snapshot("c")],
     ["other", snapshot("other")],
@@ -342,9 +391,23 @@ function boundaryFixture() {
         unread: unreadIds.has(id),
         forced: forcedIds.has(id),
         viewing: false,
+        ...(!unreadIds.has(id) && !receiptIds.has(id)
+          ? { prefixRead: true as const }
+          : {}),
       };
     },
     revision: () => readRevision,
+    ensure,
+    ...(reading
+      ? {
+          reading: () => ({
+            view: () => {},
+            dispose: () => {},
+            observe,
+            catchUp,
+          }),
+        }
+      : {}),
   };
   const session = { ...owner.session, channels, unread };
   function row(
@@ -352,8 +415,7 @@ function boundaryFixture() {
     channelId = "c",
     extra: Partial<ChannelMessage> = {},
   ): ChannelMessage {
-    snapshots.set(channelId, snapshot(channelId));
-    return {
+    const result: ChannelMessage = {
       id: event.id,
       channelId,
       authorId: event.pubkey,
@@ -366,6 +428,9 @@ function boundaryFixture() {
       replyCount: 0,
       ...extra,
     };
+    built.push(result);
+    snapshots.set(channelId, snapshot(channelId));
+    return result;
   }
   function tree(
     channelId: string,
@@ -434,6 +499,7 @@ function boundaryFixture() {
     unknownIds,
     pendingIds,
     ineligibleIds,
+    receiptIds,
     enterChannel,
     subscribers: () => ({ unread: listeners.size, sync: syncListeners.size }),
     completeReadStateSnapshot,
@@ -463,6 +529,48 @@ function boundaryFixture() {
     advanceReadRevision() {
       readRevision++;
     },
+    setSampled(value: boolean) {
+      sampled = value;
+    },
+    /** Whether an unsampled store still has a repair that can sample. */
+    setRepairing(value: boolean) {
+      repairing = value;
+    },
+    setFreshness(value: "observed" | "stale", cause?: string) {
+      freshness = value;
+      error = cause;
+    },
+    ensure,
+    catchUp,
+    observe,
+    /** A focused reader at the bottom, with the dwell clock under test control. */
+    async focusReader() {
+      vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(
+        600,
+      );
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(0, 0, 800, 500),
+      );
+      vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
+        new DOMRect(0, 0, 800, 500),
+      ] as unknown as DOMRectList);
+      await frame();
+      await frame();
+      const history = screen.getByRole("region", {
+        name: "Channel message history",
+      });
+      await act(async () => {
+        history.focus();
+        await Promise.resolve();
+      });
+    },
+    async dwell() {
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+    },
     publish,
   };
 }
@@ -489,7 +597,10 @@ it("waits for entry and unread evidence before selecting a verified entry bounda
   h.unreadIds.add(laterUnread.id);
   const rows = [own, agents, joined, firstUnread, laterUnread];
   const mounted = render(h.tree("c", rows));
-  expect(h.enterChannel).toHaveBeenCalledExactlyOnceWith("c");
+  expect(h.enterChannel).toHaveBeenCalledExactlyOnceWith(
+    "c",
+    document.hasFocus(),
+  );
   expect(screen.queryByText("New messages", { exact: true })).toBeNull();
   await h.completeEntry();
   expect(screen.queryByText("New messages", { exact: true })).toBeNull();
@@ -532,13 +643,293 @@ it("waits for entry and unread evidence before selecting a verified entry bounda
   expect(screen.queryByText("Own message", { exact: true })).not.toBeNull();
 });
 
+const divider = () => screen.getByRole("separator", { name: "New messages" });
+const precedes = (earlier: Node, later: Node) =>
+  !!(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+it.each([{ presented: true }, { presented: false }])(
+  "places the entry boundary inside incomplete history when the oldest unread message is loaded: %j",
+  async ({ presented }) => {
+    const h = boundaryFixture();
+    const older = h.row(message(h.peer, "c", "Read above the entry window", 1));
+    const read = h.row(message(h.peer, "c", "Read in loaded window", 2));
+    const first = h.row(message(h.peer, "c", "First unread in window", 3));
+    const later = h.row(message(h.peer, "c", "Later unread in window", 4));
+    h.unreadIds.add(first.id);
+    h.unreadIds.add(later.id);
+    h.completeReadStateSnapshot();
+    h.publish();
+    const entryRows = [read, first, later];
+    const mounted = render(h.tree("c", entryRows, true, true, presented));
+    await h.completeEntry();
+    if (!presented) mounted.rerender(h.tree("c", entryRows, true));
+
+    const placed = divider();
+    expect(precedes(screen.getByText("Read in loaded window"), placed)).toBe(
+      true,
+    );
+    expect(precedes(placed, screen.getByText("First unread in window"))).toBe(
+      true,
+    );
+
+    // Paging older history in neither moves nor removes the line.
+    mounted.rerender(h.tree("c", [older, ...entryRows]));
+    h.publish();
+    expect(divider()).toBe(placed);
+    expect(
+      screen.getAllByRole("separator", { name: "New messages" }),
+    ).toHaveLength(1);
+    expect(
+      precedes(screen.getByText("Read above the entry window"), placed),
+    ).toBe(true);
+    expect(precedes(placed, screen.getByText("First unread in window"))).toBe(
+      true,
+    );
+    mounted.unmount();
+  },
+);
+
+it.each([{ ownFirst: false }, { ownFirst: true }])(
+  "does not infer an entry boundary at the first unread loaded row without a read one before it: %j",
+  async ({ ownFirst }) => {
+    // The repair's sample stopped inside the window, so the first loaded row
+    // is the oldest unread message the store knows.
+    const h = boundaryFixture();
+    const own = h.row(message(h.viewer, "c", "Own message in window", 1));
+    const first = h.row(message(h.peer, "c", "First loaded unread", 2));
+    const later = h.row(message(h.peer, "c", "Later loaded unread", 3));
+    h.unreadIds.add(first.id);
+    h.unreadIds.add(later.id);
+    h.completeReadStateSnapshot();
+    h.publish();
+    const entryRows = ownFirst ? [own, first, later] : [first, later];
+    const mounted = render(h.tree("c", entryRows, true));
+    await h.completeEntry();
+    expect(
+      h.unread.snapshot({ kind: "channel", channelId: "c" }).oldestUnreadId,
+    ).toBe(first.id);
+    expect(
+      screen.queryByRole("separator", { name: "New messages" }),
+    ).toBeNull();
+
+    const older = h.row(message(h.peer, "c", "Read above the entry window", 0));
+    mounted.rerender(h.tree("c", [older, ...entryRows]));
+    h.publish();
+    expect(
+      screen.queryByRole("separator", { name: "New messages" }),
+    ).toBeNull();
+    mounted.unmount();
+  },
+);
+
+it.each([{ olderUnread: false }, { olderUnread: true }])(
+  "waits for the unread repair before placing a boundary inside incomplete history: %j",
+  async ({ olderUnread }) => {
+    // Before the repair returns, the store knows only the loaded rows: its
+    // oldest unread message sits in the window below a row catch-up read,
+    // whatever lies above the window.
+    const h = boundaryFixture();
+    h.setSampled(false);
+    const read = h.row(message(h.peer, "c", "Read by catch-up", 2));
+    const first = h.row(message(h.peer, "c", "First loaded unread", 3));
+    const later = h.row(message(h.peer, "c", "Later loaded unread", 4));
+    h.unreadIds.add(first.id);
+    h.unreadIds.add(later.id);
+    h.completeReadStateSnapshot();
+    h.publish();
+    const mounted = render(h.tree("c", [read, first, later], true));
+    await h.completeEntry();
+    const target = { kind: "channel" as const, channelId: "c" };
+    expect(h.unread.snapshot(target).oldestUnreadId).toBe(first.id);
+    expect(
+      screen.queryByRole("separator", { name: "New messages" }),
+    ).toBeNull();
+
+    // The repair returns a row above the window.
+    const above = h.row(message(h.peer, "c", "Above the entry window", 1));
+    if (olderUnread) h.unreadIds.add(above.id);
+    h.setSampled(true);
+    h.publish();
+    if (olderUnread) {
+      expect(h.unread.snapshot(target).oldestUnreadId).toBe(above.id);
+      expect(
+        screen.queryByRole("separator", { name: "New messages" }),
+      ).toBeNull();
+    } else {
+      // Catch-up read every ordinary row above the read one, but a sample
+      // that stopped short could still miss an unread mention, broadcast or
+      // marked message there; docs/unread.md records that residual.
+      expect(precedes(divider(), screen.getByText("First loaded unread"))).toBe(
+        true,
+      );
+      expect(precedes(screen.getByText("Read by catch-up"), divider())).toBe(
+        true,
+      );
+    }
+    mounted.unmount();
+  },
+);
+
+/** Rows above the window, the store unsampled: the oldest unread row it knows
+ * sits below a row catch-up read, and the reader is at the bottom. Without
+ * `failed` its repair is still running; with it, a repair already ended
+ * without sampling and live evidence has since made the store observed. */
+async function heldReader({ failed }: { failed?: string } = {}) {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const h = boundaryFixture({ reading: true });
+  h.setSampled(false);
+  if (failed) {
+    h.setRepairing(false);
+    h.setFreshness("observed", failed);
+  }
+  const read = h.row(message(h.peer, "c", "Read by catch-up", 2));
+  const first = h.row(message(h.peer, "c", "First loaded unread", 3));
+  const later = h.row(message(h.peer, "c", "Later loaded unread", 4));
+  h.unreadIds.add(first.id);
+  h.unreadIds.add(later.id);
+  h.completeReadStateSnapshot();
+  h.publish();
+  const mounted = render(h.tree("c", [read, first, later], true));
+  await h.completeEntry();
+  await h.focusReader();
+  await h.dwell();
+  return { h, mounted, read, first, later };
+}
+
+it("holds this list's reading while the boundary waits for the unread repair, then reads once it is placed", async () => {
+  const { h, mounted, later } = await heldReader();
+  try {
+    // Without the hold, catch-up's read would advance read intent and erase
+    // the oldest unread row before the repair could vouch for it: no line.
+    expect(h.catchUp).not.toHaveBeenCalled();
+    expect(h.observe).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("separator", { name: "New messages" }),
+    ).toBeNull();
+    expect(h.ensure).toHaveBeenCalledTimes(1);
+
+    h.setSampled(true);
+    h.publish();
+    expect(precedes(divider(), screen.getByText("First loaded unread"))).toBe(
+      true,
+    );
+    expect(precedes(screen.getByText("Read by catch-up"), divider())).toBe(
+      true,
+    );
+    expect(h.catchUp).not.toHaveBeenCalled();
+
+    // The hold lifting starts dwell on its own.
+    await h.dwell();
+    expect(h.catchUp).toHaveBeenCalledWith(later.id, undefined);
+    expect(h.ensure).toHaveBeenCalledTimes(1);
+    expect(precedes(divider(), screen.getByText("First loaded unread"))).toBe(
+      true,
+    );
+  } finally {
+    mounted.unmount();
+    vi.useRealTimers();
+  }
+});
+
+it.each([{ observedAgain: false }, { observedAgain: true }])(
+  "resumes this list's reading with no boundary when the unread repair fails: %j",
+  async ({ observedAgain }) => {
+    const { h, mounted, later } = await heldReader();
+    try {
+      expect(h.catchUp).not.toHaveBeenCalled();
+      h.setRepairing(false);
+      h.setFreshness("stale", "Unread observation failed");
+      h.publish();
+      // A window read or live message marks the evidence observed again
+      // before any dwell, with the error kept and nothing sampled. Dwelling
+      // while stale would instead settle the visit through its own read.
+      if (observedAgain) {
+        h.setFreshness("observed", "Unread observation failed");
+        h.publish();
+      }
+      await h.dwell();
+      expect(h.catchUp).toHaveBeenCalledWith(later.id, undefined);
+      expect(
+        screen.queryByRole("separator", { name: "New messages" }),
+      ).toBeNull();
+    } finally {
+      mounted.unmount();
+      vi.useRealTimers();
+    }
+  },
+);
+
 it.each([
-  { remoteRead: false, presented: true },
-  { remoteRead: true, presented: true },
-  { remoteRead: true, presented: false },
+  "Unread observation failed",
+  "Unread observation capacity reached; refresh available",
 ])(
-  "does not infer an entry boundary after incomplete history: %j",
-  async ({ remoteRead, presented }) => {
+  "reads at once with no boundary when entered after a repair ended without sampling: %s",
+  async (failed) => {
+    const { h, mounted, later } = await heldReader({ failed });
+    try {
+      // No repair is coming, so waiting would hold reading until a retry.
+      expect(h.catchUp).toHaveBeenCalledWith(later.id, undefined);
+      expect(h.ensure).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("separator", { name: "New messages" }),
+      ).toBeNull();
+    } finally {
+      mounted.unmount();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it.each([{ receipt: false }, { receipt: true }])(
+  "places a boundary inside incomplete history only below a row a channel-wide read reaches: %j",
+  async ({ receipt }) => {
+    // A row read only by its own receipt says nothing about the ordinary rows
+    // above it, which a sample that stopped short may not have seen.
+    const h = boundaryFixture();
+    const read = h.row(message(h.peer, "c", "Read in loaded window", 2));
+    const first = h.row(message(h.peer, "c", "First loaded unread", 3));
+    const later = h.row(message(h.peer, "c", "Later loaded unread", 4));
+    if (receipt) h.receiptIds.add(read.id);
+    h.unreadIds.add(first.id);
+    h.unreadIds.add(later.id);
+    h.completeReadStateSnapshot();
+    h.publish();
+    const mounted = render(h.tree("c", [read, first, later], true));
+    await h.completeEntry();
+    if (receipt)
+      expect(
+        screen.queryByRole("separator", { name: "New messages" }),
+      ).toBeNull();
+    else
+      expect(precedes(divider(), screen.getByText("First loaded unread"))).toBe(
+        true,
+      );
+    mounted.unmount();
+  },
+);
+
+it("a read-intent change from elsewhere during the held wait still settles with no boundary and releases reading", async () => {
+  const { h, mounted, later } = await heldReader();
+  try {
+    expect(h.catchUp).not.toHaveBeenCalled();
+    h.advanceReadRevision();
+    h.publish("other");
+    h.setSampled(true);
+    h.publish();
+    expect(
+      screen.queryByRole("separator", { name: "New messages" }),
+    ).toBeNull();
+    await h.dwell();
+    expect(h.catchUp).toHaveBeenCalledWith(later.id, undefined);
+  } finally {
+    mounted.unmount();
+    vi.useRealTimers();
+  }
+});
+
+it.each([{ remoteRead: false }, { remoteRead: true }])(
+  "does not infer an entry boundary when the oldest unread message is outside the entry window: %j",
+  async ({ remoteRead }) => {
     const h = boundaryFixture();
     const older = h.row(
       message(h.peer, "c", "Older unread outside the entry window", 1),
@@ -550,7 +941,7 @@ it.each([
     h.completeReadStateSnapshot();
     h.publish();
     const revision = h.unread.revision();
-    const mounted = render(h.tree("c", [read, unread], true, true, presented));
+    const mounted = render(h.tree("c", [read, unread], true));
     await h.completeEntry();
     expect(
       screen.queryByRole("separator", { name: "New messages" }),
@@ -569,6 +960,36 @@ it.each([
     mounted.unmount();
   },
 );
+
+it("places the boundary at a loaded row when a remote read leaves it the oldest unread before the timeline mounts", async () => {
+  const h = boundaryFixture();
+  const older = h.row(
+    message(h.peer, "c", "Older unread outside the entry window", 1),
+  );
+  const read = h.row(message(h.peer, "c", "Read in loaded window", 2));
+  const unread = h.row(message(h.peer, "c", "Unread in loaded window", 3));
+  h.unreadIds.add(older.id);
+  h.unreadIds.add(unread.id);
+  h.completeReadStateSnapshot();
+  h.publish();
+  const mounted = render(h.tree("c", [read, unread], true, true, false));
+  await h.completeEntry();
+
+  // Another device reads the older row before this timeline mounts.
+  h.unreadIds.delete(older.id);
+  h.publish();
+  mounted.rerender(h.tree("c", [older, read, unread]));
+  h.publish();
+
+  const placed = divider();
+  expect(precedes(screen.getByText("Read in loaded window"), placed)).toBe(
+    true,
+  );
+  expect(precedes(placed, screen.getByText("Unread in loaded window"))).toBe(
+    true,
+  );
+  mounted.unmount();
+});
 
 it("does not select a stale unread row after reading advances while unread evidence is pending", async () => {
   const h = boundaryFixture();
@@ -1013,7 +1434,10 @@ it.each(
     const mounted = render(
       h.tree("c", rows, false, true, timing !== "delayed mount"),
     );
-    expect(h.enterChannel).toHaveBeenCalledExactlyOnceWith("c");
+    expect(h.enterChannel).toHaveBeenCalledExactlyOnceWith(
+      "c",
+      document.hasFocus(),
+    );
     if (position === "before" || timing === "delayed mount")
       await h.completeEntry();
     try {
@@ -2541,3 +2965,429 @@ it.each([false, true])(
       expect(screen.getByText("Saved work step")).not.toBeNull();
   },
 );
+
+/** Link visits as navigation keeps them: a visit's place outlives each presentation. */
+function linkVisits() {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  // Rows are on screen, so a reveal can complete.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(0, 0, 800, 100),
+  );
+  const viewer = keypair(),
+    relay = keypair();
+  const owner = createRelaySession(
+    scriptedTransport(viewer.pubkey, relay.pubkey).transport,
+  );
+  owners.push(owner);
+  const rows = ["Linked message", "Reading place", "Latest message"].map(
+    (content, index) => {
+      const event = message(viewer, "c", content, index);
+      return {
+        id: event.id,
+        channelId: "c",
+        authorId: viewer.pubkey,
+        content,
+        createdAt: index,
+        mentions: [],
+        participants: [],
+        attachments: [],
+        reactions: [],
+        replyCount: 0,
+      };
+    },
+  );
+  const [linked, place, latest] = rows;
+  if (!linked || !place || !latest) throw new Error("Missing fixture rows");
+  const window: ChannelWindow = {
+    channelId: "c",
+    status: "ready",
+    freshness: "verified",
+    hasMore: false,
+    loadingOlder: false,
+    error: undefined,
+    rows,
+  };
+  const places = new Map<string, JsonValue>();
+  const visit = (entryId: string, messageId: string, traversal?: true) =>
+    ({
+      entryId,
+      target: {
+        version: 1,
+        kind: "conversation",
+        channelId: "c",
+        messageId,
+        scope: { viewer: viewer.pubkey, communityOrigin: "https://c.invalid" },
+      },
+      signal: new AbortController().signal,
+      ...(traversal && { traversal }),
+      complete: vi.fn<PageNavigation["complete"]>(() => true),
+      resolve: vi.fn(() => true),
+      forSession: vi.fn<PageNavigation["forSession"]>(),
+      position: (key: string) => places.get(`${entryId}:${key}`),
+      savePosition(key: string, value: JsonValue) {
+        places.set(`${entryId}:${key}`, value);
+      },
+      passThrough: () => () => {},
+    }) satisfies PageNavigation;
+  type InlineTarget = { messageId: string; signal: AbortSignal };
+  const tree = (
+    navigation?: PageNavigation,
+    snapshot = window,
+    inlineTarget?: InlineTarget,
+  ) => (
+    <StrictMode>
+      <ChannelTimeline
+        channelId="c"
+        scope="scope"
+        queries={owner.session}
+        window={snapshot}
+        navigation={navigation}
+        inlineTarget={inlineTarget}
+        onOpenLink={() => false}
+      />
+    </StrictMode>
+  );
+  let result: ReturnType<typeof render> | undefined;
+  const history = () =>
+    screen.getByRole("region", { name: "Channel message history" });
+  return {
+    linked,
+    place,
+    latest,
+    window,
+    places,
+    visit,
+    get history() {
+      return history();
+    },
+    /** The reader's place: the "Reading place" row 42 px below the top. */
+    saved: { bottom: false, anchor: { id: place.id, y: 42 } },
+    row: (id: string) =>
+      history().querySelector<HTMLElement>(`[data-message-id="${id}"]`),
+    /** Mounts the timeline for a visit, or presents another on the mounted one. */
+    show(
+      navigation?: PageNavigation,
+      snapshot = window,
+      inlineTarget?: InlineTarget,
+    ) {
+      if (result) result.rerender(tree(navigation, snapshot, inlineTarget));
+      else result = render(tree(navigation, snapshot, inlineTarget));
+    },
+    unmount() {
+      result?.unmount();
+      result = undefined;
+    },
+    /** Rows on screen, each `top` px below the top of the history. */
+    layout(tops: Record<string, number>) {
+      vi.spyOn(
+        HTMLElement.prototype,
+        "getBoundingClientRect",
+      ).mockImplementation(function (this: HTMLElement) {
+        const id =
+          this.closest<HTMLElement>("[data-message-id]")?.dataset.messageId;
+        if (!id) return new DOMRect(0, 0, 800, 600);
+        return new DOMRect(0, tops[id] ?? 300, 800, 100);
+      });
+    },
+    /** Run frames until a reveal or restoration has finished. */
+    async settle() {
+      for (let i = 0; i < 6; i++) await frame();
+    },
+  };
+}
+
+it("Back to a link's visit returns to where the reader left it, without revealing the link", async () => {
+  const h = linkVisits();
+  h.places.set("link:timeline", h.saved);
+  const back = h.visit("link", h.linked.id, true);
+  // The timeline mounts for the return, as it does coming back from another channel.
+  h.show(back);
+  await h.settle();
+  expect(scroll.toIndex).toHaveBeenLastCalledWith(1, {
+    align: "start",
+    offset: -42,
+  });
+  expect(scroll.toIndex).not.toHaveBeenCalledWith(0, expect.anything());
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+  // Nothing else completes a link's visit once its reveal is skipped, and
+  // StrictMode's second effect pass doesn't complete it again.
+  expect(back.complete).toHaveBeenCalledTimes(1);
+  expect(back.complete).toHaveBeenCalledWith({ status: "opened" });
+  // Focus the opener left behind moves to the restored reading.
+  expect(document.activeElement).toBe(h.history);
+});
+
+it("leaving a visit Back returned to records where the reader read on to", async () => {
+  const h = linkVisits();
+  h.places.set("link:timeline", h.saved);
+  h.show(h.visit("link", h.linked.id, true));
+  await h.settle();
+  // The reader reads on until "Latest message" is the first whole row.
+  fireEvent.wheel(h.history, { deltaY: 200 });
+  h.layout({ [h.linked.id]: -300, [h.place.id]: -150, [h.latest.id]: 20 });
+  h.history.scrollTop = 600;
+  fireEvent.scroll(h.history);
+  h.show(h.visit("next", h.latest.id));
+  expect(h.places.get("link:timeline")).toEqual({
+    bottom: false,
+    anchor: { id: h.latest.id, y: 20 },
+  });
+});
+
+it("a mounted timeline records a link's place as the reader leaves it, and Back returns there", async () => {
+  const h = linkVisits();
+  h.show();
+  const first = h.visit("first", h.linked.id);
+  h.show(first);
+  await h.settle();
+  expect(document.activeElement).toBe(h.row(h.linked.id));
+  expect(first.complete).toHaveBeenCalledWith({ status: "opened" });
+  // The reader scrolls on until "Reading place" is the first whole row.
+  h.layout({ [h.linked.id]: -200, [h.place.id]: 42 });
+  h.history.scrollTop = 500;
+  fireEvent.scroll(h.history);
+  expect(h.places.has("first:timeline")).toBe(false);
+  // Following another link in the same channel leaves the first visit.
+  const second = h.visit("second", h.latest.id);
+  h.show(second);
+  expect(h.places.get("first:timeline")).toEqual(h.saved);
+  await h.settle();
+  expect(document.activeElement).toBe(h.row(h.latest.id));
+  scroll.toIndex.mockClear();
+  vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+  const back = h.visit("first", h.linked.id, true);
+  h.show(back);
+  expect(h.places.has("second:timeline")).toBe(true);
+  await h.settle();
+  expect(scroll.toIndex).toHaveBeenLastCalledWith(1, {
+    align: "start",
+    offset: -42,
+  });
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+  expect(back.complete).toHaveBeenCalledTimes(1);
+  expect(back.complete).toHaveBeenCalledWith({ status: "opened" });
+  // Focus on the row the second link revealed moves to the restored reading.
+  expect(document.activeElement).toBe(h.history);
+});
+
+it("Back leaves focus the reader moved to another row where it is", async () => {
+  const h = linkVisits();
+  h.show(h.visit("first", h.linked.id));
+  await h.settle();
+  h.show(h.visit("second", h.latest.id));
+  await h.settle();
+  h.row(h.linked.id)?.focus();
+  h.show(h.visit("first", h.linked.id, true));
+  await h.settle();
+  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(2);
+  expect(document.activeElement).toBe(h.row(h.linked.id));
+});
+
+it("Back leaves focus on a row's control when this timeline revealed nothing", async () => {
+  const h = linkVisits();
+  h.places.set("link:timeline", h.saved);
+  h.show();
+  await h.settle();
+  const row = h.row(h.latest.id);
+  if (!row) throw new Error("Missing latest row");
+  const actions = within(row).getByRole("button", {
+    name: "More message actions",
+  });
+  actions.focus();
+  h.show(h.visit("link", h.linked.id, true));
+  await h.settle();
+  expect(scroll.toIndex).toHaveBeenLastCalledWith(1, {
+    align: "start",
+    offset: -42,
+  });
+  expect(document.activeElement).toBe(actions);
+});
+
+it("Back to a place inside agent activity opens its group", async () => {
+  const h = linkVisits();
+  h.places.set("link:timeline", h.saved);
+  const step = (id: string, content: string) => ({
+    ...h.place,
+    id,
+    audience: "agents" as const,
+    agentEnvelope: true,
+    content,
+  });
+  h.show(h.visit("link", h.linked.id, true), {
+    ...h.window,
+    // No reply follows the steps, so their group stays shown, folded.
+    rows: [
+      h.linked,
+      step(h.place.id, "Saved work step"),
+      step("later-step", "Later work step"),
+    ],
+  });
+  await h.settle();
+  expect(
+    screen
+      .getByRole("button", { name: /activity history/ })
+      .getAttribute("aria-expanded"),
+  ).toBe("true");
+  expect(screen.getByText("Saved work step")).not.toBeNull();
+  expect(scroll.toIndex).toHaveBeenLastCalledWith(
+    1,
+    expect.objectContaining({ align: "start" }),
+  );
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+});
+
+it("a relay rebind of the visit Back returned to leaves the reader where they are", async () => {
+  const h = linkVisits();
+  h.places.set("link:timeline", h.saved);
+  const back = h.visit("link", h.linked.id, true);
+  h.show(back);
+  await h.settle();
+  // The reader reads on and puts focus down before the session's snapshot changes.
+  fireEvent.wheel(h.history, { deltaY: 200 });
+  h.layout({ [h.linked.id]: -400, [h.place.id]: -200, [h.latest.id]: 0 });
+  h.history.scrollTop = 200;
+  fireEvent.scroll(h.history);
+  h.history.blur();
+  scroll.toIndex.mockClear();
+  const rebound = {
+    ...back,
+    signal: new AbortController().signal,
+    complete: vi.fn<PageNavigation["complete"]>(() => true),
+  };
+  // The page passes no navigation for the render that rebinds it.
+  h.show();
+  h.show(rebound);
+  await h.settle();
+  expect(scroll.toIndex).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(document.body);
+  expect(rebound.complete).toHaveBeenCalledTimes(1);
+});
+
+it("Forward to a link's visit past an inline reveal restores the link's place", async () => {
+  const h = linkVisits();
+  // Open in channel reveals a thread's root inline, with no page navigation.
+  const inline = () => ({
+    messageId: h.latest.id,
+    signal: new AbortController().signal,
+  });
+  h.show(undefined, h.window, inline());
+  await h.settle();
+  const link = h.visit("link", h.linked.id);
+  h.show(link);
+  await h.settle();
+  expect(link.complete).toHaveBeenCalledWith({ status: "opened" });
+  // The reader scrolls on until "Reading place" is the first whole row.
+  h.layout({ [h.linked.id]: -200, [h.place.id]: 42 });
+  h.history.scrollTop = 500;
+  fireEvent.scroll(h.history);
+  // Back to the Open in channel visit reveals the root again, inline.
+  h.show(undefined, h.window, inline());
+  expect(h.places.get("link:timeline")).toEqual(h.saved);
+  await h.settle();
+  expect(document.activeElement).toBe(h.row(h.latest.id));
+  scroll.toIndex.mockClear();
+  const forward = h.visit("link", h.linked.id, true);
+  h.show(forward);
+  await h.settle();
+  expect(scroll.toIndex).toHaveBeenLastCalledWith(1, {
+    align: "start",
+    offset: -42,
+  });
+  expect(forward.complete).toHaveBeenCalledTimes(1);
+  // Leaving again keeps the link's place, not the root's.
+  h.show(h.visit("next", h.latest.id));
+  expect(h.places.get("link:timeline")).toEqual(h.saved);
+});
+
+it("a link's place is where its reveal left the reader, even if nothing scrolled", async () => {
+  const h = linkVisits();
+  // The link's row, the second-latest message, already sits near the top.
+  h.layout({ [h.linked.id]: -90, [h.place.id]: 10, [h.latest.id]: 110 });
+  h.show(h.visit("link", h.place.id));
+  await h.settle();
+  // The reader leaves for another channel without scrolling.
+  h.unmount();
+  scroll.toIndex.mockClear();
+  vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+  h.show(h.visit("link", h.place.id, true));
+  await h.settle();
+  expect(scroll.toIndex).toHaveBeenLastCalledWith(1, {
+    align: "start",
+    offset: -10,
+  });
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+});
+
+it("a reveal that ends just short of the end saves the channel's place at the end, and its visit's at the row", async () => {
+  const h = linkVisits();
+  h.layout({ [h.linked.id]: -90, [h.place.id]: 10, [h.latest.id]: 110 });
+  h.show();
+  // The reveal leaves the reader 40 px above the end: near it, not clamped.
+  h.history.scrollTop = 2000 - 600 - 40;
+  h.show(h.visit("link", h.place.id));
+  await h.settle();
+  // The reader leaves for another channel without scrolling.
+  h.unmount();
+  // A plain visit opens at the latest message, as after scrolling this close.
+  expect(readView("scope", "scroll:c", null)).toEqual({ bottom: true });
+  // Back keeps the row where the reveal placed it.
+  expect(h.places.get("link:timeline")).toEqual({
+    bottom: false,
+    anchor: { id: h.place.id, y: 10 },
+  });
+});
+
+it("an inline reveal that ends just short of the end saves the channel's place at the end", async () => {
+  const h = linkVisits();
+  h.layout({ [h.linked.id]: -90, [h.place.id]: 10, [h.latest.id]: 110 });
+  h.show();
+  h.history.scrollTop = 2000 - 600 - 40;
+  h.show(undefined, h.window, {
+    messageId: h.place.id,
+    signal: new AbortController().signal,
+  });
+  await h.settle();
+  expect(document.activeElement).toBe(h.row(h.place.id));
+  h.unmount();
+  expect(readView("scope", "scroll:c", null)).toEqual({ bottom: true });
+});
+
+it.each([
+  ["Back to a place no longer loaded", "gone", true],
+  ["An opening that isn't Back/Forward, such as Retry", undefined, undefined],
+] as const)("%s reveals the link again", async (_, anchor, traversal) => {
+  const h = linkVisits();
+  h.places.set("link:timeline", {
+    bottom: false,
+    anchor: { id: anchor ?? h.place.id, y: 42 },
+  });
+  const navigation = h.visit("link", h.linked.id, traversal);
+  h.show(navigation);
+  await h.settle();
+  const row = h.row(h.linked.id);
+  expect(document.activeElement).toBe(row);
+  expect(
+    vi.mocked(HTMLElement.prototype.scrollIntoView).mock.contexts,
+  ).toContain(row);
+  // Nothing positions at the place this visit can't return to.
+  expect(scroll.toIndex).not.toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ offset: -42 }),
+  );
+  expect(navigation.complete).toHaveBeenCalledTimes(1);
+  expect(navigation.complete).toHaveBeenCalledWith({ status: "opened" });
+});
+
+it("records a link's place only once its visit was presented", async () => {
+  const h = linkVisits();
+  h.show();
+  await h.settle();
+  // The reader has a place in the channel before following a link.
+  fireEvent.scroll(h.history);
+  // A link to a message not loaded: its reveal never runs.
+  h.show(h.visit("pending", "f".repeat(64)));
+  await h.settle();
+  h.show(h.visit("next", h.latest.id));
+  h.unmount();
+  expect(h.places.has("pending:timeline")).toBe(false);
+});

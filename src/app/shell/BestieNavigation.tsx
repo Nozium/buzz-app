@@ -1,17 +1,13 @@
 import { useContext, useSyncExternalStore, type ReactNode } from "react";
 import { agentAvatars } from "../../features/agents/avatar-packs";
 import { bestieChat } from "../../bundled/bestie/chat";
-import {
-  UnreadBadge,
-  useUnreadState,
-} from "../../bundled/channels/UnreadBadge";
+import { UnreadBadge } from "../../bundled/channels/UnreadBadge";
 import channelStyles from "../../bundled/channels/Channels.module.css";
-import type { RelaySession } from "../../features/relay/session";
 import { useAgentChoices } from "../../features/agents/use-choices";
 import type { RegisteredPage } from "../../features/pages/service";
 import { useRelayConnection } from "../../features/relay/react";
 import type { RelayData } from "../../features/relay/service";
-import { useSavedAgent } from "../../features/solo/default-agent";
+import { useSavedAgentState } from "../../features/solo/default-agent";
 import { pagePresentation } from "./presentation";
 import { useAvatarPreview } from "../../features/profiles/use-avatar-preview";
 import styles from "./BestieNavigation.module.css";
@@ -39,7 +35,8 @@ export function BestieNavigationProvider({
     !!viewer &&
     !!scope?.endsWith(`:${viewer}`);
   const active = enabled && connection.status === "ready";
-  const saved = useSavedAgent(session, scope ?? "");
+  const savedState = useSavedAgentState(session, scope ?? "");
+  const saved = savedState.agent;
   const choices = useAgentChoices(session, active, active);
   const agent = enabled
     ? choices.selectable.find((item) => item.pubkey === saved)
@@ -73,7 +70,20 @@ export function BestieNavigationProvider({
         detail: "Bestie",
         avatar: { src: avatar, shape: "squircle" },
       }
-    : undefined;
+    : active &&
+        savedState.read &&
+        !savedState.error &&
+        !saved &&
+        choices.complete &&
+        ["ready", "unavailable"].includes(choices.archives.status) &&
+        !choices.archives.error &&
+        !choices.error
+      ? {
+          label: "Create an agent",
+          detail: "Bestie",
+          placeholder: true,
+        }
+      : undefined;
   return (
     <BestieNavigationContext value={mark}>
       <BestieConversationContext
@@ -82,27 +92,6 @@ export function BestieNavigationProvider({
         {children}
       </BestieConversationContext>
     </BestieNavigationContext>
-  );
-}
-
-export function BestieUnreadLabel({ label }: { label: string }) {
-  const conversation = useContext(BestieConversationContext);
-  return conversation ? <UnreadLabel {...conversation} label={label} /> : label;
-}
-function UnreadLabel({
-  session,
-  channelId,
-  label,
-}: {
-  session: RelaySession;
-  channelId: string;
-  label: string;
-}) {
-  const { ordinary } = useUnreadState(session, channelId, true);
-  return (
-    <span className={styles.label} data-bestie-unread={ordinary || undefined}>
-      {label}
-    </span>
   );
 }
 

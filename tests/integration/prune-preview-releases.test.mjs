@@ -56,6 +56,7 @@ function fixture(t) {
     platforms: Object.fromEntries(
       Object.entries({
         "darwin-aarch64": "aarch64.app.tar.gz",
+        "darwin-x86_64": "x64.app.tar.gz",
         "windows-x86_64": "x64_unsigned.exe",
         "linux-x86_64-deb": "amd64.deb",
         "linux-x86_64-appimage": "x86_64.AppImage",
@@ -143,10 +144,12 @@ test("apply deletes only eligible preview releases and their tags, leaving other
   const { run, releases } = fixture(t);
   for (const [name, prerelease, draft] of [
     ["v1.0.0", false, false],
+    ["v1.0.0-beta.1", true, false],
     [tag(30), false, false],
     [tag(40), true, true],
     ["v0.0.0-preview.19.1-windows-linux", true, false],
     ["preview-feed", true, false],
+    ["stable-feed", true, false],
   ]) {
     releases.push({
       tag_name: name,

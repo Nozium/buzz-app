@@ -1,6 +1,8 @@
 // FOUNDATION: Type-only author entry. Runtime capabilities come from injected ctx.
 export type { AgentHook, AgentHookContext } from "../features/agents/hooks";
 export type { PluginManifest, PluginModule } from "./api";
+// Keep injected-context augmentation reachable in generated declarations.
+export type * from "./status";
 export type { SettingsCard, SettingsCards } from "../features/settings/service";
 export type { Context } from "@deepseek-ai/cordis";
 export type {
@@ -184,6 +186,9 @@ export type {
 
 export type {
   SoloNavigation,
+  SoloWorkspaces,
+  SoloWorkspaceSnapshot,
+  SoloWorkspaceProps,
   SoloRegionBinding,
   SoloRegionSnapshot,
   SoloRegionAction,
@@ -196,6 +201,7 @@ export type {
   SoloConversationLinkProps,
   SoloCardProps,
   SoloDisclosureProps,
+  SoloDraftStart,
 } from "../features/channel-navigation/solo-navigation-contract";
 
 export type {

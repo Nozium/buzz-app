@@ -14,7 +14,7 @@ import {
   localSessions,
   type SavedConversation,
   ServerPool,
-  SharedProcess,
+  AgentProcess,
   type SessionsOptions,
 } from "./sessions";
 
@@ -35,10 +35,12 @@ const setup = (
     onChange,
     store,
     started,
+    tags,
     wrap,
   }: Readonly<{
     pool?: ServerPool;
     started?: SessionsOptions["started"];
+    tags?: SessionsOptions["tags"];
     onChange?: () => void;
     store?: Map<string, SavedConversation>;
     /** Wraps the fake's `serve`. */
@@ -54,7 +56,7 @@ const setup = (
     ...(silent && { silent }),
     providers: [{ providerId: "openai", defaultModel: "gpt-default" }],
   });
-  const process = new SharedProcess(
+  const process = new AgentProcess(
     wrap ? { ...fake, spawn: wrap(fake.spawn) } : fake,
     serve ? serve(fake.serve) : fake.serve,
   );
@@ -80,6 +82,7 @@ const setup = (
         store,
       }),
       ...(started && { started }),
+      ...(tags && { tags }),
       launch: async () => settings,
       choice: () => choice,
       fingerprint: () =>
@@ -561,6 +564,20 @@ describe("AgentSessions", () => {
     ]);
   });
 
+  it("opens each session with the tags for its conversation, and a one-off turn's with none", async () => {
+    vi.useFakeTimers();
+    const { sessions, fake } = setup({}, false, {
+      tags: (conversation) => ({ for: conversation ?? "none" }),
+    });
+    await sessions.deliver("chan/root", "one", 1);
+    await sessions.runOnce("watch/x", () => "look");
+    expect(
+      fake.geese[0]?.opened.map(
+        (params) => (params._meta as { tags?: unknown }).tags,
+      ),
+    ).toEqual([{ for: "chan/root" }, { for: "none" }]);
+  });
+
   it("keeps delivering past a damaged saved conversation, saving it afresh", async () => {
     vi.useFakeTimers();
     for (const sessions of [{ not: "a list" }, "s9", null, [7, "kept"]]) {
@@ -621,7 +638,7 @@ describe("AgentSessions", () => {
     const sessions = new AgentSessions({
       resolveDirectory: fake.resolveDirectory,
       tools,
-      process: new SharedProcess(fake, fake.serve),
+      process: new AgentProcess(fake, fake.serve),
       pool: new ServerPool(),
       store,
       launch: async () => {
@@ -650,7 +667,7 @@ describe("AgentSessions", () => {
     const sessions = new AgentSessions({
       resolveDirectory: fake.resolveDirectory,
       tools,
-      process: new SharedProcess(fake, fake.serve),
+      process: new AgentProcess(fake, fake.serve),
       pool: new ServerPool(),
       launch: async () => ({ workspace: "/w", systemPrompt: "" }),
       choice: () => ({ provider: "", model: "" }),
@@ -676,7 +693,7 @@ describe("AgentSessions", () => {
     const sessions = new AgentSessions({
       resolveDirectory: fake.resolveDirectory,
       tools,
-      process: new SharedProcess(fake, fake.serve),
+      process: new AgentProcess(fake, fake.serve),
       pool: new ServerPool(),
       launch,
       choice: () => ({ provider: "", model: "" }),
@@ -1108,7 +1125,7 @@ it("keeps a worker whose initialize failed until it has exited, though its start
       kill: async () => void kills++,
     };
   };
-  const process = new SharedProcess({ ...fake, spawn }, fake.serve);
+  const process = new AgentProcess({ ...fake, spawn }, fake.serve);
   const starting = tracked(process.get());
   // A failed start waits 5 s for its worker to exit, then fails anyway.
   await vi.advanceTimersByTimeAsync(4_999);
@@ -1149,7 +1166,7 @@ it("repeats a failed kill on the next retirement", async () => {
       if (++kills === 1) throw new Error("kill failed");
     },
   });
-  const process = new SharedProcess({ ...fake, spawn }, fake.serve);
+  const process = new AgentProcess({ ...fake, spawn }, fake.serve);
   await process.get();
   await expect(process.shutdown()).rejects.toThrow("kill failed");
   const shutdown = tracked(process.shutdown());
@@ -1228,7 +1245,7 @@ it("drops a source delivery invalidated during session startup", async () => {
   const sessions = new AgentSessions({
     resolveDirectory: fake.resolveDirectory,
     tools,
-    process: new SharedProcess(fake, fake.serve),
+    process: new AgentProcess(fake, fake.serve),
     pool: new ServerPool(),
     launch: async () => {
       await held;
@@ -1286,7 +1303,7 @@ it.each([false, true])(
     const sessions = new AgentSessions({
       resolveDirectory: fake.resolveDirectory,
       tools,
-      process: new SharedProcess({ ...fake, spawn }, fake.serve),
+      process: new AgentProcess({ ...fake, spawn }, fake.serve),
       pool: new ServerPool(),
       launch: async () => ({ workspace: "/w", systemPrompt: "" }),
       choice: () => choice,
@@ -1364,7 +1381,7 @@ it.each(["startup", "provider"] as const)(
     const sessions = new AgentSessions({
       resolveDirectory: fake.resolveDirectory,
       tools,
-      process: new SharedProcess({ ...fake, spawn }, fake.serve),
+      process: new AgentProcess({ ...fake, spawn }, fake.serve),
       pool: new ServerPool(),
       launch: async () => {
         if (boundary === "startup") {

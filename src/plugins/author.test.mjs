@@ -40,6 +40,8 @@ export const manifest: PluginManifest = {
     commands: [{ id: "status", program: "example-cli", args: ["status"], maxOutputBytes: 65536 }],
     networkOrigins: ["https://api.example.com"],
     managedFiles: true,
+    publicImages: true,
+    publicPages: true,
   },
 };
 const ExampleSidebar = ({ target, children }: PageSidebarProps) => {
@@ -203,7 +205,7 @@ export function apply(ctx: Context) {
     // @ts-expect-error A page icon is a data URL string.
     icon: 1,
   });
-  for (const placement of ["sidebar", "topbar", "toolbar"] as const)
+  for (const placement of ["sidebar", "dock", "topbar", "toolbar"] as const)
     ctx.pages.register({ id: placement, title: placement, component: () => null, primary: true, placement });
   ctx.pages.register({
     id: "bad-placement", title: "Bad placement", component: () => null,
@@ -234,11 +236,44 @@ export function apply(ctx: Context) {
     questions: { bad: { type: "freeform", instructions: "x" } },
   });
   void ctx.decisions.backend();
+  ctx.decisions.retireProvider("retired");
   // @ts-expect-error Only Settings chooses the backend.
   ctx.decisions.setBackend("typesafe");
 }
 // @ts-expect-error Host construction is not exported to plugin authors.
 import type { createServices } from "@buzz/author";
+`,
+    );
+    await writeFile(
+      join(dir, "plugin-status-consumer.ts"),
+      `
+import type { Context } from "@buzz/author";
+export function observePlugin(ctx: Context) {
+  const owner = ctx.pluginOwner;
+  if (!owner) return;
+  const id: string = owner.id;
+  const revision: string = owner.revision;
+  const active: boolean = ctx.pluginStatus.isActive(id, revision);
+  const stop: () => void = ctx.pluginStatus.subscribe(() => {
+    const current: boolean = ctx.pluginStatus.isActive(id, revision);
+    void current;
+  });
+  stop();
+  const settled: boolean | undefined = ctx.pluginStatus.settled?.();
+  const withoutReadiness: Context["pluginStatus"] = {
+    isActive: () => true,
+    subscribe: () => () => {},
+  };
+  void [active, settled, withoutReadiness];
+  // @ts-expect-error A revision is a string, not a generation number.
+  ctx.pluginStatus.isActive(id, 1);
+  // @ts-expect-error Subscription requires a callback.
+  ctx.pluginStatus.subscribe("changed");
+  // @ts-expect-error Readiness is optional and must be checked.
+  ctx.pluginStatus.settled();
+  // @ts-expect-error Installed ownership is readonly.
+  owner.revision = "replacement";
+}
 `,
     );
     await writeFile(
@@ -256,7 +291,7 @@ import type { createServices } from "@buzz/author";
             "@buzz/author": ["./author package/types/plugins/author.d.ts"],
           },
         },
-        files: ["consumer.ts"],
+        files: ["consumer.ts", "plugin-status-consumer.ts"],
       }),
     );
     // Only generated declarations and the external consumer, never host source.

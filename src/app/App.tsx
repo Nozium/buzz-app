@@ -20,6 +20,7 @@ import {
 import { ModalWindowDragProvider } from "../shared/design-system/ui/ModalWindowDrag";
 import { modalWindowDragHandlers } from "./shell/title-bar";
 import { isTauri } from "@tauri-apps/api/core";
+import { PairingPrompt } from "../features/credential-pairing/PairingPrompt";
 import { Dialog } from "../shared/design-system/ui/Dialog";
 import { UpdateNotice } from "../features/updates/UpdateNotice";
 import { PluginUpdates } from "./PluginUpdates";
@@ -28,6 +29,7 @@ import { ExternalAuthorizationDialog } from "../features/agents/ExternalAuthoriz
 import { MediaMenuDownloadNotice } from "../features/messages/MediaDownloadAction";
 import { CreationReview } from "../bundled/agents/CreationReview";
 import { UpdateReview } from "../bundled/agents/UpdateReview";
+import { TeamUpdateReview } from "../bundled/agents/TeamUpdateReview";
 import { InterruptedNotice } from "../features/agents/InterruptedNotice";
 import {
   useEffect,
@@ -382,16 +384,18 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
             version: 1,
             kind: "settings",
             section: "block.builderlab/login",
+            route: { version: 1, params: "create-community" },
           })
         }
       />
     );
-  const openSettingsSection = (section: string) => {
+  const openSettingsSection = (section: string, pluginId?: string) => {
     const client = services.communities.snapshot();
     void services.navigation.open({
       version: 1,
       kind: "settings",
       section,
+      ...(pluginId ? { pluginId } : {}),
       ...(client.viewer && client.selected
         ? {
             scope: {
@@ -526,6 +530,27 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
             </>
           }
         />
+      ) : route.turnedOff ? (
+        // Its details' Enable owns every restriction and admin gate.
+        <EmptyState
+          icon={<WarningCircleIcon />}
+          title={`${route.turnedOff.name} is turned off`}
+          description="Turn it on in Manage plugins to open this page."
+          action={
+            <>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() =>
+                  openSettingsSection("plugins", route.turnedOff?.id)
+                }
+              >
+                Manage plugins
+              </Button>
+              {messagesButton("quiet")}
+            </>
+          }
+        />
       ) : route.failure || failureReason === "not-found" ? (
         <EmptyState
           icon={<WarningCircleIcon />}
@@ -571,6 +596,11 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
   return (
     <>
       <SignInEnding identity={services.federatedIdentity} />
+      {isTauri() && (
+        <PairingPrompt
+          communities={client.memberships.map((membership) => membership.id)}
+        />
+      )}
       <ChannelNavigationProvider relay={services.relay}>
         <AppShell
           creationInSidebar={!workspace.page?.sidebar}
@@ -681,6 +711,7 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
           <MediaMenuDownloadNotice />
           <CreationReview agents={services.agents} />
           <UpdateReview agents={services.agents} />
+          <TeamUpdateReview agents={services.agents} />
           {!settings && startup === "recovery" ? (
             <RecoveryScreen plugins={plugins} />
           ) : !settings &&
