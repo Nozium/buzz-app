@@ -119,6 +119,11 @@ impl SessionAuthorization {
             temporary: None,
         }
     }
+    /// The token of a session with no device key. Such a session keeps the
+    /// legacy bearer behavior: every 401 means signed out.
+    pub(crate) fn bearer_token(&self) -> Option<&str> {
+        self.key.is_none().then(|| self.token.as_str())
+    }
     pub(crate) fn authorize(
         &self,
         request: reqwest::RequestBuilder,

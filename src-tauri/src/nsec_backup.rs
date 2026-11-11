@@ -1152,6 +1152,9 @@ fn backup_client(
     root: &str,
     auth: crate::federated_identity::SessionAuthorization,
 ) -> std::result::Result<Client, buzz_nsec_backup::Error> {
+    if let Some(token) = auth.bearer_token() {
+        return Client::bearer(root, token);
+    }
     Client::authorized(
         root,
         Arc::new(move |request, method, url| {
@@ -1187,6 +1190,9 @@ impl Api {
         root: &str,
         auth: crate::federated_identity::SessionAuthorization,
     ) -> Result<Self> {
+        if let Some(token) = auth.bearer_token() {
+            return Self::bearer(root, token);
+        }
         let mut api = Self::bearer(root, "unused")?;
         api.authorization = Some(auth);
         Ok(api)
