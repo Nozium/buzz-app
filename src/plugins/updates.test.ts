@@ -125,6 +125,27 @@ it.each([
   },
 );
 
+it("offers a signature-only repair and retires its notice after installation", async () => {
+  const f = fixture();
+  f.preview.candidates = [
+    { ...f.candidate, revision: f.plugin.revision, publisher: "a".repeat(64) },
+  ];
+  const updates = createPluginUpdates(f.manager, f.authorize);
+  try {
+    await updates.check();
+    expect(updates.snapshot()[0]?.candidate?.publisher).toBe("a".repeat(64));
+    expect(f.imports.install).not.toHaveBeenCalled();
+    f.plugin.publisher = "a".repeat(64);
+    f.plugin.hasSignature = true;
+    f.set(f.get());
+    expect(updates.snapshot()).toEqual([]);
+    await updates.check(true);
+    expect(updates.snapshot()).toEqual([]);
+  } finally {
+    updates.dispose();
+  }
+});
+
 it("retires a notice on opt-out and checks immediately on opt-in", async () => {
   const f = fixture();
   f.plugin.updateChecks = false;
@@ -493,7 +514,7 @@ it("publishes the same discovered Git update to background notices and the plugi
 it("checks saved folders under the background owner and retains their list result", async () => {
   const f = fixture();
   f.plugin.updateSource = { root: "/plugins/notes", path: "." };
-  const checkFolder = vi.fn(async () => "new");
+  const checkFolder = vi.fn(async () => ({ revision: "new" }));
   Object.assign(f.imports, { checkFolder });
   const updates = createPluginUpdates(f.manager, f.authorize);
   const checks = sharedPluginUpdateChecks(f.manager.imports);
@@ -543,10 +564,12 @@ it("keeps newer explicit results when a sibling consumes an older repository sna
   const pending = updates.check();
   await vi.waitFor(() => expect(release).toBeTypeOf("function"));
   const checks = sharedPluginUpdateChecks(f.manager.imports);
-  checks.observe(sibling)("newer");
+  checks.observe(sibling)({ revision: "newer" });
   release(f.preview);
   await pending;
-  expect(checks.snapshot()[sibling.manifest.id]?.revision).toBe("newer");
+  expect(checks.snapshot()[sibling.manifest.id]?.release?.revision).toBe(
+    "newer",
+  );
   updates.dispose();
 });
 
@@ -561,7 +584,9 @@ it("does not reacquire unrelated Git sources when a saved-folder revision change
     manifest: { ...f.plugin.manifest, id: "folder" },
     updateSource: { root: "/plugins", path: "." },
   };
-  Object.assign(f.imports, { checkFolder: vi.fn(async () => "folder-new") });
+  Object.assign(f.imports, {
+    checkFolder: vi.fn(async () => ({ revision: "folder-new" })),
+  });
   f.set({
     ...state,
     catalog: { ...state.catalog, plugins: [folder, f.plugin] },
@@ -591,9 +616,7 @@ it("retires an error notice when a successful explicit check supersedes backgrou
   );
   const pending = updates.check(true);
   await vi.waitFor(() => expect(release).toBeTypeOf("function"));
-  sharedPluginUpdateChecks(f.manager.imports).observe(f.plugin)(
-    f.plugin.revision,
-  );
+  sharedPluginUpdateChecks(f.manager.imports).observe(f.plugin)(f.plugin);
   expect(updates.snapshot()).toEqual([]);
   release(f.preview);
   await pending;
@@ -610,11 +633,11 @@ it("keeps Git discovery and later rounds independent of a stalled folder probe",
     manifest: { ...f.plugin.manifest, id: "folder" },
     updateSource: { root: "/plugins", path: "." },
   };
-  let release!: (revision: string) => void;
+  let release!: (release: { revision: string }) => void;
   Object.assign(f.imports, {
     checkFolder: vi.fn(
       () =>
-        new Promise<string>((resolve) => {
+        new Promise<{ revision: string }>((resolve) => {
           release = resolve;
         }),
     ),
@@ -631,7 +654,7 @@ it("keeps Git discovery and later rounds independent of a stalled folder probe",
     await updates.check(true);
     expect(f.checkGit).toHaveBeenCalledTimes(2);
   } finally {
-    release("new");
+    release({ revision: "new" });
     await pending;
     updates.dispose();
   }
@@ -668,9 +691,7 @@ it("checks a newly attached Git source after an older batch reserved a source-le
       ...f.candidate,
       manifest: registered.manifest,
     });
-    sharedPluginUpdateChecks(f.manager.imports).observe(registered)(
-      registered.revision,
-    );
+    sharedPluginUpdateChecks(f.manager.imports).observe(registered)(registered);
     f.set({
       ...state,
       catalog: { ...state.catalog, plugins: [f.plugin, registered] },
@@ -790,7 +811,7 @@ it.each(["review", "details"])(
     };
     const checks = sharedPluginUpdateChecks(f.manager.imports);
     if (entry === "review")
-      checks.observe(f.plugin)(candidate.revision, null, candidate);
+      checks.observe(f.plugin)(candidate, null, candidate);
     else {
       f.checkGit.mockResolvedValueOnce({
         ...f.preview,
@@ -864,7 +885,7 @@ it.each(["authorization", "acquisition"] as const)(
       manifest: { ...f.plugin.manifest, id: "example.folder" },
       updateSource: { root: "/plugins/folder", path: "." },
     };
-    const checkFolder = vi.fn(async () => "folder-new");
+    const checkFolder = vi.fn(async () => ({ revision: "folder-new" }));
     Object.assign(f.imports, { checkFolder });
     f.set({
       ...configuration,
@@ -971,7 +992,7 @@ it.each(["authorization", "acquisition"] as const)(
       manifest: { ...f.plugin.manifest, id: "example.folder" },
       updateSource: { root: "/plugins/folder", path: "." },
     };
-    const checkFolder = vi.fn(async () => "folder-new");
+    const checkFolder = vi.fn(async () => ({ revision: "folder-new" }));
     Object.assign(f.imports, { checkFolder });
     let release!: () => void;
     const held = new Promise<null>((resolve) => {
@@ -1454,6 +1475,161 @@ it("returns unknown when a queue request's provider is replaced", async () => {
   unregisterReplacement();
   original.dispose();
   replacement.dispose();
+});
+
+it("reports a replaced provider retired only after disposal ends its queued and unopened reviews", async () => {
+  const f = fixture();
+  const bridge = createPluginUpdateCapabilityBridge();
+  const original = createPluginUpdates(f.manager, f.authorize);
+  bridge.register(original);
+  const token = (await bridge.capability.refresh()).candidates[0]?.token;
+  const ownerId = bridge.capability.ownerId;
+  if (!token || !ownerId) throw new Error("Expected a retained provider");
+  const reviewing = bridge.capability.queueUpdates([token]);
+  const queued = bridge.capability.queueUpdates([token]);
+  const review = startReview(original);
+  if (!reviewing || !queued || !review) throw new Error("Expected a review");
+
+  const replacement = createPluginUpdates(f.manager, f.authorize);
+  const unregisterReplacement = bridge.register(replacement);
+  const nextOwnerId = bridge.capability.ownerId;
+  if (!nextOwnerId) throw new Error("Expected a replacement provider");
+  expect(original.capability.getQueue(reviewing.id)?.status).toBe("reviewing");
+  expect(original.capability.getQueue(queued.id)?.status).toBe("queued");
+  for (const id of [ownerId, nextOwnerId, "unseen" as typeof ownerId])
+    expect(bridge.capability.getOwnerStatus?.(id)).toBe("unknown");
+
+  original.dispose();
+  expect(original.capability.getQueue(reviewing.id)?.status).toBe("cancelled");
+  expect(original.capability.getQueue(queued.id)?.status).toBe("cancelled");
+  for (let query = 0; query < 3; query++)
+    expect(bridge.capability.getOwnerStatus?.(ownerId)).toBe("retired");
+  expect(bridge.forCaller("example.market").getOwnerStatus?.(ownerId)).toBe(
+    "retired",
+  );
+  expect(original.beginOperation(review.queueId, review.token)).toBeUndefined();
+  expect(startReview(original)).toBeUndefined();
+  expect(original.capability.queueUpdates([token])).toBeUndefined();
+  expect(bridge.capability.getOwnerStatus?.(nextOwnerId)).toBe("unknown");
+  expect(
+    bridge.capability.getQueueRequest({
+      ownerId,
+      requestId: "historical-request",
+      tokens: [token],
+    }),
+  ).toEqual({ status: "unknown" });
+
+  unregisterReplacement();
+  replacement.dispose();
+});
+
+it.each([
+  ["finished", "installed"],
+  ["ended", "failed"],
+  ["cancelled", "cancelled"],
+  ["reconfirmed", "failed"],
+] as const)(
+  "keeps a confirmed operation's provider unknown past disposal until it is %s",
+  async (completion, itemStatus) => {
+    const f = fixture();
+    const bridge = createPluginUpdateCapabilityBridge();
+    const original = createPluginUpdates(f.manager, f.authorize);
+    bridge.register(original);
+    const token = (await bridge.capability.refresh()).candidates[0]?.token;
+    const ownerId = bridge.capability.ownerId;
+    if (!token || !ownerId) throw new Error("Expected a retained provider");
+    const queue = bridge.capability.queueUpdates([token]);
+    let held = false;
+    const statusAtRelease = vi.fn(() =>
+      bridge.capability.getOwnerStatus?.(ownerId),
+    );
+    const hold = () => {
+      held = true;
+      return () => {
+        statusAtRelease();
+        held = false;
+      };
+    };
+    const review = original.startNextReview(hold);
+    if (!queue || !review) throw new Error("Expected a review");
+    const unconfirm = original.beginOperation(queue.id, review.token);
+    expect(unconfirm).toEqual(expect.any(Function));
+
+    const replacement = createPluginUpdates(f.manager, f.authorize);
+    const unregisterReplacement = bridge.register(replacement);
+    original.dispose();
+    if (completion === "finished" || completion === "ended")
+      expect(original.capability.cancelQueue(queue.id)).toBe(true);
+    expect(original.getActiveReview()).toBeDefined();
+    expect(held).toBe(true);
+    expect(bridge.capability.getOwnerStatus?.(ownerId)).toBe("unknown");
+    if (completion === "finished") {
+      expect(original.finishReview(queue.id, review.token, "updated")).toBe(
+        true,
+      );
+    } else {
+      unconfirm?.();
+      expect(original.getActiveReview()).toBeDefined();
+      expect(bridge.capability.getOwnerStatus?.(ownerId)).toBe("unknown");
+      if (completion === "ended")
+        expect(
+          original.endReview(queue.id, review.token, "install failed"),
+        ).toBe(true);
+      else if (completion === "cancelled")
+        expect(original.capability.cancelQueue(queue.id)).toBe(true);
+      else
+        expect(original.beginOperation(queue.id, review.token)).toBeUndefined();
+    }
+
+    expect(statusAtRelease).toHaveReturnedWith("unknown");
+    expect(held).toBe(false);
+    expect(original.getActiveReview()).toBeUndefined();
+    expect(bridge.capability.getOwnerStatus?.(ownerId)).toBe("retired");
+    expect(original.capability.getQueue(queue.id)?.items[0]?.status).toBe(
+      itemStatus,
+    );
+    expect(original.capability.queueUpdates([token])).toBeUndefined();
+    expect(original.startNextReview(hold)).toBeUndefined();
+    expect(held).toBe(false);
+    unregisterReplacement();
+    replacement.dispose();
+  },
+);
+
+it("keeps live, unregistered, evicted and restarted provider lifetimes unknown", async () => {
+  const f = fixture();
+  const bridge = createPluginUpdateCapabilityBridge();
+  const original = createPluginUpdates(f.manager, f.authorize);
+  const ownerId = original.capability.ownerId;
+  if (!ownerId) throw new Error("Expected a provider identity");
+  expect(bridge.capability.getOwnerStatus?.(ownerId)).toBe("unknown");
+  const unregister = bridge.register(original);
+  expect(bridge.capability.getOwnerStatus?.(ownerId)).toBe("unknown");
+  unregister();
+  expect(bridge.capability.getOwnerStatus?.(ownerId)).toBe("unknown");
+  original.dispose();
+  expect(bridge.capability.getOwnerStatus?.(ownerId)).toBe("retired");
+  expect(
+    createPluginUpdateCapabilityBridge().capability.getOwnerStatus?.(ownerId),
+  ).toBe("unknown");
+
+  const later: ReturnType<typeof createPluginUpdates>[] = [];
+  for (let index = 0; index < 15; index++) {
+    const next = createPluginUpdates(f.manager, f.authorize);
+    bridge.register(next)();
+    next.dispose();
+    later.push(next);
+  }
+  expect(bridge.capability.getOwnerStatus?.(ownerId)).toBe("retired");
+  const newest = createPluginUpdates(f.manager, f.authorize);
+  const unregisterNewest = bridge.register(newest);
+  expect(bridge.capability.getOwnerStatus?.(ownerId)).toBe("unknown");
+  const laterIds = later.map((next) => next.capability.ownerId);
+  expect(laterIds).not.toContain(undefined);
+  for (const id of laterIds)
+    if (id) expect(bridge.capability.getOwnerStatus?.(id)).toBe("retired");
+  unregisterNewest();
+  newest.dispose();
 });
 
 it("does not replay an ambiguous update request across checker lifetimes", async () => {
@@ -2211,7 +2387,7 @@ it.each(
         ...(change === "publisher" ? { publisher: "different" } : {}),
       };
       if (via === "explicit")
-        checks.observe(f.plugin)(candidate.revision, null, candidate);
+        checks.observe(f.plugin)(candidate, null, candidate);
       else {
         f.checkGit.mockResolvedValueOnce({
           ...f.preview,

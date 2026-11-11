@@ -1,3 +1,4 @@
+import { samePluginRelease } from "./same-release";
 import { managedBy } from "./managed";
 import type { PluginManager } from "./manager";
 import {
@@ -162,6 +163,12 @@ export type PluginUpdateCapability = Readonly<{
   subscribeQueue(id: string, listener: () => void): () => void;
   /** Stops queued/unopened reviews; an already-confirmed operation is not undone. */
   cancelQueue(id: string): boolean;
+  /**
+   * `retired` only when this host process saw that exact provider lifetime end
+   * with no queued, reviewing, or confirmed operation left; otherwise `unknown`.
+   * Missing on older hosts. Says nothing about the outcome of an earlier request.
+   */
+  getOwnerStatus?(ownerId: PluginUpdateOwnerId): "retired" | "unknown";
 }>;
 
 function freezeSnapshot(snapshot: PluginUpdateSnapshot): PluginUpdateSnapshot {
@@ -250,6 +257,7 @@ export const updateSourceKey = (source: GitUpdateSource) =>
 
 const MAX_RETAINED_UPDATE_QUEUES = 50;
 const MAX_RETAINED_UPDATE_REQUESTS = 1024;
+const MAX_RETAINED_UPDATE_OWNERS = 16;
 
 function uniqueQueueTokens(tokens: readonly PluginUpdateToken[]) {
   return [...new Set(tokens)];
@@ -267,6 +275,7 @@ export function createPluginUpdates(
   online: () => boolean = () => true,
 ) {
   const ownerId = crypto.randomUUID() as PluginUpdateOwnerId;
+  const lifetime = { ownerId, retired: false };
   let updates: readonly PluginUpdate[] = [];
   let closed = false;
   let pending: Promise<number | undefined> | undefined;
@@ -297,9 +306,11 @@ export function createPluginUpdates(
     const release = releaseActiveReview;
     releaseActiveReview = undefined;
     release?.();
+    // A confirmed operation keeps its review, and so this lifetime, open past dispose.
+    if (closed && !activeReview) lifetime.retired = true;
   };
   const key = (update: PluginUpdate) =>
-    `${update.id}:${updateSourceKey(update.source)}:${update.candidate?.revision ?? update.error}`;
+    `${update.id}:${updateSourceKey(update.source)}:${update.candidate?.revision ?? update.error}:${update.candidate?.publisher ?? ""}`;
   const getSources = () => {
     const { configuration } = plugins.snapshot();
     return configuration.status === "ready"
@@ -463,11 +474,11 @@ export function createPluginUpdates(
       }
       if (
         result.candidate &&
-        result.revision !== update.installedRevision &&
-        (update.error ||
-          result.revision !== update.candidate?.revision ||
-          (result.candidate.publisher ?? null) !==
-            (update.candidate?.publisher ?? null))
+        !samePluginRelease(result.release, {
+          revision: update.installedRevision,
+          publisher: update.installedPublisher,
+        }) &&
+        (update.error || !samePluginRelease(result.release, update.candidate))
       ) {
         const recovery =
           update.error &&
@@ -488,7 +499,8 @@ export function createPluginUpdates(
         delete discovered.error;
         return [discovered];
       }
-      return !update.error && result.revision === update.candidate?.revision
+      return !update.error &&
+        samePluginRelease(result.release, update.candidate)
         ? [update]
         : [];
     });
@@ -564,7 +576,11 @@ export function createPluginUpdates(
         if (!pluginUpdateSource(plugins, id)) checked.delete(id);
         continue;
       }
-      const identity = JSON.stringify([plugin.revision, plugin.updateSource]);
+      const identity = JSON.stringify([
+        plugin.revision,
+        plugin.publisher ?? null,
+        plugin.updateSource,
+      ]);
       const previous = checked.get(id);
       if (
         !force &&
@@ -577,8 +593,8 @@ export function createPluginUpdates(
         const live = installed(id);
         return (
           !closed &&
-          live?.revision === plugin.revision &&
-          JSON.stringify(live.updateSource) ===
+          samePluginRelease(live, plugin) &&
+          JSON.stringify(live?.updateSource) ===
             JSON.stringify(plugin.updateSource)
         );
       };
@@ -653,7 +669,11 @@ export function createPluginUpdates(
       for (const { plugin, source, observe } of batch) {
         if (closed) return;
         const id = plugin.manifest.id;
-        const identity = JSON.stringify([plugin.revision, source]);
+        const identity = JSON.stringify([
+          plugin.revision,
+          plugin.publisher ?? null,
+          source,
+        ]);
         const previousCheck = checked.get(id);
         if (
           !force &&
@@ -687,7 +707,7 @@ export function createPluginUpdates(
             throw new Error(
               "The saved repository has no plugin at its installed path.",
             );
-          if (candidate.revision !== plugin.revision)
+          if (!samePluginRelease(candidate, plugin))
             update.candidate = candidate;
         } catch (reason) {
           update.error =
@@ -698,7 +718,7 @@ export function createPluginUpdates(
         checked.set(id, { identity, at: Date.now() });
         if (
           !observe(
-            update.candidate?.revision ?? plugin.revision,
+            update.candidate ?? plugin,
             update.error ?? null,
             update.candidate,
           )
@@ -1135,6 +1155,7 @@ export function createPluginUpdates(
   return {
     snapshot: () => updates,
     capability,
+    lifetime: lifetime as Readonly<typeof lifetime>,
     forCaller(callerId: string): PluginUpdateCapability {
       return {
         ...capability,
@@ -1207,8 +1228,16 @@ export function createPluginUpdateCapabilityBridge() {
     candidates: Object.freeze([]),
     errors: Object.freeze([]),
   });
-  let provider: Pick<PluginUpdates, "capability" | "forCaller"> | undefined;
+  let provider:
+    | Pick<PluginUpdates, "capability" | "forCaller" | "lifetime">
+    | undefined;
   let unsubscribeProvider: (() => void) | undefined;
+  // Keep lifetime records, not providers, so replaced providers can be collected.
+  const lifetimes = new Map<PluginUpdateOwnerId, PluginUpdates["lifetime"]>();
+  const getOwnerStatus = (ownerId: PluginUpdateOwnerId) =>
+    lifetimes.get(ownerId)?.retired
+      ? ("retired" as const)
+      : ("unknown" as const);
   const listeners = new Set<() => void>();
   const notify = () => {
     notifySafely(listeners);
@@ -1242,6 +1271,7 @@ export function createPluginUpdateCapabilityBridge() {
         });
       },
       cancelQueue: (id) => resolve()?.cancelQueue(id) ?? false,
+      getOwnerStatus,
     };
     return capability;
   };
@@ -1254,6 +1284,11 @@ export function createPluginUpdateCapabilityBridge() {
     register(next: NonNullable<typeof provider>) {
       unsubscribeProvider?.();
       provider = next;
+      lifetimes.delete(next.lifetime.ownerId);
+      lifetimes.set(next.lifetime.ownerId, next.lifetime);
+      // An evicted lifetime becomes unknown, never retired.
+      for (const id of lifetimes.keys())
+        if (lifetimes.size > MAX_RETAINED_UPDATE_OWNERS) lifetimes.delete(id);
       unsubscribeProvider = next.capability.subscribe(notify);
       notify();
       return () => {

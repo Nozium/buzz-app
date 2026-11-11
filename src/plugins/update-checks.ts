@@ -1,28 +1,38 @@
-import type { ImportPreview, PluginImports, PluginInfo } from "./types";
+import { samePluginRelease } from "./same-release";
+import type {
+  ImportPreview,
+  PluginImports,
+  PluginInfo,
+  PluginRelease,
+} from "./types";
 
 type Authorize = (
   repository: string,
 ) => Promise<{ repository: string; token: string } | null>;
 export type UpdateCheck = {
-  installedRevision: string;
+  installedRelease: PluginRelease;
   source: string;
   sequence: number;
   checking: boolean;
-  revision: string | undefined;
+  release: PluginRelease | undefined;
   error: string | null;
   candidate?: ImportPreview["candidates"][number] | undefined;
 };
 type Snapshot = Readonly<Record<string, UpdateCheck>>;
 const identity = (plugin: PluginInfo) => JSON.stringify(plugin.updateSource);
 const installation = (plugin: PluginInfo) =>
-  JSON.stringify([plugin.revision, plugin.updateSource]);
+  JSON.stringify([
+    plugin.revision,
+    plugin.publisher ?? null,
+    plugin.updateSource,
+  ]);
 export function pluginUpdateCheck(
   snapshot: Snapshot,
   plugin: PluginInfo | undefined,
 ) {
   if (!plugin) return undefined;
   const result = snapshot[plugin.manifest.id];
-  return result?.installedRevision === plugin.revision &&
+  return samePluginRelease(result?.installedRelease, plugin) &&
     result?.source === identity(plugin)
     ? result
     : undefined;
@@ -32,8 +42,8 @@ export function pluginUpdateAvailable(snapshot: Snapshot, plugin: PluginInfo) {
   return (
     !!result &&
     !result.error &&
-    result.revision !== undefined &&
-    result.revision !== plugin.revision
+    result.release !== undefined &&
+    !samePluginRelease(result.release, plugin)
   );
 }
 
@@ -49,9 +59,9 @@ export function createPluginUpdateChecks(imports: PluginImports | undefined) {
     string,
     {
       sequence: number;
-      revisions: Record<string, string>;
+      installations: Record<string, string>;
       consumers: Set<() => boolean>;
-      promise: Promise<string | ImportPreview | null>;
+      promise: Promise<PluginRelease | ImportPreview | null>;
     }
   >();
   const publish = (id: string, result: UpdateCheck) => {
@@ -85,8 +95,8 @@ export function createPluginUpdateChecks(imports: PluginImports | undefined) {
     let request = pending.get(key);
     if (
       request &&
-      ((request.revisions[id] !== undefined &&
-        request.revisions[id] !== plugin.revision) ||
+      ((request.installations[id] !== undefined &&
+        request.installations[id] !== installed) ||
         (snapshot[id]?.sequence ?? 0) > request.sequence)
     ) {
       await request.promise.catch(() => {});
@@ -115,40 +125,45 @@ export function createPluginUpdateChecks(imports: PluginImports | undefined) {
           else gitReads--;
         }
       })().finally(() => pending.delete(key));
-      request = { sequence: ++sequence, revisions: {}, consumers, promise };
+      request = { sequence: ++sequence, installations: {}, consumers, promise };
       pending.set(key, request);
     }
     request.consumers.add(active);
-    request.revisions[id] = plugin.revision;
+    request.installations[id] = installed;
     const previous = pluginUpdateCheck(snapshot, plugin);
     const next = {
-      installedRevision: plugin.revision,
+      installedRelease: {
+        revision: plugin.revision,
+        publisher: plugin.publisher ?? null,
+      },
       source: identity(plugin),
       sequence: request.sequence,
       checking: true,
-      revision: previous?.revision,
+      release: previous?.release,
       error: null,
     };
     if ((snapshot[id]?.sequence ?? 0) > request.sequence) return;
     publish(id, next);
-    let revision: string | undefined;
+    let release: PluginRelease | undefined;
     let candidate: ImportPreview["candidates"][number] | undefined;
     let error: string | null = null;
     try {
       const result = await request.promise;
-      if (typeof result === "string") revision = result;
+      if (result && "revision" in result) release = result;
       else {
-        candidate = result?.candidates.find(
-          (item) => item.manifest.id === id && item.path === source.path,
-        );
+        candidate = (
+          result && "candidates" in result ? result.candidates : []
+        ).find((item) => item.manifest.id === id && item.path === source.path);
         if (!candidate) {
           const prefix = `${source.path === "." ? "Selected folder" : source.path}:`;
           throw new Error(
-            result?.warnings.find((warning) => warning.startsWith(prefix)) ??
+            (result && "warnings" in result ? result.warnings : []).find(
+              (warning) => warning.startsWith(prefix),
+            ) ??
               "The saved repository no longer contains this plugin at its installed path.",
           );
         }
-        revision = candidate.revision;
+        release = candidate;
       }
     } catch (reason) {
       error = String(reason);
@@ -157,7 +172,7 @@ export function createPluginUpdateChecks(imports: PluginImports | undefined) {
       publish(id, {
         ...snapshot[id],
         checking: false,
-        ...(active() && { revision, error, candidate }),
+        ...(active() && { release, error, candidate }),
       });
   }
   return {
@@ -174,7 +189,7 @@ export function createPluginUpdateChecks(imports: PluginImports | undefined) {
       const installed = installation(plugin);
       installations.set(plugin.manifest.id, installed);
       return (
-        revision: string | undefined,
+        release: PluginRelease | undefined,
         error: string | null = null,
         candidate?: ImportPreview["candidates"][number],
       ) => {
@@ -184,11 +199,14 @@ export function createPluginUpdateChecks(imports: PluginImports | undefined) {
         )
           return false;
         publish(plugin.manifest.id, {
-          installedRevision: plugin.revision,
+          installedRelease: {
+            revision: plugin.revision,
+            publisher: plugin.publisher ?? null,
+          },
           source: identity(plugin),
           sequence: started,
           checking: false,
-          revision,
+          release,
           error,
           candidate,
         });

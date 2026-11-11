@@ -228,7 +228,7 @@ it("shows exact declared access and changes before an enabled update", async () 
   };
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => preview),
       folder: vi.fn(async () => preview),
       git: vi.fn(),
@@ -381,7 +381,7 @@ it.each([
     };
     const manager = {
       imports: {
-        checkFolder: vi.fn(async () => "updated"),
+        checkFolder: vi.fn(async () => ({ revision: "updated" })),
         previewFolder: vi.fn(async () => preview),
         folder: vi.fn(async () => preview),
         discard: vi.fn(async () => {}),
@@ -585,7 +585,7 @@ it.each([
     };
     const manager = {
       imports: {
-        checkFolder: vi.fn(async () => "updated"),
+        checkFolder: vi.fn(async () => ({ revision: "updated" })),
         previewFolder: vi.fn(async () => preview),
         folder: vi.fn(async () => preview),
         discard: vi.fn(async () => {}),
@@ -650,7 +650,7 @@ it("signs in only to repositories the community authorizes", async () => {
   const git = vi.fn(async () => preview);
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(),
       folder: vi.fn(),
       git,
@@ -728,7 +728,7 @@ it("replaces Add with an error view and returns to the retained preview for retr
     );
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => preview),
       folder: vi.fn(async () => preview),
       discard: vi.fn(async () => {}),
@@ -908,7 +908,7 @@ it.each([true, false])(
   async (enabled) => {
     const manager = {
       imports: {
-        checkFolder: vi.fn(async () => "updated"),
+        checkFolder: vi.fn(async () => ({ revision: "updated" })),
         previewFolder: vi.fn(async () => ({
           token: "new",
           source: "/plugin",
@@ -1007,7 +1007,7 @@ it("limits pane updates to the selected plugin without modifying the source prev
   };
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => preview),
       folder: vi.fn(async () => preview),
       discard: vi.fn(async () => {}),
@@ -1314,7 +1314,7 @@ it("opens installed details instead of adding another source", async () => {
     installImport: vi.fn(async () => true),
     change: vi.fn(),
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => ({
         token: "duplicate",
         source: "/example",
@@ -1379,7 +1379,7 @@ it("keeps install review stable while the saved catalog arrives before enabling"
   );
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => ({
         token: "pending",
         source: "/example",
@@ -1602,7 +1602,7 @@ it.each([
     const user = userEvent.setup();
     const manager = {
       imports: {
-        checkFolder: vi.fn(async () => "updated"),
+        checkFolder: vi.fn(async () => ({ revision: "updated" })),
         previewFolder: vi.fn(async () => rememberedPreview),
         folder: vi.fn(async () => rememberedPreview),
         git: vi.fn(async () => rememberedPreview),
@@ -1678,7 +1678,7 @@ it("shows unchanged declarations in a separate dialog view and returns without r
   };
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => ({
         ...rememberedPreview,
         candidates: [
@@ -1787,7 +1787,7 @@ it.each([true, false])(
     const discard = vi.fn(async () => {});
     const manager = {
       imports: {
-        checkFolder: vi.fn(async () => "updated"),
+        checkFolder: vi.fn(async () => ({ revision: "updated" })),
         previewFolder: vi.fn(async () => ({
           ...rememberedPreview,
           candidates: [
@@ -1852,7 +1852,7 @@ it("rejects a replacement source without the installed plugin ID", async () => {
   const user = userEvent.setup();
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => ({
         ...rememberedPreview,
         candidates: [
@@ -1928,7 +1928,7 @@ function savedFolderProps(imports: unknown) {
 
 it("checks revisions without acquiring a preview and prepares fresh bytes only on Update", async () => {
   const imports = {
-    checkFolder: vi.fn(async () => "new"),
+    checkFolder: vi.fn(async () => ({ revision: "new" })),
     previewFolder: vi.fn(async () => rememberedPreview),
     discard: vi.fn(async () => {}),
   };
@@ -1954,13 +1954,13 @@ it("checks revisions without acquiring a preview and prepares fresh bytes only o
 });
 
 it("receives folder diagnostics and ignores late background checks after unmount", async () => {
-  let finish!: (revision: string) => void;
+  let finish!: (release: { revision: string }) => void;
   const checkFolder = vi
     .fn()
     .mockRejectedValueOnce(new Error("dist: plugin.js is missing"))
     .mockImplementation(
       () =>
-        new Promise<string>((resolve) => {
+        new Promise<{ revision: string }>((resolve) => {
           finish = resolve;
         }),
     );
@@ -1983,7 +1983,7 @@ it("receives folder diagnostics and ignores late background checks after unmount
   expect(checkFolder).toHaveBeenCalledTimes(2);
   view.unmount();
   await act(async () => {
-    finish("new");
+    finish({ revision: "new" });
     await pending;
   });
   expect(imports.previewFolder).not.toHaveBeenCalled();
@@ -1992,10 +1992,10 @@ it("receives folder diagnostics and ignores late background checks after unmount
 
 it("keeps explicit checks quiet until the shared one-second loading delay", async () => {
   vi.useFakeTimers();
-  let finish!: (revision: string) => void;
+  let finish!: (release: { revision: string }) => void;
   const checkFolder = vi.fn(
     () =>
-      new Promise<string>((resolve) => {
+      new Promise<{ revision: string }>((resolve) => {
         finish = resolve;
       }),
   );
@@ -2014,7 +2014,7 @@ it("keeps explicit checks quiet until the shared one-second loading delay", asyn
       "Checking for updates…",
     );
     await act(async () => {
-      finish("old");
+      finish({ revision: "old" });
       await pending;
     });
     expect(screen.getByText("Up to date")).toBeVisible();
@@ -2062,7 +2062,7 @@ it("retains known Git updates on reopen and reacquires before review", async () 
 
 it("refreshes a stale known update from the newly acquired package", async () => {
   const imports = {
-    checkFolder: vi.fn(async () => "earlier-check"),
+    checkFolder: vi.fn(async () => ({ revision: "earlier-check" })),
     previewFolder: vi.fn(async () => ({
       ...rememberedPreview,
       candidates: [{ ...rememberedPreview.candidates[0], revision: "old" }],
@@ -2199,7 +2199,7 @@ it.each(["folder", "git"])(
         candidates: [rememberedPreview.candidates[0]],
       });
     const props = savedFolderProps({
-      checkFolder: vi.fn(async () => "new"),
+      checkFolder: vi.fn(async () => ({ revision: "new" })),
       previewFolder: acquire,
       git: acquire,
       discard: vi.fn(async () => {}),
@@ -3443,11 +3443,11 @@ it("leaves an unconstrained link editable and unpinned", async () => {
 });
 
 it("keeps a known Update usable while background discovery is pending", async () => {
-  let finish!: (revision: string) => void;
+  let finish!: (release: { revision: string }) => void;
   const imports = {
     checkFolder: vi.fn(
       () =>
-        new Promise<string>((resolve) => {
+        new Promise<{ revision: string }>((resolve) => {
           finish = resolve;
         }),
     ),
@@ -3458,7 +3458,7 @@ it("keeps a known Update usable while background discovery is pending", async ()
   const checks = createPluginUpdateChecks(props.plugins.imports);
   const plugin = props.catalog.plugins[0];
   if (!plugin) throw new Error("fixture plugin missing");
-  checks.observe(plugin)("new");
+  checks.observe(plugin)({ revision: "new" });
   render(<PluginImport {...props} updateChecks={checks} />);
   act(() => {
     void checks.check(plugin);
@@ -3473,7 +3473,7 @@ it("keeps a known Update usable while background discovery is pending", async ()
       rememberedManifest.id,
     );
   } finally {
-    await act(async () => finish("new"));
+    await act(async () => finish({ revision: "new" }));
   }
 });
 
@@ -3522,7 +3522,7 @@ it.each([false, true])(
     expect(pluginUpdateAvailable(checks.snapshot(), rememberedPlugin)).toBe(
       true,
     );
-    expect(checks.snapshot()[rememberedManifest.id]?.revision).toBe(
+    expect(checks.snapshot()[rememberedManifest.id]?.release?.revision).toBe(
       multiple ? "alternate" : "new",
     );
     expect(
@@ -3536,7 +3536,7 @@ it.each([false, true])(
 );
 
 it("lets the owner check a changed saved folder explicitly", async () => {
-  const checkFolder = vi.fn(async () => "new");
+  const checkFolder = vi.fn(async () => ({ revision: "new" }));
   render(<PluginImport {...savedFolderProps({ checkFolder })} />);
   expect(checkFolder).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));

@@ -53,7 +53,7 @@ it.each([false, true])(
           );
         }),
     );
-    const checkFolder = vi.fn(async () => "folder-new");
+    const checkFolder = vi.fn(async () => ({ revision: "folder-new" }));
     const checks = createPluginUpdateChecks({
       checkGit,
       checkFolder,
@@ -72,9 +72,9 @@ it.each([false, true])(
       updateSource: { root: "/plugins", path: "." },
     };
     await checks.check(folder);
-    expect(pluginUpdateCheck(checks.snapshot(), folder)?.revision).toBe(
-      "folder-new",
-    );
+    expect(
+      pluginUpdateCheck(checks.snapshot(), folder)?.release?.revision,
+    ).toBe("folder-new");
     expect(checkGit).toHaveBeenCalledTimes(2);
     finishes[0]?.(fail);
     await vi.waitFor(() => expect(checkGit).toHaveBeenCalledTimes(3));
@@ -137,22 +137,22 @@ it("does not promote an old pending acquisition over a newer observed read", asy
     checkGit,
   } as unknown as PluginImports);
   const first = checks.check(plugin());
-  checks.observe(plugin())("newer");
+  checks.observe(plugin())({ revision: "newer" });
   const joined = checks.check(plugin());
-  expect(pluginUpdateCheck(checks.snapshot(), plugin())?.revision).toBe(
-    "newer",
-  );
+  expect(
+    pluginUpdateCheck(checks.snapshot(), plugin())?.release?.revision,
+  ).toBe("newer");
   await Promise.resolve();
   finish(preview("installed"));
   await first;
-  expect(pluginUpdateCheck(checks.snapshot(), plugin())?.revision).not.toBe(
-    "installed",
-  );
+  expect(
+    pluginUpdateCheck(checks.snapshot(), plugin())?.release?.revision,
+  ).not.toBe("installed");
   await joined;
   expect(checkGit).toHaveBeenCalledTimes(2);
-  expect(pluginUpdateCheck(checks.snapshot(), plugin())?.revision).toBe(
-    "newest",
-  );
+  expect(
+    pluginUpdateCheck(checks.snapshot(), plugin())?.release?.revision,
+  ).toBe("newest");
 });
 
 it("rejects an older observed read after a newer source acquisition completes", async () => {
@@ -162,10 +162,10 @@ it("rejects an older observed read after a newer source acquisition completes", 
   } as unknown as PluginImports);
   const older = checks.observe(plugin());
   await checks.check(plugin());
-  older("stale");
-  expect(pluginUpdateCheck(checks.snapshot(), plugin())?.revision).toBe(
-    "installed",
-  );
+  older({ revision: "stale" });
+  expect(
+    pluginUpdateCheck(checks.snapshot(), plugin())?.release?.revision,
+  ).toBe("installed");
   expect(pluginUpdateAvailable(checks.snapshot(), plugin())).toBe(false);
 });
 
@@ -188,7 +188,7 @@ it.each([false, true])(
     await checks.check(plugin());
     const result = pluginUpdateCheck(checks.snapshot(), plugin());
     expect(result?.checking).toBe(false);
-    expect(result?.revision).toBeUndefined();
+    expect(result?.release?.revision).toBeUndefined();
     expect(result?.error).toContain(
       missing ? "one: Missing plugin" : "offline",
     );
@@ -198,7 +198,7 @@ it.each([false, true])(
 
 it("records a failed preview read without keeping a stale revision", () => {
   const checks = createPluginUpdateChecks(undefined);
-  checks.observe(plugin())("new");
+  checks.observe(plugin())({ revision: "new" });
   checks.observe(plugin())(undefined, "Source unavailable");
   expect(pluginUpdateAvailable(checks.snapshot(), plugin())).toBe(false);
   expect(pluginUpdateCheck(checks.snapshot(), plugin())?.error).toBe(
@@ -229,7 +229,9 @@ it("drops an obsolete installation retry after rollback rejoins the original rea
   finish(preview("new"));
   await Promise.all([first, obsolete, latest]);
   expect(checkGit).toHaveBeenCalledOnce();
-  expect(pluginUpdateCheck(checks.snapshot(), original)?.revision).toBe("new");
+  expect(
+    pluginUpdateCheck(checks.snapshot(), original)?.release?.revision,
+  ).toBe("new");
 });
 
 it("does not retry a replaced source after its old read settles", async () => {
@@ -261,13 +263,13 @@ it("does not retry a replaced source after its old read settles", async () => {
   finish(preview("old"));
   await Promise.all([first, obsolete]);
   expect(checkGit).toHaveBeenCalledTimes(2);
-  expect(pluginUpdateCheck(checks.snapshot(), replacement)?.revision).toBe(
-    "new",
-  );
+  expect(
+    pluginUpdateCheck(checks.snapshot(), replacement)?.release?.revision,
+  ).toBe("new");
 });
 
 it("retires queued folder reads when eligibility is revoked", async () => {
-  let finish!: (value: string) => void;
+  let finish!: (value: { revision: string }) => void;
   let eligible = true;
   const folder = {
     ...plugin(),
@@ -275,7 +277,7 @@ it("retires queued folder reads when eligibility is revoked", async () => {
   };
   const checkFolder = vi.fn(
     () =>
-      new Promise<string>((resolve) => {
+      new Promise<{ revision: string }>((resolve) => {
         finish = resolve;
       }),
   );
@@ -283,17 +285,19 @@ it("retires queued folder reads when eligibility is revoked", async () => {
     checkFolder,
   } as unknown as PluginImports);
   const first = checks.check(folder, undefined, () => eligible);
-  checks.observe(folder)("newer");
+  checks.observe(folder)({ revision: "newer" });
   const queued = checks.check(folder, undefined, () => eligible);
   eligible = false;
-  finish("old");
+  finish({ revision: "old" });
   await Promise.all([first, queued]);
   expect(checkFolder).toHaveBeenCalledOnce();
-  expect(pluginUpdateCheck(checks.snapshot(), folder)?.revision).toBe("newer");
+  expect(pluginUpdateCheck(checks.snapshot(), folder)?.release?.revision).toBe(
+    "newer",
+  );
 });
 
 it("settles the pending indicator without publishing an ineligible folder result", async () => {
-  let finish!: (value: string) => void;
+  let finish!: (value: { revision: string }) => void;
   let eligible = true;
   const folder = {
     ...plugin(),
@@ -301,7 +305,7 @@ it("settles the pending indicator without publishing an ineligible folder result
   };
   const checkFolder = vi.fn(
     () =>
-      new Promise<string>((resolve) => {
+      new Promise<{ revision: string }>((resolve) => {
         finish = resolve;
       }),
   );
@@ -310,11 +314,11 @@ it("settles the pending indicator without publishing an ineligible folder result
   } as unknown as PluginImports);
   const checking = checks.check(folder, undefined, () => eligible);
   eligible = false;
-  finish("new");
+  finish({ revision: "new" });
   await checking;
   expect(pluginUpdateCheck(checks.snapshot(), folder)?.checking).toBe(false);
   expect(
-    pluginUpdateCheck(checks.snapshot(), folder)?.revision,
+    pluginUpdateCheck(checks.snapshot(), folder)?.release?.revision,
   ).toBeUndefined();
   expect(pluginUpdateCheck(checks.snapshot(), folder)?.error).toBeNull();
 });
@@ -339,4 +343,51 @@ it("ignores pinned URL sources without authorizing or acquiring a repository", a
   expect(checkGit).not.toHaveBeenCalled();
   expect(checkFolder).not.toHaveBeenCalled();
   expect(checks.snapshot()).toEqual({});
+});
+
+it.each(["folder", "git"])(
+  "retains publisher-only repairs in shared %s results",
+  async (source) => {
+    const installed: PluginInfo = {
+      ...plugin(),
+      publisher: null,
+      ...(source === "folder" && {
+        updateSource: { root: "/plugins", path: "one" },
+      }),
+    };
+    const signed = { revision: installed.revision, publisher: "a".repeat(64) };
+    const candidate = {
+      path: "one",
+      manifest: installed.manifest,
+      ...signed,
+    };
+    const checks = createPluginUpdateChecks({
+      checkFolder: vi.fn(async () => signed),
+      checkGit: vi.fn(async () => ({
+        ...preview(installed.revision),
+        candidates: [candidate],
+      })),
+    } as unknown as PluginImports);
+    await checks.check(installed);
+    expect(
+      pluginUpdateCheck(checks.snapshot(), installed)?.release,
+    ).toMatchObject(signed);
+    expect(pluginUpdateAvailable(checks.snapshot(), installed)).toBe(true);
+    const repaired = { ...installed, ...signed };
+    expect(pluginUpdateCheck(checks.snapshot(), repaired)).toBeUndefined();
+    await checks.check(repaired);
+    expect(pluginUpdateAvailable(checks.snapshot(), repaired)).toBe(false);
+  },
+);
+
+it("rejects a late observed result when only the installed publisher changes", () => {
+  const checks = createPluginUpdateChecks(undefined);
+  const unsigned = { ...plugin(), publisher: null };
+  const oldRead = checks.observe(unsigned);
+  const repaired = { ...unsigned, publisher: "a".repeat(64) };
+  checks.observe(repaired)(repaired);
+  expect(oldRead({ revision: "obsolete" })).toBe(false);
+  expect(pluginUpdateCheck(checks.snapshot(), repaired)?.release).toEqual(
+    repaired,
+  );
 });

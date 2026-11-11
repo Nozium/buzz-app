@@ -26,6 +26,7 @@ import {
   type PluginUpdateChecks,
 } from "../plugins/update-checks";
 import type { PluginManager } from "../plugins/manager";
+import { samePluginRelease } from "../plugins/same-release";
 import type { Catalog, ImportPreview, PluginInfo } from "../plugins/types";
 import {
   pluginUpdateSource,
@@ -164,7 +165,7 @@ export function PluginImport({
   );
   const checkSnapshot = useSyncExternalStore(checks.subscribe, checks.snapshot);
   const sourceCheck = pluginUpdateCheck(checkSnapshot, currentPlugin);
-  const checkedRevision = sourceCheck?.revision;
+  const checkedRelease = sourceCheck?.release;
   const checking = !!sourceCheck?.checking;
   const checkError = sourceCheck?.error;
   const [repository, setRepository] = useState(
@@ -442,18 +443,14 @@ export function PluginImport({
     // its enabled state and existing rollback target for the same revision.
     !(updateId && !savedSource) &&
     !!existing &&
-    candidate?.revision ===
-      (updateId
-        ? catalog.plugins.find((item) => item.manifest.id === updateId)
-            ?.revision
-        : existing.revision);
+    samePluginRelease(candidate, updateId ? currentPlugin : existing);
   const updateAvailable =
     !error &&
     !(checkError && !preview) &&
     (preview
       ? !upToDate
-      : checkedRevision !== undefined
-        ? checkedRevision !== currentPlugin?.revision
+      : checkedRelease !== undefined
+        ? !samePluginRelease(checkedRelease, currentPlugin)
         : initialUpdateAvailable);
   useEffect(() => {
     if (!reviewRequested || loading) return;
@@ -605,7 +602,7 @@ export function PluginImport({
         }
       }
       if (next?.candidates.length === 1 && next.candidates[0])
-        observe?.(next.candidates[0].revision, null, next.candidates[0]);
+        observe?.(next.candidates[0], null, next.candidates[0]);
       lastQueuedUpdateFailure.current = undefined;
       setError(null);
       setPreview(next);
@@ -998,7 +995,7 @@ export function PluginImport({
               unavailable. {error ?? checkError}
             </p>
           ) : null}
-          {(preview || checkedRevision !== undefined) &&
+          {(preview || checkedRelease !== undefined) &&
           !open &&
           !error &&
           !checkError &&
@@ -1149,11 +1146,7 @@ export function PluginImport({
                   disabled={blocked || !candidate}
                   onClick={() => {
                     if (currentPlugin && candidate)
-                      checks.observe(currentPlugin)(
-                        candidate.revision,
-                        null,
-                        candidate,
-                      );
+                      checks.observe(currentPlugin)(candidate, null, candidate);
                     setExisting(
                       catalog.plugins.find(
                         (item) => item.manifest.id === candidate?.manifest.id,

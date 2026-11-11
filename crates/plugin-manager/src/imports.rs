@@ -269,9 +269,18 @@ pub fn prepare_saved_folder(manager: &Manager, id: &str) -> Result<PreparedImpor
 }
 
 /// No preview is retained, installed, or published to the native import slot.
-pub fn check_saved_folder(manager: &Manager, id: &str) -> Result<String> {
+#[derive(Debug, Serialize)]
+pub struct UpdateCheck {
+    pub revision: String,
+    pub publisher: Option<String>,
+}
+
+pub fn check_saved_folder(manager: &Manager, id: &str) -> Result<UpdateCheck> {
     let (_, release) = read_saved_folder(manager, id)?;
-    Ok(hash(&release.bytes))
+    Ok(UpdateCheck {
+        revision: hash(&release.bytes),
+        publisher: release.publisher(),
+    })
 }
 
 fn read_saved_folder(manager: &Manager, id: &str) -> Result<(ReloadSource, Release)> {
@@ -1178,6 +1187,23 @@ mod tests {
             "Git could not read this repository: fatal: repository not found"
         );
     }
+    const TEST_SIGNING_KEY: &str =
+        "0000000000000000000000000000000000000000000000000000000000000001";
+
+    fn sign(directory: &Path) {
+        crate::sign_release(directory, TEST_SIGNING_KEY).unwrap();
+    }
+
+    fn add_release_files(upload: &mut FolderUpload, directory: &Path, prefix: &str) {
+        for name in ["plugin.artifact.json", "plugin.signature.json"] {
+            upload.files.push(ImportFile {
+                path: format!("{prefix}{name}"),
+                text: Some(fs::read_to_string(directory.join(name)).unwrap()),
+                base64: None,
+            });
+        }
+    }
+
     fn uploaded(files: &[(&str, &str)]) -> FolderUpload {
         FolderUpload {
             source: "example".into(),
@@ -1194,14 +1220,11 @@ mod tests {
 
     #[test]
     fn dropped_folder_uses_reviewed_snapshot_without_a_temporary_reload_source() {
-        let prepared = prepare_upload(uploaded(&[
-            (
-                "dist/manifest.json",
-                r#"{"id":"example.drop","name":"Drop","apiVersion":1}"#,
-            ),
-            ("dist/plugin.js", "export function apply() {}"),
-        ]))
-        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let source = plugin(root.path(), "dist", "example.drop");
+        let mut upload = uploaded(&[]);
+        add_release_files(&mut upload, &source, "dist/");
+        let prepared = prepare_upload(upload).unwrap();
         assert_eq!(prepared.preview.source, "Dropped folder: example");
         assert_eq!(prepared.preview.candidates[0].path, "dist");
         assert!(prepared.folder_root.is_none());
@@ -1221,7 +1244,7 @@ mod tests {
         manager.change("enable", "example.drop").unwrap();
         assert_eq!(
             manager.module("example.drop", &plugin.revision).unwrap(),
-            "export function apply() {}"
+            "export function apply() {} // first"
         );
     }
 
@@ -1345,6 +1368,7 @@ mod tests {
         fs::write(package.join("README.md"), "# Hello").unwrap();
         fs::write(package.join("icon.png"), &png).unwrap();
         fs::write(package.join("icon.jpg"), &jpg).unwrap();
+        sign(&package);
         let folder = prepare_folder(&package).unwrap();
         let mut upload = uploaded(&[
             (
@@ -1364,6 +1388,7 @@ mod tests {
                 base64: Some(BASE64.encode(bytes)),
             });
         }
+        add_release_files(&mut upload, &package, "");
         let dropped = prepare_upload(upload).unwrap();
         assert!(dropped.preview.warnings.is_empty());
         let candidate = &dropped.preview.candidates[0];
@@ -1427,6 +1452,12 @@ mod tests {
     }
 
     fn plugin(root: &Path, folder: &str, id: &str) -> PathBuf {
+        let path = unsigned_plugin(root, folder, id);
+        sign(&path);
+        path
+    }
+
+    fn unsigned_plugin(root: &Path, folder: &str, id: &str) -> PathBuf {
         let path = root.join(folder);
         fs::create_dir_all(&path).unwrap();
         fs::write(
@@ -1447,12 +1478,12 @@ mod tests {
         git.run(&["init", "--template=", "repository"], LIMIT)
             .unwrap();
         let repo = git.scratch.path().join("repository");
-        plugin(&repo, "", "example.one");
+        unsigned_plugin(&repo, "", "example.one");
         fs::remove_file(repo.join("plugin.js")).unwrap();
         plugin(&repo, "dist", "example.one");
-        let broken = plugin(&repo, "broken", "example.one");
+        let broken = unsigned_plugin(&repo, "broken", "example.one");
         fs::remove_file(broken.join("plugin.js")).unwrap();
-        let other = plugin(&repo, "other", "example.other");
+        let other = unsigned_plugin(&repo, "other", "example.other");
         fs::remove_file(other.join("plugin.js")).unwrap();
         plugin(&repo, "other/dist", "example.different");
         fs::create_dir_all(repo.join("malformed")).unwrap();
@@ -1462,13 +1493,19 @@ mod tests {
             "manifest.json",
             "dist/manifest.json",
             "dist/plugin.js",
+            "dist/plugin.artifact.json",
+            "dist/plugin.signature.json",
             "broken/manifest.json",
             "other/manifest.json",
             "other/dist/manifest.json",
             "other/dist/plugin.js",
+            "other/dist/plugin.artifact.json",
+            "other/dist/plugin.signature.json",
             "malformed/manifest.json",
             "malformed/dist/manifest.json",
             "malformed/dist/plugin.js",
+            "malformed/dist/plugin.artifact.json",
+            "malformed/dist/plugin.signature.json",
         ];
         let upload = FolderUpload {
             source: "fixture".into(),
@@ -1517,6 +1554,11 @@ mod tests {
         // With no valid build, a source-only manifest still explains why import failed.
         fs::remove_file(repo.join("dist/plugin.js")).unwrap();
         fs::remove_file(repo.join("malformed/dist/plugin.js")).unwrap();
+        for folder in ["dist", "malformed/dist"] {
+            for name in ["plugin.artifact.json", "plugin.signature.json"] {
+                fs::remove_file(repo.join(folder).join(name)).unwrap();
+            }
+        }
         let missing = prepare_folder(&repo).unwrap();
         assert!(missing
             .preview
@@ -1531,6 +1573,7 @@ mod tests {
         let source = plugin(root.path(), "pages/one/dist", "example.one");
         fs::write(source.join("README.md"), "# One").unwrap();
         fs::write(source.join("icon.png"), png()).unwrap();
+        sign(&source);
         plugin(root.path(), "panels/two", "example.two");
         plugin(root.path(), "node_modules/skipped", "example.skipped");
         fs::write(root.path().join("manifest.json"), "{}").unwrap();
@@ -1556,6 +1599,7 @@ mod tests {
             "throw Error('changed'); while(true) {}",
         )
         .unwrap();
+        sign(&source);
         let catalog = prepared
             .install(&manager, &prepared.preview.token, "pages/one/dist")
             .unwrap();
@@ -1625,6 +1669,7 @@ mod tests {
         );
         manager.change("enable", "example.remembered").unwrap();
         fs::write(source.join("plugin.js"), "export const updated = true;").unwrap();
+        sign(&source);
         let mut git = prepare_folder(root.path()).unwrap();
         git.folder_root = None;
         git.git_source = Some(GitSource {
@@ -1760,13 +1805,15 @@ mod tests {
         let repo = git.scratch.path().join("repository");
         let case = plugin(&repo, "case", "example.case");
         fs::write(case.join("readme.md"), "not conventional").unwrap();
+        sign(&case);
         for (index, name) in ["README.md", "icon.png", "icon.jpg"].iter().enumerate() {
-            let linked = plugin(
+            let linked = unsigned_plugin(
                 &repo,
                 &format!("linked{index}"),
                 &format!("example.linked{index}"),
             );
             std::os::unix::fs::symlink("plugin.js", linked.join(name)).unwrap();
+            assert!(prepare_unsigned_artifact(&linked).is_err());
         }
         git.run(&["-C", "repository", "add", "."], LIMIT).unwrap();
         git.run(
@@ -1806,18 +1853,20 @@ mod tests {
         let outside = tempfile::tempdir().unwrap();
         plugin(outside.path(), "outside", "example.outside");
         symlink(outside.path(), root.path().join("escape")).unwrap();
-        let folder = plugin(root.path(), "bad", "example.bad");
+        let folder = unsigned_plugin(root.path(), "bad", "example.bad");
         fs::remove_file(folder.join("plugin.js")).unwrap();
         symlink(
             outside.path().join("outside/plugin.js"),
             folder.join("plugin.js"),
         )
         .unwrap();
-        let fifo = plugin(root.path(), "fifo", "example.fifo");
+        let fifo = unsigned_plugin(root.path(), "fifo", "example.fifo");
         fs::remove_file(fifo.join("plugin.js")).unwrap();
         let name =
             std::ffi::CString::new(fifo.join("plugin.js").as_os_str().as_encoded_bytes()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(prepare_unsigned_artifact(&folder).is_err());
+        assert!(prepare_unsigned_artifact(&fifo).is_err());
         let prepared = prepare_folder(root.path()).unwrap();
         assert!(prepared.preview.candidates.is_empty());
         assert_eq!(prepared.preview.warnings.len(), 2);
@@ -1859,20 +1908,23 @@ mod tests {
     #[test]
     fn rejects_invalid_artifacts_and_bounds_preview_size() {
         let root = tempfile::tempdir().unwrap();
-        plugin(root.path(), "bundled", "buzz.channels");
-        let bad = plugin(root.path(), "unsupported", "example.bad");
+        unsigned_plugin(root.path(), "bundled", "buzz.channels");
+        let bad = unsigned_plugin(root.path(), "unsupported", "example.bad");
         fs::write(
             bad.join("manifest.json"),
             r#"{"id":"example.bad","name":"Bad","apiVersion":2}"#,
         )
         .unwrap();
-        let empty = plugin(root.path(), "empty", "example.empty");
+        let empty = unsigned_plugin(root.path(), "empty", "example.empty");
         fs::write(empty.join("plugin.js"), " ").unwrap();
-        let large = plugin(root.path(), "large", "example.large");
+        let large = unsigned_plugin(root.path(), "large", "example.large");
         File::create(large.join("plugin.js"))
             .unwrap()
             .set_len(LIMIT + 1)
             .unwrap();
+        for source in [&bad, &empty, &large] {
+            assert!(prepare_unsigned_artifact(source).is_err());
+        }
         let prepared = prepare_folder(root.path()).unwrap();
         assert!(prepared.preview.candidates.is_empty());
         assert_eq!(prepared.preview.warnings.len(), 4);
@@ -2034,7 +2086,6 @@ mod tests {
             .unwrap();
         let repo = git.scratch.path().join("repository");
         let signed = plugin(&repo, "plugins/one/dist", "example.one");
-        crate::sign_release(&signed, &nostr::key::SecretKey::generate().to_secret_hex()).unwrap();
         fs::remove_file(signed.join("manifest.json")).unwrap();
         fs::remove_file(signed.join("plugin.js")).unwrap();
         plugin(&repo, "plugins/two", "example.two");
@@ -2045,6 +2096,7 @@ mod tests {
             .write_image(&[128, 128, 128], 1, 1, ExtendedColorType::Rgb8)
             .unwrap();
         fs::write(repo.join("plugins/two/icon.jpg"), &jpg).unwrap();
+        sign(&repo.join("plugins/two"));
         fs::write(
             repo.join("package.json"),
             r#"{"scripts":{"postinstall":"exit 1"}}"#,
@@ -2156,7 +2208,9 @@ mod tests {
             .revision
             .clone();
         assert_eq!(
-            check_saved_folder(&manager, "example.checked").unwrap(),
+            check_saved_folder(&manager, "example.checked")
+                .unwrap()
+                .revision,
             original
         );
         fs::write(
@@ -2164,8 +2218,11 @@ mod tests {
             "export function activate() { /* changed */ }",
         )
         .unwrap();
+        sign(&source);
         assert_ne!(
-            check_saved_folder(&manager, "example.checked").unwrap(),
+            check_saved_folder(&manager, "example.checked")
+                .unwrap()
+                .revision,
             original
         );
         // A read never installs bytes or invalidates an unrelated captured preview.
@@ -2203,6 +2260,9 @@ mod tests {
             .install(&manager, &bound.preview.token, "other")
             .is_err());
         fs::remove_file(source.join("plugin.js")).unwrap();
+        for name in ["plugin.artifact.json", "plugin.signature.json"] {
+            fs::remove_file(source.join(name)).unwrap();
+        }
         let error = check_saved_folder(&manager, "example.checked").unwrap_err();
         assert!(error.contains("dist:"), "{error}");
         assert!(error.contains("plugin.js"), "{error}");
@@ -2234,7 +2294,9 @@ mod tests {
         }
         assert!(prepare_folder(root.path()).is_err());
         assert_eq!(
-            check_saved_folder(&manager, "example.checked").unwrap(),
+            check_saved_folder(&manager, "example.checked")
+                .unwrap()
+                .revision,
             original
         );
     }
@@ -2261,7 +2323,9 @@ mod tests {
             "export function activate() { /* changed */ }",
         )
         .unwrap();
-        let revision = check_saved_folder(&manager, "example.checked").unwrap();
+        let revision = check_saved_folder(&manager, "example.checked")
+            .unwrap()
+            .revision;
         let preview = prepare_saved_folder(&manager, "example.checked").unwrap();
         assert_eq!(preview.preview.candidates.len(), 1);
         assert_eq!(preview.preview.candidates[0].path, "dist");
@@ -2285,6 +2349,57 @@ mod tests {
         };
         assert_eq!(saved.path, "dist");
         assert_eq!(saved.root, root.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn saved_folder_check_reports_signature_only_repair_without_scanning_siblings() {
+        let root = tempfile::tempdir().unwrap();
+        let source = plugin(root.path(), "dist", "example.checked");
+        let home = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
+        let pending = prepare_folder(root.path()).unwrap();
+        pending
+            .install(&manager, &pending.preview.token, "dist")
+            .unwrap();
+        // A legacy install may lack metadata even when its source is now signed.
+        let mut registry = manager.read().unwrap();
+        registry
+            .installed
+            .get_mut("example.checked")
+            .unwrap()
+            .current_signature = None;
+        manager.save(&registry).unwrap();
+        let installed = manager.catalog().unwrap();
+        let unsigned = installed
+            .plugins
+            .iter()
+            .find(|p| p.manifest.id == "example.checked")
+            .unwrap();
+        assert!(unsigned.publisher.is_none());
+        let publisher = crate::sign_release(&source, TEST_SIGNING_KEY).unwrap();
+        for index in 0..MAX_PLUGINS {
+            plugin(
+                root.path(),
+                &format!("sibling-{index}"),
+                &format!("example.sibling{index}"),
+            );
+        }
+        let checked = check_saved_folder(&manager, "example.checked").unwrap();
+        assert_eq!(checked.revision, unsigned.revision);
+        assert_eq!(checked.publisher.as_deref(), Some(publisher.as_str()));
+        let captured = prepare_saved_folder(&manager, "example.checked").unwrap();
+        assert_eq!(captured.preview.candidates[0].publisher, checked.publisher);
+        assert!(manager
+            .catalog()
+            .unwrap()
+            .plugins
+            .iter()
+            .find(|p| p.manifest.id == "example.checked")
+            .unwrap()
+            .publisher
+            .is_none());
+        fs::write(source.join("plugin.signature.json"), "{}").unwrap();
+        assert!(check_saved_folder(&manager, "example.checked").is_err());
     }
 
     #[test]
@@ -2323,8 +2438,8 @@ mod tests {
     fn signed_folder_import_load_reload_and_publisher_continuity() {
         let root = tempfile::tempdir().unwrap();
         let source = plugin(root.path(), "dist", "example.signed");
-        let first_key = nostr::key::SecretKey::generate().to_secret_hex();
-        let publisher = crate::sign_release(&source, &first_key).unwrap();
+        let first_key = TEST_SIGNING_KEY;
+        let publisher = crate::sign_release(&source, first_key).unwrap();
         let pair_only = tempfile::tempdir().unwrap();
         for name in ["plugin.artifact.json", "plugin.signature.json"] {
             fs::copy(source.join(name), pair_only.path().join(name)).unwrap();
@@ -2366,7 +2481,7 @@ mod tests {
         fs::write(&stored, original).unwrap();
         manager.change("disable", "example.signed").unwrap();
         fs::write(source.join("plugin.js"), "export const changed = true;").unwrap();
-        crate::sign_release(&source, &first_key).unwrap();
+        crate::sign_release(&source, first_key).unwrap();
         let second = manager.reload("example.signed").unwrap();
         let second = second
             .plugins
@@ -2399,7 +2514,7 @@ mod tests {
             .unwrap()
             .contains("first"));
         manager.change("disable", "example.signed").unwrap();
-        crate::sign_release(&source, &nostr::key::SecretKey::generate().to_secret_hex()).unwrap();
+        crate::sign_release(&source, &"02".repeat(32)).unwrap();
         let different = prepare_folder(root.path()).unwrap();
         assert!(different
             .install(&manager, &different.preview.token, "dist")
@@ -2417,15 +2532,16 @@ mod tests {
             .install(&source)
             .err()
             .unwrap()
-            .contains("Publisher changed"));
+            .contains("signed plugin became unsigned"));
         manager.change("remove", "example.signed").unwrap();
+        assert!(manager.install(&source).is_ok());
+        crate::sign_release(&source, &"02".repeat(32)).unwrap();
         assert!(manager.install(&source).is_ok());
     }
     #[test]
     fn signed_pair_never_falls_back_to_unsigned_files() {
         let root = tempfile::tempdir().unwrap();
         let source = plugin(root.path(), "dist", "example.signed");
-        crate::sign_release(&source, &nostr::key::SecretKey::generate().to_secret_hex()).unwrap();
         fs::remove_file(source.join("plugin.signature.json")).unwrap();
         let preview = prepare_folder(root.path()).unwrap();
         assert!(preview.preview.candidates.is_empty());
@@ -2437,6 +2553,131 @@ mod tests {
             .candidates
             .is_empty());
     }
+
+    #[test]
+    fn every_import_source_respects_signature_policy() {
+        crate::tests::rerun_with_signatures_required(
+            "imports::tests::every_import_source_respects_signature_policy",
+        );
+        let required = std::env::var("BUZZ_REQUIRE_PLUGIN_SIGNATURES").as_deref() == Ok("1");
+        let git = Git::new().unwrap();
+        git.run(&["init", "--template=", "repository"], LIMIT)
+            .unwrap();
+        let repo = git.scratch.path().join("repository");
+        unsigned_plugin(&repo, "unsigned", "example.unsigned");
+        let missing_artifact = plugin(&repo, "missing-artifact", "example.artifact");
+        fs::remove_file(missing_artifact.join("plugin.artifact.json")).unwrap();
+        let missing_signature = plugin(&repo, "missing-signature", "example.signature");
+        fs::remove_file(missing_signature.join("plugin.signature.json")).unwrap();
+        let bad_signature = plugin(&repo, "bad-signature", "example.invalid");
+        let signature_path = bad_signature.join("plugin.signature.json");
+        let mut signature: serde_json::Value =
+            serde_json::from_slice(&fs::read(&signature_path).unwrap()).unwrap();
+        signature["sig"] = serde_json::json!("0".repeat(128));
+        fs::write(signature_path, serde_json::to_vec(&signature).unwrap()).unwrap();
+        let changed_artifact = plugin(&repo, "changed-artifact", "example.changed");
+        let artifact_path = changed_artifact.join("plugin.artifact.json");
+        let mut bytes = fs::read(&artifact_path).unwrap();
+        bytes.push(b'\n');
+        fs::write(artifact_path, bytes).unwrap();
+        plugin(&repo, "valid", "example.valid");
+
+        let mut upload = uploaded(&[]);
+        for folder in [
+            "unsigned",
+            "missing-artifact",
+            "missing-signature",
+            "bad-signature",
+            "changed-artifact",
+            "valid",
+        ] {
+            for name in [
+                "manifest.json",
+                "plugin.js",
+                "plugin.artifact.json",
+                "plugin.signature.json",
+            ] {
+                if let Ok(text) = fs::read_to_string(repo.join(folder).join(name)) {
+                    upload.files.push(ImportFile {
+                        path: format!("{folder}/{name}"),
+                        text: Some(text),
+                        base64: None,
+                    });
+                }
+            }
+        }
+        git.run(&["-C", "repository", "add", "."], LIMIT).unwrap();
+        git.run(
+            &[
+                "-C",
+                "repository",
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "fixture",
+            ],
+            LIMIT,
+        )
+        .unwrap();
+
+        for prepared in [
+            prepare_folder(&repo).unwrap(),
+            prepare_upload(upload).unwrap(),
+            git.read_plugins("fixture".into(), None).unwrap(),
+        ] {
+            let paths: Vec<_> = prepared
+                .preview
+                .candidates
+                .iter()
+                .map(|p| p.path.as_str())
+                .collect();
+            assert_eq!(
+                paths,
+                if required {
+                    vec!["valid"]
+                } else {
+                    vec!["unsigned", "valid"]
+                }
+            );
+            for candidate in &prepared.preview.candidates {
+                assert_eq!(candidate.publisher.is_some(), candidate.path == "valid");
+            }
+            assert_eq!(
+                prepared.preview.warnings.len(),
+                if required { 5 } else { 4 }
+            );
+            for (folder, reason) in [
+                ("unsigned", crate::UNSIGNED_PLUGIN_ERROR),
+                ("missing-artifact", "Incomplete signed plugin release pair"),
+                ("missing-signature", "Incomplete signed plugin release pair"),
+                (
+                    "bad-signature",
+                    "Invalid plugin release event ID or signature",
+                ),
+                (
+                    "changed-artifact",
+                    "Invalid or ambiguous plugin release x tag",
+                ),
+            ] {
+                if folder == "unsigned" && !required {
+                    continue;
+                }
+                assert!(
+                    prepared.preview.warnings.iter().any(|warning| {
+                        warning.starts_with(&format!("{folder}:")) && warning.contains(reason)
+                    }),
+                    "{folder}: {:?}",
+                    prepared.preview.warnings
+                );
+            }
+        }
+    }
+
     #[test]
     fn signed_update_cannot_roll_back_to_unsigned_revision() {
         let root = tempfile::tempdir().unwrap();
@@ -2444,8 +2685,16 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
         manager.install(&source).unwrap();
+        // Simulate a pre-enforcement installation without admitting unsigned code.
+        let mut registry = manager.read().unwrap();
+        registry
+            .installed
+            .get_mut("example.signed")
+            .unwrap()
+            .current_signature = None;
+        manager.save(&registry).unwrap();
         fs::write(source.join("plugin.js"), "export const signed = true;").unwrap();
-        crate::sign_release(&source, &nostr::key::SecretKey::generate().to_secret_hex()).unwrap();
+        sign(&source);
         manager.install(&source).unwrap();
         assert!(manager
             .change("rollback", "example.signed")

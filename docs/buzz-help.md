@@ -395,9 +395,26 @@ revokes all of them, and a pairing unused for 30 days expires.
   notification. Selecting someone outside the channel does not grant access;
   inviting them requires an explicit decision from someone with permission.
 - **Workspaces** group Solo chats and provide starting folders and instructions.
+  With Nexus enabled, each workspace also contains its tasks and can have a Lead
+  task. Nexus saves and chooses Leads, so they exist only while Nexus is enabled.
+  Creating a workspace selects it so you can start a conversation with its Lead.
+  The title or blank row area opens the workspace's Lead, or a task composer if
+  it has none; sending from that composer makes the new task its Lead. Only the
+  chevron expands or collapses
+  the workspace. Hover Solo or a workspace and use **New task**, beside **…**, for another task. The button also appears with keyboard focus. **New task** is also in the workspace's **…** menu, the only place it shows when the header is too narrow, for example with enlarged text. Chat creation
+  is available only in **Chats**. The workspace itself stays selected while its Lead
+  conversation is open; the Lead has no separate task row. New task's agent picker
+  lists agents eligible to run the task on this device.
+  Without Nexus, chat creation remains available in the global **+** menu,
+  Solo and each workspace; creating a workspace opens a chat draft filed there.
   Folders are optional unless **Work in a new worktree** is on. In that mode,
   add at least one project folder; the form shows a message beside Folders
-  until you add one or turn worktree mode off.
+  until you add one or turn worktree mode off. In **New chat**, typing **#**
+  lists your workspaces above channels; choosing one sets the composer's
+  workspace control and leaves no text in the message. A plugin's chat, such as
+  a Nexus task, shows the workspace control when its plugin files it; until
+  that chat's first message, **#** offers its workspaces too, and choosing one
+  files the chat right away.
 - **Activity** (the bell at the top of the Messages sidebar) collects DMs, ordinary responses in Solo chats, mentions of you, and
   replies in threads you started, replied in, or follow. Solo chats appear under All, not DMs; their nested
   threads stay separate. Agent-only coordination stays out. The tabs (All, Threads, Mentions, DMs, Reactions) narrow it by
@@ -1245,6 +1262,40 @@ Release builds ignore it.
 ### Builderlab in development
 
 With the pinned-viewer development server, Settings → Plugins → Builderlab manages one sign-in for hosted communities, remote agents and apps. It survives app reloads while the server runs. Signing out or session expiry signs all three out. The credential stays on the server and is not saved to disk.
+
+### Charts in messages
+
+The optional **Charts** plugin, off until turned on in Settings → Plugins, draws
+a `buzz-chart` code block as a chart. Anyone reading the message needs it on;
+otherwise they see the JSON. The block holds strict JSON (no comments or
+functions), up to 60 KB. **Expand chart** shows it larger and **View data rows**
+lists the plotted values as text.
+
+````
+```buzz-chart
+{"version":1,"type":"bar","title":"Open issues","x":"team","y":"issues","data":[{"team":"Web","issues":12},{"team":"Relay","issues":7}],"source":{"name":"Issue tracker"}}
+```
+````
+
+- Version 1: `type` is `bar` (at most 40 rows), `line` or `scatter` (at most 200),
+  with `title`, `x`, `y` and `data` rows of those two fields. Every `y` is a
+  finite number. Bars use text `x` values. Line and scatter use numbers, or set
+  `"xType":"temporal"` for ISO dates (date-times need seconds and a timezone).
+  Bars and lines need unique `x` values; aggregate first. `series` names a field
+  that splits rows into colored series. Charts use four colors, so the series
+  after the third are summed into one **Other** series; give your own totals when
+  a sum would mislead.
+- Version 2: `{"version":2,"title":"…","height":360,"option":{…}}` where `option`
+  is an Apache ECharts option with its data inline (`dataset.source` or
+  `series[].data`). Series types are bar, line, scatter, pie, heatmap, funnel,
+  gauge, boxplot, candlestick, sankey, treemap and radar. `height` is 160–900.
+  Colors come from the theme: the fourth color is followed by the first again,
+  so keep a chart to four series, slices or nodes when readers must tell them
+  apart. Links, images, graphics, toolbox, custom series, HTML in tooltips and
+  `inside` zoom are removed.
+- Optional `"source":{"name":"…","url":"https://…","metric":"…"}` shows
+  attribution under the chart; it is not verified. `note` adds a caveat line.
+- An invalid chart shows its error and source instead of drawing.
 
 ### Saved External apps approval
 
