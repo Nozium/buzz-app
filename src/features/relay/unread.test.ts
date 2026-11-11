@@ -2126,8 +2126,9 @@ it("failed exact-read persistence keeps forced IDs and retry persists only the s
   expect(unread.attention("room", selected.id).forced).toBe(true);
   expect(unread.attention("room", other.id).forced).toBe(true);
 
-  await requireCapturedRead(unread, [selected.id]);
-  expect(unread.sync().status).toBe("local");
+  const retried = await requireCapturedRead(unread, [selected.id]);
+  expect(retried).toMatchObject({ durability: "saved", sync: "pending" });
+  expect(unread.sync().status).toBe("pending");
   expect(unread.attention("room", selected.id).forced).toBe(false);
   expect(unread.attention("room", other.id).forced).toBe(true);
   expect(h.journal()?.state.frontiers).toEqual({
@@ -2176,6 +2177,7 @@ it("serializes overlapping captured sets in either order and releases locks afte
   const inOther = message(h.alice, "other", "other message", 12);
   h.emit([inRoom, inOther]);
   const unread = h.session.unread;
+  await unread.ensure();
   const held = h.holdSaveStarted();
   h.failNextSave();
   const first = requireCapturedRead(unread, [inRoom.id, inOther.id]);
