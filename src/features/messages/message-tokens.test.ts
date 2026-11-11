@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import type { ComposerToken } from "./composer-token";
+import { composerTokenText, type ComposerToken } from "./composer-token";
 import {
   MESSAGE_TOKENS_TAG,
   messageTokenTags,
@@ -28,9 +28,12 @@ const skill: ComposerToken = {
   target: "a".repeat(64),
 };
 
-it("sends chips as their labels, literally and in authored order", () => {
+it("sends a skill as `$name` and a folder as its path, literally and in authored order", () => {
   const atom = (semantic: ComposerToken) =>
-    composerSchema.nodes.token.create({ source: semantic.label, semantic });
+    composerSchema.nodes.token.create({
+      source: composerTokenText(semantic),
+      semantic,
+    });
   const draft = projectComposerDocument(
     composerSchema.nodes.doc.create(
       null,
@@ -42,7 +45,9 @@ it("sends chips as their labels, literally and in authored order", () => {
       ]),
     ),
   ).draft;
-  expect(composerMarkdown(draft)).toBe("Use review in buzz-app");
+  expect(composerMarkdown(draft)).toBe(
+    "Use $review in /example/repos/buzz-app",
+  );
   expect(
     composerChips(readComposerSnapshot(draft.document)).map(
       ({ token }) => token,
@@ -50,11 +55,11 @@ it("sends chips as their labels, literally and in authored order", () => {
   ).toEqual([skill, folder]);
 });
 
-it("serializes syntax-like labels literally, including under rich formatting", () => {
-  const label = "@Other /run [link](https://example.com) `code` **bold**";
-  const selected = { ...folder, label };
+it("serializes syntax-like chip text literally, including under rich formatting", () => {
+  const id = "/example/@Other /run [link](https://example.com) `code` **bold**";
+  const selected = { ...folder, id };
   const atom = composerSchema.nodes.token.create(
-    { source: label, semantic: selected },
+    { source: id, semantic: selected },
     null,
     [composerSchema.marks.bold.create()],
   );

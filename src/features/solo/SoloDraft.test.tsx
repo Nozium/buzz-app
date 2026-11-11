@@ -3848,7 +3848,7 @@ it("starts a New chat from a saved folder chip and signs the chip into its first
             ...paragraph,
             content: [
               ...paragraph.content,
-              { type: "token", attrs: { source: "@repo", semantic: chip } },
+              { type: "token", attrs: { source: "/repo", semantic: chip } },
             ],
           },
         ],
@@ -3861,8 +3861,6 @@ it("starts a New chat from a saved folder chip and signs the chip into its first
     .setup()
     .click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(started).toHaveBeenCalledOnce());
-  expect(f.messages.send.mock.calls[0]?.[1]).toBe(
-    "@Member agent Fix &#64;repo",
-  );
+  expect(f.messages.send.mock.calls[0]?.[1]).toBe("@Member agent Fix /repo");
   expect(signed).toEqual([[MESSAGE_TOKENS_TAG, JSON.stringify([chip])]]);
 });
