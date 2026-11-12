@@ -1073,9 +1073,12 @@ it("saves the Anthropic workspace with the key using Enter without submitting it
     await screen.findByLabelText("Anthropic API key"),
     "sk-ant-api03-pasted",
   );
-  const workspace = screen.getByLabelText("Anthropic workspace ID Optional");
+  const workspace = screen.getByLabelText("Anthropic workspace ID");
   expect(workspace).toHaveAccessibleDescription(
-    /Required if your API key isn't scoped to one workspace/,
+    /Required for organization-scoped API keys/,
+  );
+  expect(workspace).toHaveAccessibleDescription(
+    /Save the ID together with the API key, including when replacing it/,
   );
   await user.type(workspace, "  wrkspc_example  {Enter}");
   await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
@@ -2576,7 +2579,7 @@ it("keeps focus in the field through a save started there", async () => {
 it("keeps both credential fields through a refused workspace save and retries", async () => {
   const { saves, field, onClose } = await heldKeySaves();
   const user = userEvent.setup();
-  const workspace = screen.getByLabelText("Anthropic workspace ID Optional");
+  const workspace = screen.getByLabelText("Anthropic workspace ID");
   await user.type(field(), "sk-ant-api03-secret");
   await user.type(workspace, "not-a-workspace{Enter}");
   await waitFor(() => expect(saves).toHaveLength(1));
@@ -2605,10 +2608,6 @@ it("keeps focus on Save when a keyboard save clears the field", async () => {
   const { saves, field, save } = await heldKeySaves();
   const user = userEvent.setup();
   await user.type(field(), "sk-ant-api03-secret");
-  await user.tab();
-  expect(document.activeElement).toBe(
-    screen.getByLabelText("Anthropic workspace ID Optional"),
-  );
   await user.tab();
   expect(document.activeElement).toBe(save());
   await user.keyboard("{Enter}");

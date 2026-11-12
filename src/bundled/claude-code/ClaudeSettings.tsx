@@ -105,7 +105,6 @@ export function ClaudeSettings({
               {configured === true ? (
                 <SavedApiKey
                   credential={setup.auth}
-                  onSaved={() => setup.check()}
                   active={active}
                   disabled={disabled}
                   conceal={confirm || clearing || !!readError || !active()}

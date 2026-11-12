@@ -92,7 +92,7 @@ async function action(name: string, user = userEvent.setup()) {
 async function replaceKey(user = userEvent.setup()) {
   await savedKey();
   await action("Replace", user);
-  const input = screen.getByLabelText("Replacement API key");
+  const input = screen.getByLabelText("Anthropic API key");
   await waitFor(() => expect(input).not.toHaveAttribute("readonly"));
   return input;
 }
@@ -364,7 +364,7 @@ it("offers replacement and confirmed removal without reading the saved key", asy
     screen.getAllByRole("menuitem").map((item) => item.textContent),
   ).toEqual(["Replace", "Remove"]);
   await user.click(screen.getByRole("menuitem", { name: "Replace" }));
-  expect(screen.getByLabelText("Replacement API key")).toHaveValue("");
+  expect(screen.getByLabelText("Anthropic API key")).toHaveValue("");
   expect(
     native.invoke.mock.calls.every(
       ([command]) => command === "claude_api_key_status",
@@ -396,7 +396,7 @@ it("opens replacement from input focus without trapping reverse Tab or reopening
   );
   await user.keyboard("{Enter}");
   await waitFor(() =>
-    expect(screen.getByLabelText("Replacement API key")).toHaveValue(""),
+    expect(screen.getByLabelText("Anthropic API key")).toHaveValue(""),
   );
   expect(input).toHaveFocus();
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();

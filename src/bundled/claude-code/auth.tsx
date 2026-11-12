@@ -348,8 +348,9 @@ function KeyForm({
       setKey("");
       setWorkspace("");
       setSaved({ ok: true, text });
-      await setup.check();
       onSaved?.();
+      // A runtime refresh cannot undo the completed credential save.
+      await setup.check().catch(() => undefined);
     } catch (error) {
       if (!controller.signal.aborted)
         setSaved({ ok: false, text: message(error) });
@@ -362,8 +363,7 @@ function KeyForm({
     <div className="grid gap-4">
       <Field
         label="Anthropic workspace ID"
-        optional
-        description="Required if your API key isn't scoped to one workspace. Copy the wrkspc_ ID from the Claude Console's Workspaces page. Enter it again when replacing that key."
+        description="Required for organization-scoped API keys. Copy the wrkspc_ ID of the workspace Claude should use from the Claude Console's Workspaces page. Save the ID together with the API key, including when replacing it."
       >
         <Input
           autoComplete="off"

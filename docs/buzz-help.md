@@ -1104,11 +1104,14 @@ available rather than silently discarding it.
   gives it to every Claude process, security reviews included. Commands a
   Claude agent runs inherit it, so they can read the key. Until a key is
   saved, Claude agents don't answer and Claude reviews fail closed.
-  If the key isn't scoped to one Anthropic workspace, enter **Anthropic workspace
-  ID** when saving it: the `wrkspc_` ID from the Claude Console's **Workspaces**
-  page. It applies to Claude agents and security reviews. Enter it again when
-  replacing that key; leave it empty for a key scoped to one workspace. This ID
-  is separate from an agent's **Workspace** folder.
+  **Organization-scoped API keys require an Anthropic workspace ID on every
+  request.** When saving a key, also enter the `wrkspc_` ID of the workspace to use
+  from the Claude Console's **Workspaces** page. The ID applies to Claude agents
+  and security reviews. Save it together with the API key and enter it again when
+  replacing the key. This ID is separate from an agent's **Workspace** folder.
+  Saving credentials checks their format, not API access or the key's scope. See
+  [Anthropic's authentication documentation](https://platform.claude.com/docs/en/manage-claude/authentication#select-a-workspace)
+  for the API's scope rules.
   Codex security reviews for protected agents need a ChatGPT sign-in made
   there, and fail until there is one, or while Codex's sign-in is for another
   workspace. Codex's harness defaults offer that sign-in while Codex is signed

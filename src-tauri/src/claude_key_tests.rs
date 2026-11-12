@@ -89,13 +89,13 @@ async fn a_check_rereads_a_key_replaced_or_removed_elsewhere() {
 async fn clearing_removes_the_stored_and_cached_key_and_is_repeatable() {
     let store = Arc::new(FakeStore::default());
     let key = host(&store);
-    key.set("sk-ant-saved").await.unwrap();
+    key.set("sk-ant-saved", None).await.unwrap();
     key.clear().await.unwrap();
     assert!(store.key.lock().unwrap().is_none());
     assert_eq!(kept(key.key().await), None);
     assert!(!host(&store).configured().await.unwrap());
     key.clear().await.unwrap();
-    key.set("sk-ant-new").await.unwrap();
+    key.set("sk-ant-new", None).await.unwrap();
     assert_eq!(kept(key.key().await).as_deref(), Some("sk-ant-new"));
 }
 
@@ -103,7 +103,7 @@ async fn clearing_removes_the_stored_and_cached_key_and_is_repeatable() {
 async fn a_failed_delete_keeps_the_saved_key_until_retry_succeeds() {
     let store = Arc::new(FakeStore::default());
     let key = host(&store);
-    key.set("sk-ant-saved").await.unwrap();
+    key.set("sk-ant-saved", None).await.unwrap();
     *store.undeletable.lock().unwrap() = true;
     assert_eq!(key.clear().await, Err("locked".into()));
     assert_eq!(kept(key.key().await).as_deref(), Some("sk-ant-saved"));
