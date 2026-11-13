@@ -14,6 +14,8 @@ Open **Settings** → **Claude** to manage the saved key. Focus or click the mas
 
 New local Claude sessions and security reviews need a key again after removal; a turn already running can finish. Agents on another computer use that computer's credentials.
 
+---
+
 ## Authentication transport
 
 Buzz drives the Claude Code binary over the same stream-JSON protocol as the Claude Agent SDK. Authentication follows the SDK's [environment option](https://code.claude.com/docs/en/agent-sdk/typescript#options) and Claude Code's [documented environment variables](https://code.claude.com/docs/en/env-vars):
