@@ -171,10 +171,10 @@ const CATALOG = [
     description: "Opus 5.5 · Best for everyday, complex tasks",
   },
   {
-    value: "claude-fable-5-1[1m]",
-    resolvedModel: "claude-fable-5-1",
+    value: "claude-fable-5-2[1m]",
+    resolvedModel: "claude-fable-5-2",
     displayName: "Fable",
-    description: "Fable 5.1 · Most capable for your hardest tasks",
+    description: "Fable 5.2 · Most capable for your hardest tasks",
   },
   {
     value: "sonnet",
@@ -956,7 +956,7 @@ it("edits the model through the Settings dropdown and preserves agent inheritanc
   await user.click(control);
   fireEvent.click(await screen.findByRole("menuitem", { name: "Claude" }));
   fireEvent.click(
-    await screen.findByRole("menuitemradio", { name: "Fable 5.1" }),
+    await screen.findByRole("menuitemradio", { name: "Fable 5.2" }),
   );
   cleanup();
   const Settings = tab(installedType, 0);
@@ -964,7 +964,7 @@ it("edits the model through the Settings dropdown and preserves agent inheritanc
   render(<Settings agent={agent()} save={save} />);
   await waitFor(() =>
     expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent(
-      "Fable 5.1",
+      "Fable 5.2",
     ),
   );
   expect(save).not.toHaveBeenCalled();
@@ -986,7 +986,7 @@ it("keeps the saved default and shows the error while a default could not be sav
     fireEvent.click(control);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Claude" }));
     fireEvent.click(
-      await screen.findByRole("menuitemradio", { name: "Fable 5.1" }),
+      await screen.findByRole("menuitemradio", { name: "Fable 5.2" }),
     );
   };
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1001,7 +1001,7 @@ it("keeps the saved default and shows the error while a default could not be sav
   await waitFor(() =>
     expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
   );
-  expect(control).toHaveTextContent("Fable 5.1");
+  expect(control).toHaveTextContent("Fable 5.2");
   expect(storage.get("buzz.claude-code.provider-defaults.v1")).toContain(
     "fable",
   );
