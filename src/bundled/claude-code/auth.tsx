@@ -345,6 +345,7 @@ function KeyForm({
         controller.signal,
         workspace,
       );
+      if (!active() || controller.signal.aborted) return;
       setKey("");
       setWorkspace("");
       setSaved({ ok: true, text });

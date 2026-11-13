@@ -66,6 +66,14 @@ export function SavedApiKey({
   const input = useRef<HTMLInputElement>(null);
   const editor = useRef<HTMLDivElement>(null);
   const restoring = useRef(false);
+  const wasEditing = useRef(false);
+  const replacementWrite = useRef<
+    | {
+        generation: number;
+        focused: Element | null;
+      }
+    | undefined
+  >(undefined);
   const menu = useRef<HTMLDivElement>(null);
   const notify = useToastNotification();
   const editing = !conceal && replacing;
@@ -88,14 +96,17 @@ export function SavedApiKey({
     };
   }, [credential, conceal, reset]);
   useEffect(() => {
-    if (editing)
+    if (editing && !wasEditing.current)
       (editor.current?.querySelector("input") ?? input.current)?.focus();
-    else if (restoring.current) {
+    else if (!editing && restoring.current) {
       restoring.current = false;
-      trigger.current?.focus();
-      input.current?.focus();
+      if (active()) {
+        trigger.current?.focus();
+        input.current?.focus();
+      }
     }
-  }, [editing, trigger]);
+    wasEditing.current = editing;
+  }, [active, editing, trigger]);
   // MenuTrigger establishes the popup anchor and keyboard focus.
   const openActions = () => {
     if (!menuOpen && !editing && active() && !disabled && !conceal && !saving)
@@ -157,12 +168,21 @@ export function SavedApiKey({
             reset();
           },
           onSaved: () => {
-            restoring.current = true;
+            const write = replacementWrite.current;
+            if (!active() || write?.generation !== request.current) return;
+            restoring.current =
+              document.activeElement === write.focused ||
+              document.activeElement === document.body;
             reset();
             notify("Saved", "success");
             void onSaved?.().catch(() => undefined);
           },
           onSavingChange: (pending) => {
+            if (pending)
+              replacementWrite.current = {
+                generation: request.current,
+                focused: document.activeElement,
+              };
             writing.current = pending;
             setSaving(pending);
             onSavingChange(pending);
